@@ -30,6 +30,7 @@
     "@examharness/plugin-bank": "workspace:*",
     "@examharness/plugin-construct-parabola": "workspace:*",
     "@examharness/plugin-graph": "workspace:*",
+    "@examharness/plugin-paper": "workspace:*",
     "@examharness/plugin-verify-dedup": "workspace:*",
     "@examharness/plugin-verify-scope": "workspace:*",
     "@examharness/plugin-verify-symbolic": "workspace:*",

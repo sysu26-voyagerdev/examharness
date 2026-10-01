@@ -34,6 +34,7 @@
 <header>
   <b>命题组 · 调试台</b>
   <span>闸门链 = 唯一写入口；被拦下的题不会落盘</span>
+  <button id="assemble" style="margin-left:auto">按蓝图组卷</button>
 </header>
 <main>
   <h2>命题蓝图</h2>
@@ -45,6 +46,12 @@
   <table id="items"><thead>
     <tr><th>id</th><th>题位</th><th>题干</th><th>答案</th><th>证据</th><th>状态</th></tr>
   </thead><tbody></tbody></table>
+
+  <h2>卷子（由易到难）</h2>
+  <table id="paper"><thead>
+    <tr><th>序</th><th>题位</th><th>知识点</th><th>难度</th><th>分值</th><th>题干</th><th>答案</th></tr>
+  </thead><tbody></tbody></table>
+  <div id="papermeta" style="font-size:12px;color:#81858c;margin:8px 0 0"></div>
 
   <h2>闸门日志</h2>
   <div id="log">（等待事件）</div>
@@ -91,6 +98,25 @@ document.addEventListener('click', async (event) => {
   log(result.ok ? `入库 ${result.id}` : `被拦下：${result.verdict.gate} — ${result.verdict.reason}`,
       result.ok ? 'ok' : 'no')
   await loadState()
+})
+
+document.getElementById('assemble').addEventListener('click', async () => {
+  const paper = await (await fetch('/api/paper', { method: 'POST' })).json()
+  document.querySelector('#paper tbody').innerHTML = paper.slots.map((item, index) => `
+    <tr>
+      <td>${index + 1}</td>
+      <td><code>${item.slot}</code></td>
+      <td>${item.knowledge.join('、')}</td>
+      <td><code>${item.difficulty[0]}–${item.difficulty[1]}</code></td>
+      <td>${item.score}</td>
+      <td>${item.stem}</td>
+      <td>${item.answer}</td>
+    </tr>`).join('')
+  const gaps = paper.gaps.length === 0 ? '' :
+    `｜缺口：${paper.gaps.map((g) => `${g.slot} ${g.reason}`).join('；')}`
+  document.getElementById('papermeta').textContent =
+    `满分 ${paper.totalScore} · 与蓝图差 ${paper.scoreGap} · 提交 ${paper.attempts} 次 · 缺口 ${paper.gaps.length}${gaps}`
+  log(`组卷完成：${paper.slots.length} 题 · 缺口 ${paper.gaps.length}`, paper.gaps.length ? 'no' : 'ok')
 })
 
 const stream = new EventSource('/api/stream')

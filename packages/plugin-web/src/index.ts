@@ -15,7 +15,7 @@ import z from 'schemastery'
  */
 
 export const name = 'web'
-export const inject = ['bank', 'construct']
+export const inject = ['bank', 'construct', 'paper']
 
 export const Config = z.object({
   port: z.number().default(8787),
@@ -117,6 +117,21 @@ export function apply(ctx: Context, config: WebConfig): void {
       // 唯一的入库路径：闸门链在 bank.submit 内部跑，这里绕不过去
       const result = await ctx.bank.submit(item)
       send(res, result.ok ? 200 : 422, result.ok ? { ok: true, id: result.id } : { ok: false, verdict: result.verdict })
+      return
+    }
+
+    if (method === 'POST' && path === '/api/paper') {
+      const paper = await ctx.paper.assemble(blueprint)
+      send(res, 200, {
+        totalScore: paper.totalScore,
+        scoreGap: paper.scoreGap,
+        attempts: paper.attempts,
+        gaps: paper.gaps,
+        slots: paper.order.flatMap((id) => {
+          const item = ctx.bank.get(id)
+          return item === undefined ? [] : [{ ...summarize(item), difficulty: item.slot.difficulty }]
+        }),
+      })
       return
     }
 

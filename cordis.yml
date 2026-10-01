@@ -48,6 +48,11 @@
   config:
     rootRange: [-4, 5]
 
+- id: paper
+  name: '@examharness/plugin-paper'
+  config:
+    maxAttempts: 6
+
 - id: web
   name: '@examharness/plugin-web'
   config:
