@@ -3,7 +3,7 @@ import type { Verdict } from '@examharness/core'
 import z from 'schemastery'
 
 /**
- * 三审：查重 → 原创度。
+ * 查重闸门（原创度）。
  * 结构指纹完全相同 = 撞题；相似度超过阈值 = 太像。两者都拒绝。
  * 通过时把「本卷最高相似度」写进证据——这是对外的原创度凭据。
  */

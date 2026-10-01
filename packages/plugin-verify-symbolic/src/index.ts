@@ -3,7 +3,7 @@ import type { Verdict } from '@examharness/core'
 import z from 'schemastery'
 
 /**
- * 一审：符号校验。
+ * 符号校验闸门。
  *
  * **这是本项目正确性的落点**：它不相信构造器，只相信代入验证——
  * 从 `instance.params` 重新算出函数，再把主张的根代回求值。

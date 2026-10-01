@@ -256,7 +256,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       if (result.ok) {
         return {
           kind: 'gate',
-          text: `submit_item：${candidateId} 通过四审并入库（${result.id}）`,
+          text: `submit_item：${candidateId} 通过全部闸门并入库（${result.id}）`,
           // 通过时把证据一并回给模型：它能看到"凭什么通过"，而不是只看到 ok
           payload: {
             ok: true,

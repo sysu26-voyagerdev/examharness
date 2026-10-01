@@ -3,7 +3,7 @@ import type { Verdict } from '@examharness/core'
 import z from 'schemastery'
 
 /**
- * 二审：知识边界。
+ * 知识边界闸门。
  * 两层判断——本卷禁用的知识点（蓝图约束），以及超出已学范围的前置知识。
  * 都属于结构性违规：改措辞没用，必须换知识点，所以 fixable = false。
  */

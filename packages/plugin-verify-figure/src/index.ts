@@ -3,7 +3,7 @@ import type { Verdict } from '@examharness/core'
 import z from 'schemastery'
 
 /**
- * 四审：图形规范。
+ * 图形规范闸门。
  *
  * 它不"看"图——它让 `ctx.figure` 由图数据重算一遍，并检查断言：
  *   - 几何一致性：标注的点是否真在曲线上；
