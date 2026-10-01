@@ -77,7 +77,7 @@ describe('组卷', () => {
       ...blueprint,
       blueprint: [
         // 对称轴是构造器覆盖的，动点问题是未学的 → 由 scope 闸门拦下
-        { key: 'X1', knowledge: ['对称轴', '动点问题'], cognitive: '运用', type: '解答', count: 2, difficulty: [0.5, 0.7], score: 10 },
+        { key: 'X1', knowledge: ['对称轴', '动点问题'], cognitive: '灵活运用', type: '解答', count: 2, difficulty: [0.5, 0.7], score: 10 },
       ],
     }
     const paper = await ctx.paper.assemble(illegal)
