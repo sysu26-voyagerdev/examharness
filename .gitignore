@@ -1,0 +1,31 @@
+# 依赖
+node_modules/
+.pnpm-store/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# 构建产物
+dist/
+build/
+*.tsbuildinfo
+client/dist/
+
+# 运行期数据（绝不入库：会话、卷子、渲染产物、题库索引）
+data/
+*.local.yml
+*.local.yaml
+.env
+.env.*
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# 本地草稿
+*.bak
+*.old
+scratch/
