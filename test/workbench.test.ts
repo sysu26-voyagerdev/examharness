@@ -57,7 +57,11 @@ function fakeLlm(configured: boolean, chat: (messages: readonly LlmMessage[]) =>
   return {
     name: 'fake-llm',
     apply(ctx: Context): void {
-      ctx.provide('llm', { configured, chat: async (messages: readonly LlmMessage[]) => chat(messages) })
+      ctx.provide('llm', {
+        configured,
+        model: 'fake-writer',
+        chat: async (messages: readonly LlmMessage[]) => chat(messages),
+      })
     },
   }
 }

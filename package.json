@@ -35,6 +35,7 @@
     "@examharness/plugin-paper": "workspace:*",
     "@examharness/plugin-verify-dedup": "workspace:*",
     "@examharness/plugin-verify-figure": "workspace:*",
+    "@examharness/plugin-verify-roundtrip": "workspace:*",
     "@examharness/plugin-verify-scope": "workspace:*",
     "@examharness/plugin-verify-symbolic": "workspace:*",
     "@examharness/plugin-web": "workspace:*",

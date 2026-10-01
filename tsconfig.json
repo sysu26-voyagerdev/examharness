@@ -23,6 +23,9 @@
       "path": "./packages/plugin-construct-parabola"
     },
     {
+      "path": "./packages/plugin-verify-roundtrip"
+    },
+    {
       "path": "./packages/plugin-paper"
     },
     {

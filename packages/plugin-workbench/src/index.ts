@@ -1,4 +1,5 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
+import { parseJsonObject } from '@examharness/core'
 import type {
   Blueprint,
   BlueprintRow,
@@ -62,6 +63,16 @@ const TOOLS: readonly LlmToolSpec[] = [
       type: 'object',
       properties: { slotKey: { type: 'string' }, seed: { type: 'number' } },
       required: ['slotKey', 'seed'],
+    },
+  },
+  {
+    name: 'serialize_item',
+    description:
+      '让执笔者把候选题的结构写成给学生看的题面（序列化）。题面随后会过回译校验：写漏条件会被拦下。',
+    parameters: {
+      type: 'object',
+      properties: { candidateId: { type: 'string' } },
+      required: ['candidateId'],
     },
   },
   {
@@ -187,6 +198,54 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       }
     }
 
+    if (tool === 'serialize_item') {
+      const candidateId = String(args.candidateId ?? '')
+      const candidate = this.candidates.get(candidateId)
+      if (candidate === undefined) {
+        return { kind: 'tool', text: `serialize_item：没有候选题 ${candidateId}`, payload: { error: '未知候选' } }
+      }
+      const brief = {
+        题型: candidate.item.slot.type,
+        知识点: candidate.item.slot.knowledge,
+        条件: candidate.item.instance.givens,
+        目标: candidate.item.instance.goal,
+        答案: candidate.item.witness.answer,
+      }
+      const reply = await this.ctx.llm.chat([
+        { role: 'system', content: SERIALIZER_PROMPT },
+        { role: 'user', content: JSON.stringify(brief) },
+      ])
+      const parsed = parseJsonObject(reply.content)
+      const stem = typeof parsed?.stem === 'string' ? parsed.stem : undefined
+      const answerText = typeof parsed?.answerText === 'string' ? parsed.answerText : undefined
+      if (stem === undefined || answerText === undefined || stem === '') {
+        return {
+          kind: 'tool',
+          text: 'serialize_item：执笔者没有按要求返回 stem/answerText',
+          payload: { error: '序列化失败：需要 JSON 里的 stem 与 answerText' },
+        }
+      }
+      const solution = Array.isArray(parsed?.solution) ? parsed.solution.map(String) : candidate.item.prose.solution
+      // 干扰项保留构造器给的那份（错因库的活，不交给这次调用随手编）
+      const options = candidate.item.prose.options
+      const item: Item = {
+        ...candidate.item,
+        prose: {
+          stem,
+          ...(options === undefined ? {} : { options }),
+          answerText,
+          solution,
+          serializer: { model: this.ctx.llm.model, version: 1 },
+        },
+      }
+      this.candidates.set(candidateId, { ...candidate, item })
+      return {
+        kind: 'tool',
+        text: `serialize_item：题面已写（${stem.length} 字，序列化者 ${this.ctx.llm.model}）`,
+        payload: { ok: true, candidateId, stem },
+      }
+    }
+
     if (tool === 'submit_item') {
       const candidateId = String(args.candidateId ?? '')
       const candidate = this.candidates.get(candidateId)
@@ -240,6 +299,17 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   }
 }
 
+/** 执笔者提示词：只把结构写成通顺题面，**不许改数学** */
+const SERIALIZER_PROMPT = [
+  '你是命题组的执笔者。给你一道**已经构造好**的题的结构，把它写成给学生看的题面。',
+  '只输出 JSON：{"stem":"题干","answerText":"答案","solution":["步骤1","步骤2"]}',
+  '硬规矩：',
+  '1. 只把给你的条件与目标写成通顺的题面，**不得新增、删改、四舍五入任何条件或数值**；',
+  '2. 你不负责算答案：answerText 直接使用给你的答案；',
+  '3. 步骤要写成学生看得懂的解题过程，但数值必须与给你的数据一致；',
+  '4. 不要输出 JSON 以外的任何内容。',
+].join('\n')
+
 function systemPrompt(blueprint: Blueprint, extraRules: string): string {
   const rows = blueprint.blueprint
     .map((row) => `- ${row.key}：${row.knowledge.join('、')}｜${row.cognitive}｜${row.type}｜${row.score} 分 ×${row.count}`)
@@ -254,7 +324,8 @@ function systemPrompt(blueprint: Blueprint, extraRules: string): string {
     '',
     '硬规矩：',
     '1. 数学真值由构造与符号计算保证，你不要自己算答案，也不要改题面里的数值。',
-    '2. 收尾动作只能是 submit_item；闸门由框架挂载，你无法跳过，也不必重复验证。',
+    '2. 每道候选题先用 serialize_item 写题面（写漏条件会被回译闸门拦下），再用 submit_item 提交；',
+    '   闸门由框架挂载，你无法跳过，也不必重复验证。',
     '3. 被拦下时读清楚是哪道闸门、能不能靠重做修好：能就换种子重来，不能就换题位设计。',
     '4. 每题位凑齐为止；凑不齐就说明原因，不要用不合规的题凑数。',
     extraRules === '' ? '' : `5. ${extraRules}`,

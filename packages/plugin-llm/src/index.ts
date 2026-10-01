@@ -111,6 +111,10 @@ export class LlmService extends Service implements LlmApi {
     return this.apiKey !== ''
   }
 
+  get model(): string {
+    return this.config.model
+  }
+
   async chat(messages: readonly LlmMessage[], tools?: readonly LlmToolSpec[]): Promise<LlmReply> {
     if (!this.configured) throw new Error('未配置模型密钥（EXAMHARNESS_API_KEY）')
     const response = await fetch(`${this.config.baseUrl.replace(/\/$/, '')}/chat/completions`, {

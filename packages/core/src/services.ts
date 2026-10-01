@@ -134,6 +134,8 @@ export interface LlmReply {
 export interface LlmApi {
   /** 有没有配好密钥。没配好时工作台必须**明确拒绝**，而不是假装在干活 */
   readonly configured: boolean
+  /** 当前模型名（要记进 prose.serializer，题面将来可重生成） */
+  readonly model: string
   chat(messages: readonly LlmMessage[], tools?: readonly LlmToolSpec[]): Promise<LlmReply>
 }
 

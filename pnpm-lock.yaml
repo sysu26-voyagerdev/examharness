@@ -44,6 +44,9 @@ importers:
       '@examharness/plugin-verify-figure':
         specifier: workspace:*
         version: link:packages/plugin-verify-figure
+      '@examharness/plugin-verify-roundtrip':
+        specifier: workspace:*
+        version: link:packages/plugin-verify-roundtrip
       '@examharness/plugin-verify-scope':
         specifier: workspace:*
         version: link:packages/plugin-verify-scope
@@ -167,6 +170,18 @@ importers:
         version: 3.18.0
 
   packages/plugin-verify-figure:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.4
+        version: 4.0.4(@deepseek-ai/cordis-plugin-include@1.0.9)(@deepseek-ai/cordis-plugin-loader@1.0.5)
+      '@examharness/core':
+        specifier: workspace:*
+        version: link:../core
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+
+  packages/plugin-verify-roundtrip:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.4
