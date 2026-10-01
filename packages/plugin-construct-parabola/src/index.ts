@@ -34,6 +34,11 @@ function rng(seed: number): () => number {
   }
 }
 
+/** 数学排版：负号用 U+2212，不用连字符 */
+function minus(value: number): string {
+  return String(value).replace('-', '−')
+}
+
 function poly(b: number, c: number): string {
   const bs = b === 0 ? '' : b > 0 ? ` + ${b}x` : ` − ${-b}x`
   const cs = c === 0 ? '' : c > 0 ? ` + ${c}` : ` − ${-c}`
@@ -98,16 +103,18 @@ export function createParabolaRoots(config: ConstructConfig): Constructor {
     const wantsVertex = slot.knowledge.includes('顶点式')
 
     const goal = wantsAxis ? '对称轴' : wantsVertex ? '顶点坐标' : '线段 AB 的长'
-    const answer = wantsAxis ? `x = ${h}` : wantsVertex ? `(${h}, ${k})` : `AB = ${length}`
+    const answer = wantsAxis ? `x = ${minus(h)}` : wantsVertex ? `(${minus(h)}, ${minus(k)})` : `AB = ${length}`
 
     const figure: FigureSpec = {
       kind: 'function-graph',
-      functions: [{ expr: `x^2${b >= 0 ? `+${b}` : `${b}`}x${c >= 0 ? `+${c}` : `${c}`}`, domain: [low - 1, high + 1] }],
+      // 数据同源：给系数，不给字符串
+      quadratics: [{ a: 1, b, c }],
+      domain: [low - 1, high + 1],
       points: [
         { label: 'A', x: r1, y: 0 },
         { label: 'B', x: r2, y: 0 },
       ],
-      annotations: [`对称轴 x = ${h}`],
+      annotations: [`对称轴 x = ${minus(h)}`],
     }
 
     const options: readonly Option[] | undefined =

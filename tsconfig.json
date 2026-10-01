@@ -26,6 +26,12 @@
       "path": "./packages/plugin-paper"
     },
     {
+      "path": "./packages/plugin-figure"
+    },
+    {
+      "path": "./packages/plugin-verify-figure"
+    },
+    {
       "path": "./packages/plugin-web"
     }
   ]

@@ -48,6 +48,18 @@
   config:
     rootRange: [-4, 5]
 
+- id: verify-figure
+  name: '@examharness/plugin-verify-figure'
+  config:
+    requireFigure: false
+
+- id: figure
+  name: '@examharness/plugin-figure'
+  config:
+    width: 480
+    height: 300
+    minPointGapPx: 14
+
 - id: paper
   name: '@examharness/plugin-paper'
   config:

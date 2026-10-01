@@ -1,4 +1,4 @@
-import type { Blueprint, BlueprintRow, Item, SlotSpec, Verdict } from './types.js'
+import type { Blueprint, BlueprintRow, FigureArtifact, FigureSpec, Item, SlotSpec, Verdict } from './types.js'
 
 // 必须真实导入被增强的模块：TS 只在模块已进入程序时才认这条声明合并
 import '@deepseek-ai/cordis'
@@ -101,11 +101,19 @@ export interface PaperApi {
   current(): Paper | undefined
 }
 
+/** 图形渲染：由 spec 决定，不靠模型"画" */
+export interface FigureApi {
+  render(spec: FigureSpec): FigureArtifact
+  /** 渲染题目自带的图；没有图返回 undefined */
+  renderItem(item: Item): FigureArtifact | undefined
+}
+
 declare module '@deepseek-ai/cordis' {
   interface Context {
     bank: BankApi
     graph: GraphApi
     construct: ConstructApi
     paper: PaperApi
+    figure: FigureApi
   }
 }

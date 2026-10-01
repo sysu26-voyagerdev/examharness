@@ -15,7 +15,7 @@ import z from 'schemastery'
  */
 
 export const name = 'web'
-export const inject = ['bank', 'construct', 'paper']
+export const inject = ['bank', 'construct', 'paper', 'figure']
 
 export const Config = z.object({
   port: z.number().default(8787),
@@ -62,6 +62,9 @@ export function apply(ctx: Context, config: WebConfig): void {
   const base = ctx.baseUrl === undefined ? process.cwd() : fileURLToPath(ctx.baseUrl)
   const clients = new Set<ServerResponse>()
   const blueprint = loadBlueprint(base)
+  /** 图由 spec 现渲染（骨架阶段不做文件缓存） */
+  const summarize = (item: Item): Record<string, unknown> =>
+    summarizeWith(item, ctx.figure.renderItem(item)?.svg ?? '')
 
   const broadcast = (event: string, data: unknown): void => {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
@@ -161,7 +164,7 @@ export function apply(ctx: Context, config: WebConfig): void {
 }
 
 /** 推给界面的最小投影：不要整个 Item 糊过去 */
-function summarize(item: Item): Record<string, unknown> {
+function summarizeWith(item: Item, figureSvg: string): Record<string, unknown> {
   return {
     id: item.id,
     slot: item.slot.key,
@@ -171,6 +174,7 @@ function summarize(item: Item): Record<string, unknown> {
     lifecycle: item.lifecycle,
     stem: item.prose.stem,
     answer: item.prose.answerText,
+    figure: figureSvg,
     constructor: item.provenance.constructor,
     seed: item.provenance.seed,
     evidence: item.evidence,

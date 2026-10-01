@@ -61,14 +61,30 @@ export interface Prose {
   serializer: { model: string; version: number }
 }
 
+/** y = ax² + bx + c */
+export interface QuadraticFunction {
+  a: number
+  b: number
+  c: number
+}
+
 export interface FunctionGraphSpec {
   kind: 'function-graph'
-  functions: readonly { expr: string; domain: readonly [number, number] }[]
+  /** **数据同源**：曲线由系数决定，渲染器不解析任何字符串 */
+  quadratics: readonly QuadraticFunction[]
+  domain: readonly [number, number]
+  /** 图上标注的点；按约定它们都在曲线上（断言会验证这一点） */
   points: readonly { label: string; x: number; y: number }[]
   annotations?: readonly string[]
 }
 
 export type FigureSpec = FunctionGraphSpec
+
+/** 渲染产物：SVG + 断言结果。断言不过就不许入库（见 verify-figure 闸门） */
+export interface FigureArtifact {
+  svg: string
+  assertions: Readonly<Record<string, boolean>>
+}
 
 export interface Figure {
   spec: FigureSpec
