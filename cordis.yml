@@ -1,0 +1,54 @@
+# 命题组 · 组合根
+#
+# 一行 = 一个插件。老师改题型、难度、禁用清单都在这里改，不用碰代码；
+# 开发时配合 HMR 可以现场热重载（docs/agent/02-架构与仓库结构.md）。
+#
+# 顺序即挂载顺序；依赖由各插件的 inject 声明，不靠这里的先后。
+
+- id: graph
+  name: '@examharness/plugin-graph'
+  config:
+    path: seed/knowledge.json
+    # 已学集合：不在其中的前置知识 = 超纲（本卷只讲到「最值」）
+    learned:
+      - 一次函数
+      - 配方
+      - 图象平移
+      - 二次函数图象
+      - 顶点式
+      - 对称轴
+      - 与坐标轴交点
+      - 最值
+
+- id: bank
+  name: '@examharness/plugin-bank'
+  config:
+    path: data/bank.jsonl
+
+# ── 闸门链（每个闸门一个包，可单独开关）──
+- id: verify-scope
+  name: '@examharness/plugin-verify-scope'
+  config:
+    forbid:
+      - 实际问题建模
+      - 动点问题
+
+- id: verify-symbolic
+  name: '@examharness/plugin-verify-symbolic'
+  config:
+    tolerance: 1.0e-9
+
+- id: verify-dedup
+  name: '@examharness/plugin-verify-dedup'
+  config:
+    maxSimilarity: 0.85
+
+- id: construct
+  name: '@examharness/plugin-construct-parabola'
+  config:
+    rootRange: [-4, 5]
+
+- id: web
+  name: '@examharness/plugin-web'
+  config:
+    port: 8787

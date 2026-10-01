@@ -1,0 +1,31 @@
+{
+  "paper": {
+    "title": "二次函数 · 课后作业",
+    "totalScore": 100,
+    "minutes": 40,
+    "className": "初三(2)班"
+  },
+  "blueprint": [
+    {
+      "key": "S1",
+      "knowledge": ["与坐标轴交点"],
+      "cognitive": "掌握",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [0.6, 0.8],
+      "score": 10
+    },
+    {
+      "key": "S2",
+      "knowledge": ["对称轴"],
+      "cognitive": "理解",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [0.65, 0.85],
+      "score": 10
+    }
+  ],
+  "constraints": {
+    "forbidKnowledge": ["实际问题建模", "动点问题"]
+  }
+}

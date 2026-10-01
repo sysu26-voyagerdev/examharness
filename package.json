@@ -1,0 +1,45 @@
+{
+  "name": "examharness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "初中数学原创命题与组卷 · 构造优先 · 闸门链 · 教师终审",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "examharness": "./bin.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "start": "pnpm build && node bin.js",
+    "dev": "node --watch bin.js",
+    "lint": "oxlint --deny-warnings packages test",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "clean": "tsc -b --clean"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "^4.0.4",
+    "@deepseek-ai/cordis-plugin-include": "^1.0.9",
+    "@deepseek-ai/cordis-plugin-loader": "^1.0.5",
+    "@examharness/core": "workspace:*",
+    "@examharness/plugin-bank": "workspace:*",
+    "@examharness/plugin-construct-parabola": "workspace:*",
+    "@examharness/plugin-graph": "workspace:*",
+    "@examharness/plugin-verify-dedup": "workspace:*",
+    "@examharness/plugin-verify-scope": "workspace:*",
+    "@examharness/plugin-verify-symbolic": "workspace:*",
+    "@examharness/plugin-web": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxfmt": "^0.71.0",
+    "oxlint": "^1.86.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

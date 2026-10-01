@@ -1,0 +1,29 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./packages/plugin-graph"
+    },
+    {
+      "path": "./packages/plugin-bank"
+    },
+    {
+      "path": "./packages/plugin-verify-scope"
+    },
+    {
+      "path": "./packages/plugin-verify-symbolic"
+    },
+    {
+      "path": "./packages/plugin-verify-dedup"
+    },
+    {
+      "path": "./packages/plugin-construct-parabola"
+    },
+    {
+      "path": "./packages/plugin-web"
+    }
+  ]
+}
