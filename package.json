@@ -11,16 +11,17 @@
     "examharness": "./bin.js"
   },
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && pnpm --filter @examharness/client run build",
     "start": "pnpm build && node bin.js",
     "dev": "node --watch bin.js",
     "lint": "oxlint --deny-warnings packages test",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
-    "typecheck": "tsc -b && tsc -p tsconfig.test.json",
+    "typecheck": "tsc -b && tsc -p tsconfig.test.json && pnpm --filter @examharness/client run typecheck",
     "test": "vitest run",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
-    "clean": "tsc -b --clean"
+    "clean": "tsc -b --clean",
+    "dev:client": "pnpm --filter @examharness/client run dev"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.4",

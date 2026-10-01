@@ -31,10 +31,14 @@ preview/index.html   界面布局草图（纯静态示意，仅作参考，不�
 
 ## 看那张布局草图
 
+那只是**视觉契约**（布局与措辞的参照物，静态示意）。真正能用的界面在 `client/`（React + Vite）：
+
 ```bash
-python3 -m http.server 8123 --bind 0.0.0.0 --directory preview
-# 浏览器打开 http://<本机IP>:8123
+pnpm install
+pnpm start          # 构建全部 + 起服务，界面在 http://<本机IP>:8787/
 ```
+
+开发前端时：`pnpm dev:client`（vite 5173，`/api` 代理到 8787），另开一个终端 `node bin.js`。
 
 ---
 

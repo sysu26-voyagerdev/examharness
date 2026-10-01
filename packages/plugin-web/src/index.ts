@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { resolve } from 'node:path'
+import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Blueprint, BlueprintRow, Item } from '@examharness/core'
@@ -15,7 +15,7 @@ import z from 'schemastery'
  */
 
 export const name = 'web'
-export const inject = ['bank', 'construct', 'paper', 'figure', 'workbench']
+export const inject = ['bank', 'graph', 'construct', 'paper', 'figure', 'workbench']
 
 export const Config = z.object({
   port: z.number().default(8787),
@@ -29,6 +29,17 @@ export interface WebConfig {
 export interface GenerateRequest {
   slotKey: string
   seed: number
+}
+
+const MIME: Readonly<Record<string, string>> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.woff2': 'font/woff2',
+  '.png': 'image/png',
 }
 
 function loadBlueprint(base: string): Blueprint {
@@ -78,15 +89,15 @@ export function apply(ctx: Context, config: WebConfig): void {
     const method = req.method ?? 'GET'
     const path = (req.url ?? '/').split('?')[0] ?? '/'
 
-    if (method === 'GET' && path === '/') {
-      const html = readFileSync(resolve(base, 'client/index.html'), 'utf8')
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-      res.end(html)
-      return
-    }
-
     if (method === 'GET' && path === '/api/state') {
-      send(res, 200, { blueprint, items: ctx.bank.all().map(summarize) })
+      send(res, 200, {
+        blueprint,
+        items: ctx.bank.all().map(summarize),
+        knowledge: {
+          nodes: ctx.graph.nodes().map((key) => ({ key, prerequisites: ctx.graph.prerequisites([key]) })),
+          learned: ctx.graph.learnedKeys(),
+        },
+      })
       return
     }
 
@@ -148,7 +159,35 @@ export function apply(ctx: Context, config: WebConfig): void {
       return
     }
 
+    if (method === 'GET' && !path.startsWith('/api/')) {
+      serveClient(path, res)
+      return
+    }
+
     send(res, 404, { error: 'not found' })
+  }
+
+  /** 托管构建好的前端；没构建就明确说清楚该跑什么命令，而不是给个白屏 */
+  const serveClient = (path: string, res: ServerResponse): void => {
+    const dist = resolve(base, 'client/dist')
+    const file = resolve(dist, path === '/' ? 'index.html' : path.replace(/^\//, ''))
+    if (!file.startsWith(dist)) {
+      res.writeHead(403).end('forbidden')
+      return
+    }
+    if (existsSync(file) && extname(file) !== '') {
+      res.writeHead(200, { 'content-type': MIME[extname(file)] ?? 'application/octet-stream' })
+      res.end(readFileSync(file))
+      return
+    }
+    const fallback = resolve(dist, 'index.html')
+    if (existsSync(fallback)) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      res.end(readFileSync(fallback))
+      return
+    }
+    res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end('前端还没构建：先跑 pnpm --filter @examharness/client build')
   }
 
   const server: Server = createServer((req, res) => {
