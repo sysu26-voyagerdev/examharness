@@ -117,6 +117,7 @@
   .step .st{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
             color:var(--label-3);font-size:var(--fs-sm)}
   .step .st.ok{color:var(--st-success-strong)} .step .st.warn{color:var(--st-warn)} .step .st.run{color:var(--st-business)}
+  .step.dim .k{color:var(--label-2)}          /* 压缩行：标题比普通行更暗（DSH label-primary-dimmed） */
   .step .act{width:28px;height:28px;flex:0 0 28px;display:none;align-items:center;justify-content:center;
              border:0;background:none;border-radius:28px;color:var(--label-4);cursor:pointer}
   .step>summary:hover .act{display:inline-flex}
@@ -136,6 +137,7 @@
   .quick button{font-size:var(--fs-cap);color:var(--label-3);background:none;border:1px solid var(--line-2);
                 border-radius:var(--r-ctl);padding:4px 10px;cursor:pointer}
   .quick button:hover{background:var(--bg-hover);color:var(--label-1)}
+  .meter{margin-left:auto;font-size:var(--fs-cap);color:var(--label-3)}
   .in{display:flex;gap:var(--sp-3);align-items:center;border:1px solid var(--line-2);background:var(--bg);
       border-radius:var(--r-code);padding:var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-5)}
   .in:focus-within{border-color:var(--label-4)}
@@ -255,6 +257,7 @@ const P={
  sun:'<circle cx="8" cy="8" r="3"/><path d="M8 2v1.4M8 12.6V14M2 8h1.4M12.6 8H14M3.8 3.8l1 1M11.2 11.2l1 1M12.2 3.8l-1 1M4.8 11.2l-1 1"/>',
  moon:'<path d="M13 9.6A5.6 5.6 0 0 1 6.4 3a5.6 5.6 0 1 0 6.6 6.6z"/>',
  send:'<path d="M8 12.5V3.8M4.6 7.2L8 3.8l3.4 3.4"/>',
+ compress:'<path d="M3.2 3.2l3.4 3.4M12.8 3.2L9.4 6.6"/><path d="M3.2 12.8l3.4-3.4M12.8 12.8L9.4 9.4"/>',
  paper:'<path d="M4 2.6h5l3 3v7.8H4z"/><path d="M9 2.6v3h3"/>'
 };
 const icon=(n,cls="")=>`<svg class="${cls}" viewBox="0 0 16 16" fill="none" stroke="currentColor"
@@ -311,6 +314,11 @@ const FLOW=[
   d:`<div class="note">符号校验、知识边界、查重三项均通过。</div>`},
  {ic:"upload", k:"提交 · 第 6 题", st:"已重做", warn:1, open:1, d:`<div class="note">题面曾漏写「a > 0」，被符号校验截下。</div>
     <div class="code" style="margin-top:8px"><b>第 1 次</b>漏条件<br><b>第 2 次</b>干扰项重复<br><b>第 3 次</b>通过</div>`},
+ {ic:"compress", k:"上下文已压缩", st:"压掉 12 项工具明细", dim:1, d:`<div class="code">
+    <b>保留</b>会话约定 · 蓝图 · 指令与理由 · 未解决疑点<br>
+    <b>摘要</b>第 1–6 题的构造与校验过程<br>
+    <b>剪枝</b>题库命中原文、渲染日志（可按引用回取）</div>
+    <div class="note">证据在制品里，不在上下文里——压缩不影响可审计性。</div>`},
  {ic:"chart", k:"本卷统计", st:"拦截 5 次", d:`<div class="note">其中超纲 2 次、多解 1 次、图形误导 2 次，均已自动重做。</div>`},
 ];
 const QUICK=["换一道","再补两道解答题","整体降一档","重排顺序","看证据"];
@@ -351,7 +359,7 @@ const items=()=>QS.map(q=>{
 });
 const statusOf=q=>q.flag?{t:"待复核",c:"warn",i:"alert"}:q.ok?{t:"已确认",c:"ok",i:"check"}:
                     q.rep?{t:"已替换",c:"ok",i:"check"}:{t:"通过",c:"",i:"check"};
-const stepHTML=s=>`<details class="step" ${s.open?"open":""}>
+const stepHTML=s=>`<details class="step ${s.dim?"dim":""}" ${s.open?"open":""}>
     <summary>
       <span class="ico">${icon(s.ic)}</span>
       <span class="k">${s.k}</span><span class="dot"></span>
@@ -434,7 +442,8 @@ function renderTx(){
     ${stepHTML({ic:"refresh",k:"重做 · 第 3 题",st:"通过",ok:1,open:1,
       d:`<div class="note">只重做第 3 题，其余 9 题与蓝图保持不变。</div>`})}
   </div>`;
-  document.getElementById("quick").innerHTML=QUICK.map(q=>`<button>${q}</button>`).join("");
+  document.getElementById("quick").innerHTML=QUICK.map(q=>`<button>${q}</button>`).join("")
+    +`<span class="meter">上下文 62%</span>`;
   document.getElementById("nav").innerHTML=NAV.map(([t,s,on])=>
     `<div class="row ${on?"on":""}"><span class="t">${t}</span><span class="s">${s}</span></div>`).join("");
   document.getElementById("send").innerHTML=icon("send");
