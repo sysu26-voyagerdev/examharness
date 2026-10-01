@@ -32,6 +32,12 @@
       "path": "./packages/plugin-verify-figure"
     },
     {
+      "path": "./packages/plugin-llm"
+    },
+    {
+      "path": "./packages/plugin-workbench"
+    },
+    {
       "path": "./packages/plugin-web"
     }
   ]

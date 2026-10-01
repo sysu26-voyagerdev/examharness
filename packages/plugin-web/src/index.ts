@@ -15,7 +15,7 @@ import z from 'schemastery'
  */
 
 export const name = 'web'
-export const inject = ['bank', 'construct', 'paper', 'figure']
+export const inject = ['bank', 'construct', 'paper', 'figure', 'workbench']
 
 export const Config = z.object({
   port: z.number().default(8787),
@@ -135,6 +135,16 @@ export function apply(ctx: Context, config: WebConfig): void {
           return item === undefined ? [] : [{ ...summarize(item), difficulty: item.slot.difficulty }]
         }),
       })
+      return
+    }
+
+    if (method === 'POST' && path === '/api/run') {
+      const body = (await readBody(req)) as { goal?: string }
+      const run = await ctx.workbench.run({
+        goal: body.goal ?? `按蓝图出一份《${blueprint.paper.title}》`,
+        blueprint,
+      })
+      send(res, 200, run)
       return
     }
 

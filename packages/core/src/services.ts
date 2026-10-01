@@ -101,6 +101,67 @@ export interface PaperApi {
   current(): Paper | undefined
 }
 
+// ── 模型与工作台 ──────────────────────────────────────────────
+// LLM 在这个项目里只有两件事：**序列化题面** 与 **驱动工作台**。
+// 它不产生数学真值（R1），也不决定验证跑不跑（R2）。
+
+export interface LlmToolSpec {
+  name: string
+  description: string
+  parameters: Readonly<Record<string, unknown>>
+}
+
+export interface LlmToolCall {
+  id: string
+  name: string
+  /** 原始 JSON 字符串；解析失败要当成工具错误回给模型，而不是崩掉 */
+  arguments: string
+}
+
+export interface LlmMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string | null
+  /** role = tool 时指回哪次调用 */
+  toolCallId?: string
+  toolCalls?: readonly LlmToolCall[]
+}
+
+export interface LlmReply {
+  content: string | null
+  toolCalls: readonly LlmToolCall[]
+}
+
+export interface LlmApi {
+  /** 有没有配好密钥。没配好时工作台必须**明确拒绝**，而不是假装在干活 */
+  readonly configured: boolean
+  chat(messages: readonly LlmMessage[], tools?: readonly LlmToolSpec[]): Promise<LlmReply>
+}
+
+export interface WorkbenchRequest {
+  goal: string
+  blueprint: Blueprint
+}
+
+/** 工作台的每一步都留痕：这就是可审计的"命题组工作记录" */
+export interface WorkbenchEvent {
+  step: number
+  kind: 'assistant' | 'tool' | 'gate'
+  text: string
+}
+
+export interface WorkbenchRun {
+  goal: string
+  steps: number
+  transcript: readonly WorkbenchEvent[]
+  stored: readonly string[]
+  stopped: 'done' | 'max-steps' | 'no-llm'
+}
+
+/** agent 工作台：模型拿工具自己迭代，但收尾动作只能是"提交"，由闸门裁决 */
+export interface WorkbenchApi {
+  run(request: WorkbenchRequest): Promise<WorkbenchRun>
+}
+
 /** 图形渲染：由 spec 决定，不靠模型"画" */
 export interface FigureApi {
   render(spec: FigureSpec): FigureArtifact
@@ -115,5 +176,7 @@ declare module '@deepseek-ai/cordis' {
     construct: ConstructApi
     paper: PaperApi
     figure: FigureApi
+    llm: LlmApi
+    workbench: WorkbenchApi
   }
 }

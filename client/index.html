@@ -34,7 +34,8 @@
 <header>
   <b>命题组 · 调试台</b>
   <span>闸门链 = 唯一写入口；被拦下的题不会落盘</span>
-  <button id="assemble" style="margin-left:auto">按蓝图组卷</button>
+  <button id="run" style="margin-left:auto">跑一次命题组</button>
+  <button id="assemble">按蓝图组卷</button>
 </header>
 <main>
   <h2>命题蓝图</h2>
@@ -98,6 +99,14 @@ document.addEventListener('click', async (event) => {
   const result = await response.json()
   log(result.ok ? `入库 ${result.id}` : `被拦下：${result.verdict.gate} — ${result.verdict.reason}`,
       result.ok ? 'ok' : 'no')
+  await loadState()
+})
+
+document.getElementById('run').addEventListener('click', async () => {
+  log('命题组开始工作（agent 内环 + 闸门外环）…')
+  const run = await (await fetch('/api/run', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).json()
+  for (const event of run.transcript) log(`[${event.step}] ${event.text}`, event.kind === 'gate' ? 'no' : '')
+  log(`结束：${run.stopped} · 步数 ${run.steps} · 入库 ${run.stored.length}`, run.stored.length > 0 ? 'ok' : 'no')
   await loadState()
 })
 

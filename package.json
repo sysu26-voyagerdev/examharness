@@ -31,12 +31,14 @@
     "@examharness/plugin-construct-parabola": "workspace:*",
     "@examharness/plugin-figure": "workspace:*",
     "@examharness/plugin-graph": "workspace:*",
+    "@examharness/plugin-llm": "workspace:*",
     "@examharness/plugin-paper": "workspace:*",
     "@examharness/plugin-verify-dedup": "workspace:*",
     "@examharness/plugin-verify-figure": "workspace:*",
     "@examharness/plugin-verify-scope": "workspace:*",
     "@examharness/plugin-verify-symbolic": "workspace:*",
-    "@examharness/plugin-web": "workspace:*"
+    "@examharness/plugin-web": "workspace:*",
+    "@examharness/plugin-workbench": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

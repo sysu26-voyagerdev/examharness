@@ -32,6 +32,9 @@ importers:
       '@examharness/plugin-graph':
         specifier: workspace:*
         version: link:packages/plugin-graph
+      '@examharness/plugin-llm':
+        specifier: workspace:*
+        version: link:packages/plugin-llm
       '@examharness/plugin-paper':
         specifier: workspace:*
         version: link:packages/plugin-paper
@@ -50,6 +53,9 @@ importers:
       '@examharness/plugin-web':
         specifier: workspace:*
         version: link:packages/plugin-web
+      '@examharness/plugin-workbench':
+        specifier: workspace:*
+        version: link:packages/plugin-workbench
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -110,6 +116,18 @@ importers:
         version: 3.18.0
 
   packages/plugin-graph:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.4
+        version: 4.0.4(@deepseek-ai/cordis-plugin-include@1.0.9)(@deepseek-ai/cordis-plugin-loader@1.0.5)
+      '@examharness/core':
+        specifier: workspace:*
+        version: link:../core
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+
+  packages/plugin-llm:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.4
@@ -185,6 +203,18 @@ importers:
         version: 3.18.0
 
   packages/plugin-web:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.4
+        version: 4.0.4(@deepseek-ai/cordis-plugin-include@1.0.9)(@deepseek-ai/cordis-plugin-loader@1.0.5)
+      '@examharness/core':
+        specifier: workspace:*
+        version: link:../core
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+
+  packages/plugin-workbench:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.4

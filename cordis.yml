@@ -65,6 +65,20 @@
   config:
     maxAttempts: 6
 
+- id: llm
+  name: '@examharness/plugin-llm'
+  config:
+    # 密钥走环境变量：EXAMHARNESS_API_KEY / EXAMHARNESS_BASE_URL / EXAMHARNESS_MODEL
+    baseUrl: ${EXAMHARNESS_BASE_URL}
+    apiKey: ${EXAMHARNESS_API_KEY}
+    model: ${EXAMHARNESS_MODEL}
+    temperature: 0.2
+
+- id: workbench
+  name: '@examharness/plugin-workbench'
+  config:
+    maxSteps: 8
+
 - id: web
   name: '@examharness/plugin-web'
   config:
