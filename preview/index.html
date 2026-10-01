@@ -37,6 +37,7 @@
     /* 状态（DSH alias-state-*） */
     --st-business:#4176e6; --st-success:#22c55e; --st-success-strong:#16a34a;
     --st-warn:#dd8629; --st-error:#dc2626; --st-warn-bg:#fef5e7;
+    --bubble:#edf3fe;            /* DSH --dsw-specific-bubble（light = deepseek-50） */
     /* 排版 */
     --font:-apple-system,BlinkMacSystemFont,system-ui,"PingFang SC","Microsoft YaHei",sans-serif;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
@@ -50,7 +51,7 @@
     --label-1:#e9ecf2; --label-2:#adb2b8; --label-3:#81858c; --label-4:#65676b;
     --bg:#151517; --bg-module:#232324; --bg-hover:#ffffff0f; --bg-active:#ffffff1a; --bg-overlay:#2c2c2e;
     --line-1:rgb(255 255 255 / 6%); --line-2:rgb(255 255 255 / 12%);
-    --st-success-strong:#3aa76d; --st-warn-bg:#2a2418;
+    --st-success-strong:#3aa76d; --st-warn-bg:#2a2418; --bubble:#2c2c2e;
   }
   *{box-sizing:border-box}
   html,body{height:100%}
@@ -96,8 +97,12 @@
   .tx{padding:var(--sp-6) var(--sp-6) var(--sp-5);max-width:760px}
   .turn{margin-bottom:var(--sp-5)}
   .who{font-size:var(--fs-caption);color:var(--label-4);margin-bottom:var(--sp-2)}
-  .say{background:var(--bg-module);border-radius:var(--r-ctl);padding:10px var(--sp-5);font-size:var(--fs-base)}
-  .turn.sys .say{background:none;padding:0}
+  /* 用户消息：右对齐胶囊气泡（照抄 DSH .Sixlwa_userStack / .Sixlwa_bubble） */
+  .turn.user{display:flex;justify-content:flex-end;margin-bottom:var(--sp-6)}
+  .turn.user .stack{max-width:min(calc(760px * .702), 82%);display:flex;flex-direction:column;
+                    align-items:flex-end;gap:var(--sp-3)}
+  .bubble{background:var(--bubble);color:var(--label-1);font-size:var(--fs-base);line-height:22px;
+          border-radius:22px;padding:10px 16px;white-space:pre-wrap;word-break:break-word}
   .step{border-top:1px solid var(--line-1)}
   .step:last-of-type{border-bottom:1px solid var(--line-1)}
   .step>summary{list-style:none;cursor:pointer;display:flex;align-items:baseline;gap:var(--sp-4);
@@ -394,7 +399,7 @@ function ev(){
 const stepHTML=s=>`<details class="step" ${s.open?"open":""}>
     <summary><span class="k">${s.k}</span><span class="st ${s.ok?"ok":s.warn?"warn":s.run?"run":""}">${s.st}</span></summary>
     ${s.d?`<div class="body">${s.d}</div>`:""}</details>`;
-const userTurn=t=>`<div class="turn"><div class="who">你</div><div class="say">${t}</div></div>`;
+const userTurn=t=>`<div class="turn user"><div class="stack"><div class="bubble">${t}</div></div></div>`;
 function renderTx(){
   document.getElementById("tx").innerHTML=`<div class="tx">
     ${userTurn("出今天的课后作业卷：一课时、40 分钟、10 题，难度偏易；本课时没讲动点和实际问题建模，别出。")}
@@ -426,7 +431,7 @@ document.getElementById("stage").onclick=e=>{
   if(b.dataset.a==="an"){q.querySelector(".ans").classList.toggle("on");return}
   const said={sw:`第 ${no} 题换一道`,rd:`只重做第 ${no} 题`,ok:`第 ${no} 题我确认`}[b.dataset.a];
   const d=document.createElement("div");
-  d.className="turn";d.innerHTML=`<div class="who">你</div><div class="say">${said}</div>`;
+  d.className="turn user";d.innerHTML=`<div class="stack"><div class="bubble">${said}</div></div>`;
   document.querySelector(".tx").appendChild(d);
 };
 render();
