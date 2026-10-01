@@ -23,8 +23,8 @@
     --ok:#0f9960; --ok-bg:#e9f6f0;
     --warn:#c07a12; --warn-bg:#fdf4e6;
     --bad:#d1493f; --bad-bg:#fdeeec;
-    --r:8px; --r-sm:6px;
-    --fs:12.5px; --fs-sm:11px; --fs-xs:10.5px;
+    --r:3px; --r-sm:3px;
+    --fs:14px; --fs-sm:13px; --fs-xs:12px;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
   html[data-theme=dark]{
@@ -45,110 +45,112 @@
   .dim{color:var(--muted2)}
 
   /* ── 顶栏 ── */
-  .top{height:40px; display:flex; align-items:center; gap:10px; padding:0 10px;
+  .top{height:46px; display:flex; align-items:center; gap:12px; padding:0 12px;
        background:var(--panel); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:10}
-  .brand{display:flex; align-items:center; gap:6px; font-weight:600; font-size:var(--fs)}
-  .brand i{width:6px;height:6px;border-radius:50%;background:var(--accent);display:block}
+  .brand{display:flex; align-items:center; gap:7px; font-weight:600; font-size:14.5px}
+  .brand i{width:7px;height:7px;border-radius:50%;background:var(--accent);display:block}
   .brand em{font-style:normal; font-size:var(--fs-xs); color:var(--muted2); font-weight:400}
-  .title{font-size:var(--fs-sm); color:var(--muted); border-left:1px solid var(--line); padding-left:10px}
-  .chips{display:flex; gap:4px; margin-left:auto}
-  .chip{font-size:var(--fs-xs); color:var(--muted); background:var(--line2); border-radius:4px; padding:2px 6px; white-space:nowrap}
+  .title{font-size:var(--fs-sm); color:var(--muted); border-left:1px solid var(--line); padding-left:12px}
+  .chips{display:flex; gap:6px; margin-left:auto}
+  .chip{font-size:var(--fs-xs); color:var(--muted); background:var(--line2); border-radius:var(--r); padding:3px 8px; white-space:nowrap}
   .chip.no{color:var(--bad); background:var(--bad-bg)}
-  .seg{display:flex; border:1px solid var(--line); border-radius:var(--r-sm); overflow:hidden}
+  .seg{display:flex; border:1px solid var(--line); border-radius:var(--r); overflow:hidden}
   .seg b{border:0;background:none;color:var(--muted);font:inherit;font-size:var(--fs-xs);
-         padding:3px 8px;cursor:pointer;font-weight:400}
+         padding:5px 11px;cursor:pointer;font-weight:400}
   .seg b+b{border-left:1px solid var(--line)}
   .seg b.on{background:var(--accent);color:#fff;font-weight:600}
-  .ib{width:26px;height:24px;border:1px solid var(--line);background:none;border-radius:var(--r-sm);
-      color:var(--muted);cursor:pointer;font-size:12px;line-height:1}
+  .ib{width:30px;height:28px;border:1px solid var(--line);background:none;border-radius:var(--r);
+      color:var(--muted);cursor:pointer;font-size:13px;line-height:1}
   .ib:hover{color:var(--ink)}
-  .pri{border:1px solid var(--accent);background:var(--accent);color:#fff;font:inherit;font-size:var(--fs-xs);
-       font-weight:600;padding:4px 10px;border-radius:var(--r-sm);cursor:pointer}
+  .pri{border:1px solid var(--accent);background:var(--accent);color:#fff;font:inherit;font-size:var(--fs-sm);
+       font-weight:600;padding:5px 13px;border-radius:var(--r);cursor:pointer}
 
   /* ── 三栏 ── */
-  .shell{display:grid; grid-template-columns:196px 352px 1fr; height:calc(100vh - 40px)}
+  .shell{display:grid; grid-template-columns:222px 386px 1fr; height:calc(100vh - 46px)}
   .col{display:flex;flex-direction:column;min-height:0;background:var(--panel);border-right:1px solid var(--line)}
   .col:last-child{border-right:0;background:var(--bg)}
-  .hd{height:30px;display:flex;align-items:center;gap:6px;padding:0 10px;border-bottom:1px solid var(--line);
-      font-size:var(--fs-xs);color:var(--muted2);text-transform:uppercase;letter-spacing:.4px}
-  .bd{flex:1;overflow:auto;padding:8px}
+  .hd{height:34px;display:flex;align-items:center;gap:6px;padding:0 12px;border-bottom:1px solid var(--line);
+      font-size:var(--fs-xs);color:var(--muted2)}
+  .bd{flex:1;overflow:auto;padding:10px}
   .bd.p0{padding:0}
 
-  /* ── 会话 ── */
-  .s{display:flex;justify-content:space-between;gap:6px;align-items:center;padding:7px 8px;border-radius:var(--r-sm);
-     cursor:pointer;font-size:var(--fs);border:1px solid transparent}
+  /* ── 会话：扁平行 + 左侧强调条，不用卡片 ── */
+  .s{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:9px 10px;
+     cursor:pointer;font-size:var(--fs);border-left:2px solid transparent}
   .s:hover{background:var(--line2)}
-  .s.on{background:var(--accent-bg);border-color:var(--accent)}
+  .s.on{background:var(--accent-bg);border-left-color:var(--accent)}
   .s small{display:block;font-size:var(--fs-xs);color:var(--muted2);font-weight:400}
 
-  /* ── 工作记录 ── */
-  .step{border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:4px;background:var(--panel);overflow:hidden}
-  .step>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:7px;padding:6px 8px;font-size:var(--fs-sm)}
+  /* ── 工作记录：发丝分隔线，不用卡片 ── */
+  .step{border-bottom:1px solid var(--line2);background:var(--panel)}
+  .step:last-of-type{border-bottom:0}
+  .step>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:9px;padding:9px 10px;font-size:var(--fs-sm)}
   .step>summary::-webkit-details-marker{display:none}
-  .step .g{width:14px;text-align:center;color:var(--muted2);flex:0 0 14px;font-size:11px}
-  .step .k{font-family:var(--mono);font-size:var(--fs-xs);color:var(--ink);flex:0 0 auto}
-  .step .v{color:var(--muted2);font-size:var(--fs-xs);margin-left:auto;text-align:right}
+  .step .g{width:16px;text-align:center;color:var(--muted2);flex:0 0 16px;font-size:12px}
+  .step .k{font-family:var(--mono);font-size:12px;color:var(--ink);flex:0 0 auto}
+  .step .v{color:var(--muted2);font-size:12px;margin-left:auto;text-align:right}
   .step[open]>summary{border-bottom:1px solid var(--line2)}
-  .step .d{padding:6px 8px;background:var(--bg);font-size:var(--fs-xs);color:var(--muted)}
+  .step .d{padding:9px 12px;background:var(--bg);font-size:var(--fs-xs);color:var(--muted)}
   .step .d table{width:100%;border-collapse:collapse}
-  .step .d td,.step .d th{padding:2px 4px;text-align:left;border-bottom:1px solid var(--line2);font-weight:400}
+  .step .d td,.step .d th{padding:3px 6px;text-align:left;border-bottom:1px solid var(--line2);font-weight:400}
   .step .d th{color:var(--muted2)}
-  .step.ok .g{color:var(--ok)} .step.no .g{color:var(--warn)} .step.fig .d{display:flex;gap:8px;align-items:center}
-  .say{display:flex;gap:7px;margin:10px 0;font-size:var(--fs-sm)}
-  .say span{flex:0 0 14px;color:var(--muted2);font-size:11px;text-align:center}
-  .say div{background:var(--line2);border-radius:var(--r-sm);padding:5px 8px}
+  .step.ok .g{color:var(--ok)} .step.no .g{color:var(--warn)} .step.fig .d{display:flex;gap:10px;align-items:center}
+  .say{display:flex;gap:9px;margin:12px 0;font-size:var(--fs-sm)}
+  .say span{flex:0 0 16px;color:var(--muted2);font-size:12px;text-align:center}
+  .say div{background:var(--line2);border-radius:var(--r);padding:7px 10px}
 
-  .cmp{border-top:1px solid var(--line);padding:8px;background:var(--panel)}
-  .q{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
+  .cmp{border-top:1px solid var(--line);padding:10px;background:var(--panel)}
+  .q{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
   .q button{font:inherit;font-size:var(--fs-xs);color:var(--muted);background:none;border:1px solid var(--line);
-            border-radius:99px;padding:2px 8px;cursor:pointer}
+            border-radius:var(--r);padding:4px 10px;cursor:pointer}
   .q button:hover{border-color:var(--accent);color:var(--accent)}
-  .in{display:flex;gap:6px;align-items:center;border:1px solid var(--line);border-radius:var(--r);padding:5px 8px}
+  .in{display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:var(--r);padding:4px 4px 4px 11px}
   .in input{flex:1;border:0;outline:0;background:none;font:inherit;font-size:var(--fs-sm);color:var(--ink)}
 
   /* ── 页签 / 卷子 ── */
-  .tabs{display:flex;align-items:center;gap:2px;padding:0 8px;background:var(--panel);border-bottom:1px solid var(--line);height:30px}
-  .tabs button{font:inherit;font-size:var(--fs-xs);color:var(--muted);background:none;border:0;padding:6px 8px;
-               cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+  .tabs{display:flex;align-items:center;gap:2px;padding:0 10px;background:var(--panel);border-bottom:1px solid var(--line);height:36px}
+  .tabs button{font:inherit;font-size:var(--fs-sm);color:var(--muted);background:none;border:0;
+               padding:8px 10px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
   .tabs button.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
   .tabs .r{margin-left:auto;font-size:var(--fs-xs);color:var(--muted2);cursor:pointer}
 
-  .wrap{padding:10px}
-  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;max-width:760px;margin:0 auto}
-  .sheet h1{margin:0;font-size:14px;font-weight:650}
-  .sheet .meta{font-size:var(--fs-xs);color:var(--muted2);display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;
-               padding-bottom:8px;border-bottom:1px solid var(--line2)}
-  .diff{font-size:var(--fs-xs);color:var(--accent);background:var(--accent-bg);border-radius:var(--r-sm);
-        padding:4px 8px;margin-bottom:8px}
-  .item{border:1px solid var(--line);border-radius:var(--r-sm);padding:9px 10px;margin-bottom:6px}
-  .item.flag{border-color:var(--warn);background:var(--warn-bg)}
-  .ih{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--muted2)}
-  .ih b{color:var(--ink);font-size:var(--fs);font-weight:650}
-  .bdg{font-family:var(--mono);font-size:var(--fs-xs);color:var(--muted);background:var(--line2);border-radius:4px;padding:1px 5px}
+  /* 卷子：一张纸，题与题之间只用发丝线，不用卡片 */
+  .wrap{padding:14px}
+  .sheet{background:var(--panel);border:1px solid var(--line);padding:20px 24px;max-width:780px;margin:0 auto}
+  .sheet h1{margin:0;font-size:16px;font-weight:650}
+  .sheet .meta{font-size:var(--fs-xs);color:var(--muted2);display:flex;gap:12px;flex-wrap:wrap;margin-top:6px;
+               padding-bottom:10px;border-bottom:1px solid var(--line)}
+  .diff{font-size:var(--fs-xs);color:var(--accent);background:var(--accent-bg);padding:6px 10px;margin-bottom:14px}
+  .item{padding:13px 0;border-top:1px solid var(--line2)}
+  .item.f{border-top:0;padding-top:4px}
+  .item.flag{background:var(--warn-bg);box-shadow:inset 2px 0 0 var(--warn);padding-left:12px;padding-right:8px}
+  .ih{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--muted2)}
+  .ih b{color:var(--ink);font-size:14.5px;font-weight:650}
+  .bdg{font-family:var(--mono);font-size:11.5px;color:var(--muted);background:var(--line2);border-radius:2px;padding:2px 6px}
   .bdg.ok{color:var(--ok);background:var(--ok-bg)}
   .bdg.no{color:var(--warn);background:var(--warn-bg)}
   .bdg.ac{color:var(--accent);background:var(--accent-bg)}
-  .stem{font-size:13px;line-height:1.7;margin:6px 0 0}
-  .opts{font-size:var(--fs-sm);color:var(--muted);margin-top:3px}
-  .fg{margin-top:6px;border:1px solid var(--line);border-radius:var(--r-sm);padding:3px;display:inline-block;background:var(--panel)}
-  .why{font-size:var(--fs-xs);color:var(--warn);margin-top:6px}
-  .acts{display:flex;gap:4px;margin-top:7px}
-  .acts button{font:inherit;font-size:var(--fs-xs);color:var(--muted2);background:none;border:0;padding:0 2px;cursor:pointer}
+  .stem{font-size:15px;line-height:1.75;margin:8px 0 0}
+  .opts{font-size:14px;color:var(--muted);margin-top:4px}
+  .fg{margin-top:8px;border:1px solid var(--line);padding:4px;display:inline-block;background:var(--panel)}
+  .why{font-size:var(--fs-xs);color:var(--warn);margin-top:8px}
+  .acts{display:flex;gap:12px;margin-top:9px}
+  .acts button{font:inherit;font-size:var(--fs-xs);color:var(--muted2);background:none;border:0;padding:0;cursor:pointer}
   .acts button:hover{color:var(--accent)}
-  .ans{display:none;margin-top:7px;padding-top:7px;border-top:1px solid var(--line2);font-size:var(--fs-sm);color:var(--muted)}
+  .ans{display:none;margin-top:10px;padding-top:9px;border-top:1px solid var(--line2);font-size:var(--fs-sm);color:var(--muted)}
   .ans.on{display:block}
-  .ans li{margin-bottom:2px}
+  .ans li{margin-bottom:3px}
 
-  .lg{display:flex;gap:10px;font-size:var(--fs-xs);color:var(--muted2);margin:6px 0}
-  .lg i{width:8px;height:8px;border-radius:2px;display:inline-block;margin-right:4px;vertical-align:0}
-  .kpi{display:flex;gap:14px;margin:10px 0 4px;font-size:var(--fs-xs);color:var(--muted2)}
-  .kpi b{display:block;font-size:15px;color:var(--ink);font-family:var(--mono)}
+  .lg{display:flex;gap:16px;font-size:var(--fs-xs);color:var(--muted2);margin:8px 0}
+  .lg i{width:9px;height:9px;display:inline-block;margin-right:5px}
+  .kpi{display:flex;gap:22px;margin:14px 0 6px;font-size:var(--fs-xs);color:var(--muted2)}
+  .kpi b{display:block;font-size:17px;color:var(--ink);font-family:var(--mono)}
   table.t{width:100%;border-collapse:collapse;font-size:var(--fs-xs)}
-  table.t th,table.t td{border-bottom:1px solid var(--line2);padding:3px 5px;text-align:left;font-weight:400}
+  table.t th,table.t td{border-bottom:1px solid var(--line2);padding:5px 8px;text-align:left;font-weight:400}
   table.t th{color:var(--muted2)}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px}
-  .tag{position:fixed;right:10px;bottom:10px;font-size:var(--fs-xs);color:var(--muted2);background:var(--panel);
-       border:1px solid var(--line);border-radius:99px;padding:2px 8px}
+  .card{background:var(--panel);border:1px solid var(--line);padding:16px}
+  .tag{position:fixed;right:12px;bottom:12px;font-size:var(--fs-xs);color:var(--muted2);background:var(--panel);
+       border:1px solid var(--line);padding:3px 9px}
   @media (max-width:1080px){.shell{grid-template-columns:1fr;height:auto}}
 </style>
 </head>
@@ -284,8 +286,8 @@ const items=()=>Q.map(q=>{
 });
 const bd=(t,c)=>`<span class="bdg ${c||''}">${t}</span>`;
 
-function itemHTML(q){
-  return `<div class="item ${q.flag?'flag':''}">
+function itemHTML(q,i){
+  return `<div class="item ${q.flag?'flag':''} ${i?'':'f'}">
     <div class="ih"><b>${q.n}</b><span>${q.t} ${q.s}分</span><span class="mono">p=${q.p.toFixed(2)}</span>
       ${bd("符号 ✓","ok")}${bd("边界 ✓","ok")}${bd("查重 "+q.d.toFixed(2))}${bd("原创 "+Math.round((1-q.d*2)*100)+"%","ac")}
       ${q.fig?bd("图形 ✓","ok"):""}${q.ok?bd("已确认","ok"):""}${q.flag?bd("待复核","no"):""}${q.rep?bd("#3 已替换","ac"):""}
@@ -305,7 +307,7 @@ function paper(){
     <h1>二次函数 · 课后作业</h1>
     <div class="meta"><span>初三(2)班</span><span>100 分</span><span>40min</span><span class="mono">${ver}</span>
       <span>${v.flag.length?`<span style="color:var(--warn)">待复核 ${v.flag.length}</span>`:`<span style="color:var(--ok)">可定稿</span>`}</span></div>
-    ${L.map(itemHTML).join("")}
+    ${L.map((q,i)=>itemHTML(q,i)).join("")}
   </div></div>`;
 }
 function net(){
