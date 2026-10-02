@@ -22,11 +22,23 @@ declare module '@deepseek-ai/cordis' {
     'item:rejected'(payload: { item: Item; verdict: Verdict }): void
     /** 老师签了字（emit，仅广播；R4 的留痕） */
     'item:confirmed'(payload: { item: Item; by: string }): void
+    /** 一轮 agent 循环开始（emit，仅广播；界面据此把"正在跑"显示出来） */
+    'run:started'(payload: { runId: string; goal: string; workspace: string }): void
     /** 工作台的一步（emit，仅广播；界面实时显示 agent 在干什么） */
-    'run:step'(payload: { step: number; kind: 'assistant' | 'tool' | 'gate'; text: string }): void
+    'run:step'(payload: { runId: string; step: number; kind: 'assistant' | 'tool' | 'gate' | 'user'; text: string }): void
+    /** 一轮结束（emit，仅广播；界面据此收尾并刷新数据） */
+    'run:done'(payload: {
+      runId: string
+      stopped: 'done' | 'max-steps' | 'no-llm' | 'stopped'
+      steps: number
+      stored: readonly string[]
+      workspace: string
+    }): void
     /** 设置被改（emit，仅广播） */
     'settings:changed'(payload: { restartRequired: readonly string[] }): void
     /** 知识库状态变化（emit，仅广播；界面看得到"整理到哪一步了"） */
     'kb:changed'(payload: { batchId: string; status: string; records?: number }): void
+    /** 工作区变了（agent 写了文件 / 跑了命令；界面可以刷新"这一轮留下了什么"） */
+    'workspace:changed'(payload: { name: string; files: number }): void
   }
 }

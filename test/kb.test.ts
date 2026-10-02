@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -6,6 +6,7 @@ import { Context, type Fiber } from '@deepseek-ai/cordis'
 import type { CorpusRecord } from '@examharness/core'
 import * as corpusPlugin from '@examharness/plugin-corpus'
 import * as kbPlugin from '@examharness/plugin-kb'
+import * as settingsPlugin from '@examharness/plugin-settings'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 /**
@@ -126,5 +127,111 @@ describe('知识库', () => {
     // 索引文件真的写了状态，重启后还在
     const onDisk = JSON.parse(readFileSync(join(dir, 'kb.json'), 'utf8')) as { id: string; status: string }[]
     expect(onDisk[0]?.status).toBe('indexed')
+  })
+})
+
+describe('设置与密钥（照 DSH 的规矩）', () => {
+  it('密钥只进不出：describe 给"配没配 + 从哪来"，值不进任何响应；环境变量优先且只读', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'examharness-settings-'))
+    scratch.push(dir)
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(ROOT).href
+    fibers.push(
+      await ctx.plugin(settingsPlugin, {
+        path: join(dir, 'settings.json'),
+        credentials: join(dir, 'credentials.json'),
+        modelBaseUrl: '',
+        modelName: '',
+        modelApiKeyEnv: 'EXAMHARNESS_TEST_KEY',
+        websearchEnabled: false,
+        websearchEndpoint: '',
+        corpusDirs: [],
+        defaultClassName: '初三(2)班',
+        defaultProgress: '',
+        defaultBlueprint: 'seed/blueprint.json',
+        corpusWordingMax: 0.55,
+        corpusNumbersMin: 0.8,
+        bankMaxSimilarity: 0.85,
+      }),
+    )
+
+    // 还没配：来源 none，可写
+    expect(ctx.settings.credentials.describe('EXAMHARNESS_TEST_KEY')).toEqual({
+      ref: 'EXAMHARNESS_TEST_KEY',
+      configured: false,
+      source: 'none',
+      writable: true,
+    })
+
+    ctx.settings.credentials.set('EXAMHARNESS_TEST_KEY', 'sk-file-1')
+    const info = ctx.settings.credentials.describe('EXAMHARNESS_TEST_KEY')
+    expect(info.configured).toBe(true)
+    expect(info.source).toBe('file')
+    expect(ctx.settings.credentials.get('EXAMHARNESS_TEST_KEY')).toBe('sk-file-1')
+    // CredentialInfo 里**没有值字段**（类型上就不给）
+    expect(Object.keys(info).toSorted()).toEqual(['configured', 'ref', 'source', 'writable'])
+
+    // 凭据文件权限 0600（照 DSH：别人可读就拒绝启动）
+    if (process.platform !== 'win32') {
+      expect(statSync(join(dir, 'credentials.json')).mode & 0o777).toBe(0o600)
+    }
+
+    // 环境变量优先：设了就由环境说了算，界面上改不了
+    process.env.EXAMHARNESS_TEST_KEY = 'sk-env-1'
+    try {
+      expect(ctx.settings.credentials.get('EXAMHARNESS_TEST_KEY')).toBe('sk-env-1')
+      expect(ctx.settings.credentials.describe('EXAMHARNESS_TEST_KEY').source).toBe('env')
+      expect(ctx.settings.credentials.describe('EXAMHARNESS_TEST_KEY').writable).toBe(false)
+      expect(() => ctx.settings.credentials.set('EXAMHARNESS_TEST_KEY', 'sk-x')).toThrow(/启动环境/)
+    } finally {
+      delete process.env.EXAMHARNESS_TEST_KEY
+    }
+  })
+
+  it('写入按路径打补丁：没提到的字段（含密钥）不会被删掉；修订号对不上就报冲突', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'examharness-settings-'))
+    scratch.push(dir)
+    const ctx = new Context()
+    ctx.baseUrl = pathToFileURL(ROOT).href
+    fibers.push(
+      await ctx.plugin(settingsPlugin, {
+        path: join(dir, 'settings.json'),
+        credentials: join(dir, 'credentials.json'),
+        modelBaseUrl: 'https://a.example/v1',
+        modelName: 'm1',
+        modelApiKeyEnv: 'EXAMHARNESS_TEST_KEY',
+        websearchEnabled: false,
+        websearchEndpoint: '',
+        corpusDirs: ['corpus/questions'],
+        defaultClassName: '初三(2)班',
+        defaultProgress: '',
+        defaultBlueprint: 'seed/blueprint.json',
+        corpusWordingMax: 0.55,
+        corpusNumbersMin: 0.8,
+        bankMaxSimilarity: 0.85,
+      }),
+    )
+    ctx.settings.credentials.set('EXAMHARNESS_TEST_KEY', 'sk-keep-me')
+
+    const rev = ctx.settings.revision()
+    const after = ctx.settings.mutate(
+      [
+        { path: ['model', 'model'], value: 'm2' },
+        { path: ['gates', 'corpusWordingMax'], value: 0.4 },
+      ],
+      rev,
+    )
+
+    expect(after.model.model).toBe('m2')
+    expect(after.model.baseUrl).toBe('https://a.example/v1') // 没提到的字段留着
+    expect(after.gates.corpusWordingMax).toBe(0.4)
+    expect(ctx.settings.credentials.get('EXAMHARNESS_TEST_KEY')).toBe('sk-keep-me') // 密钥没被碰
+    expect(ctx.settings.revision()).toBeGreaterThan(rev)
+
+    // 拿着旧修订号写入 = 有人在别处改过了 → 明确冲突，不静默覆盖
+    expect(() => ctx.settings.mutate([{ path: ['model', 'model'], value: 'm3' }], rev)).toThrow(/修订号/)
+
+    // unset 回到装机配置的值
+    expect(ctx.settings.mutate([{ path: ['model', 'model'], unset: true }]).model.model).toBe('m1')
   })
 })

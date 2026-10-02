@@ -56,6 +56,9 @@
       "path": "./packages/plugin-session"
     },
     {
+      "path": "./packages/plugin-workspace"
+    },
+    {
       "path": "./packages/plugin-web"
     }
   ]

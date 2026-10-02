@@ -10,6 +10,8 @@ import type {
   WorkbenchEvent,
   WorkbenchRequest,
   WorkbenchRun,
+  WorkspaceFile,
+  WorkspaceRun,
 } from '@examharness/core'
 import z from 'schemastery'
 
@@ -29,6 +31,14 @@ import z from 'schemastery'
 export const name = 'workbench'
 export const inject = ['llm', 'graph', 'bank', 'construct']
 
+/**
+ * 工作区（ADR-0020）：agent 的**手脚**——不只知识库那支 agent，主 agent 一样有。
+ *
+ * `in/` 原件副本 · `tmp/` 自己写的脚本 · `out/` 产物。
+ * 要跑的东西**先落成文件**（不许 `-c` 内联代码），跑出来的东西留在目录里可复查；
+ * 产物是**草稿不是真值**：数学结论仍然只能由构造与符号计算给出，闸门才是裁判（R1/R2）。
+ */
+
 export const Config = z.object({
   maxSteps: z.number().default(8),
   /** 会话约定之外，额外给模型的硬规矩 */
@@ -44,6 +54,31 @@ interface Candidate {
   id: string
   slot: BlueprintRow
   item: Item
+}
+
+/** 一轮 agent 循环的状态：过程要走事件流出去，中途还要能被插话/叫停 */
+interface RunState {
+  id: string
+  request: WorkbenchRequest
+  workspace?: WorkspaceHandle
+  transcript: WorkbenchEvent[]
+  stored: string[]
+  /** 老师插的话：下一步开始时读进上下文 */
+  inbox: string[]
+  stopRequested: boolean
+  steps: number
+  done: Promise<WorkbenchRun>
+}
+
+/** 本轮工作区的句柄：模型只给相对路径，绝对路径由服务持有（它就不必知道仓库在哪） */
+interface WorkspaceHandle {
+  name: string
+  path: string
+  files: readonly WorkspaceFile[]
+  list: () => readonly WorkspaceFile[]
+  read: (relPath: string, offset?: number, limit?: number) => { text: string; total: number; next?: number } | undefined
+  write: (relPath: string, text: string) => { path: string; bytes: number } | undefined
+  run: (argv: readonly string[], timeoutMs?: number) => WorkspaceRun
 }
 
 const TOOLS: readonly LlmToolSpec[] = [
@@ -134,6 +169,44 @@ const WEB_SEARCH_TOOL: LlmToolSpec = {
   },
 }
 
+const WORKSPACE_TOOLS: readonly LlmToolSpec[] = [
+  {
+    name: 'ws_ls',
+    description: '列工作区里的文件（in/ 原件、tmp/ 你的脚本、out/ 产物）。',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'ws_read',
+    description: '分片读工作区里的文本文件：给 offset/limit 翻页，别一次读整份（和 kb_read 一样的规矩）。',
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string' }, offset: { type: 'number' }, limit: { type: 'number' } },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'ws_write',
+    description: '在工作区写一个文件（一般写 tmp/ 下的脚本）。要跑的东西先写下来，再 ws_run 跑它。',
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string' }, text: { type: 'string' } },
+      required: ['path', 'text'],
+    },
+  },
+  {
+    name: 'ws_run',
+    description:
+      '在工作区里跑一条命令（cwd = 工作区，逐个参数传，不过 shell）：' +
+      'argv 是数组，例如 ["python3","tmp/extract.py"]、["pdftotext","in/a.pdf","out/a.txt"]。' +
+      'python3/pip 优先用仓库的虚拟环境 .venv。不许 -c 内联代码，不许工作区之外的路径。',
+    parameters: {
+      type: 'object',
+      properties: { argv: { type: 'array', items: { type: 'string' } }, timeoutMs: { type: 'number' } },
+      required: ['argv'],
+    },
+  },
+]
+
 const KB_TOOLS: readonly LlmToolSpec[] = [
   {
     name: 'kb_list',
@@ -184,6 +257,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
 
   private readonly config: WorkbenchConfig
   private readonly candidates = new Map<string, Candidate>()
+  /** 正在跑的轮次（同一时刻最多一轮，见 start()） */
+  private readonly runs = new Map<string, RunState>()
   private counter = 0
 
   constructor(ctx: Context, config: WorkbenchConfig) {
@@ -200,37 +275,151 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     if (this.ctx.get('corpus') !== undefined) tools.push(...CORPUS_TOOLS)
     if (this.ctx.get('websearch')?.enabled === true) tools.push(WEB_SEARCH_TOOL)
     if (this.ctx.get('kb') !== undefined) tools.push(...KB_TOOLS)
+    // 工作区对**所有** agent 开放：主 agent 也要能处理原件、写脚本、跑东西
+    if (this.ctx.get('workspace') !== undefined) tools.push(...WORKSPACE_TOOLS)
     return tools
   }
 
+  /**
+   * 跑到底（脚本与测试用）。产品路径走 start()：界面要看过程、要能插话。
+   */
   async run(request: WorkbenchRequest): Promise<WorkbenchRun> {
-    const transcript: WorkbenchEvent[] = []
-    const stored: string[] = []
+    const started = this.start(request)
+    return await started.done
+  }
+
+  /**
+   * 起一轮 agent 循环，**立刻返回 runId**：过程通过 run:started / run:step / run:done 事件流出去。
+   *
+   * 同一时刻只允许一轮：工作台的候选题表是共享状态，两轮并行会互相踩。
+   * 与其假装能并行，不如明确拒绝（界面会说"已经有 agent 在跑"）。
+   */
+  start(request: WorkbenchRequest): { runId: string; workspace: string; done: Promise<WorkbenchRun> } {
+    if (this.runs.size > 0) {
+      const running = [...this.runs.values()][0]
+      throw new Error(`已经有 agent 在跑（${running?.id ?? '?'}）：等它结束，或者让它停下来`)
+    }
+    const id = `r${String(Date.now())}-${String((this.counter += 1))}`
+    const workspace = this.openWorkspace(request.workspace)
+    const state: RunState = {
+      id,
+      request,
+      // done 在下面 loop 起好之后填（RunState 需要它，但 loop 又需要 state）
+      done: Promise.resolve({ goal: request.goal, steps: 0, transcript: [], stored: [], stopped: 'stopped' }),
+      ...(workspace === undefined ? {} : { workspace }),
+      transcript: [],
+      stored: [],
+      inbox: [],
+      stopRequested: false,
+      steps: 0,
+    }
+    this.runs.set(id, state)
+    // 候选题表是**本轮**的：上一轮的候选不该在这一轮还能被提交
+    this.candidates.clear()
+    this.ctx.emit('run:started', {
+      runId: id,
+      goal: request.goal,
+      workspace: workspace?.name ?? '',
+    })
+    state.done = this.loop(state)
+    return { runId: id, workspace: workspace?.name ?? '', done: state.done }
+  }
+
+  /** 老师说一句：下一步就会读到（不是重开一轮，是插进这一轮） */
+  interject(runId: string, text: string): boolean {
+    const state = this.runs.get(runId)
+    if (state === undefined || text.trim() === '') return false
+    state.inbox.push(text.trim())
+    return true
+  }
+
+  /** 让它在下一步之前停下来（正在飞的那次模型调用结束后） */
+  stop(runId: string): boolean {
+    const state = this.runs.get(runId)
+    if (state === undefined) return false
+    state.stopRequested = true
+    return true
+  }
+
+  active(): readonly { id: string; goal: string; steps: number; workspace: string }[] {
+    return [...this.runs.values()].map((state) => ({
+      id: state.id,
+      goal: state.request.goal,
+      steps: state.steps,
+      workspace: state.workspace?.name ?? '',
+    }))
+  }
+
+  private async loop(state: RunState): Promise<WorkbenchRun> {
+    const { request, workspace } = state
+    const workspaceOf = (): WorkbenchRun['workspace'] =>
+      workspace === undefined ? undefined : { name: workspace.name, files: workspace.list() }
     const say = (step: number, kind: WorkbenchEvent['kind'], text: string): void => {
-      transcript.push({ step, kind, text })
+      state.transcript.push({ step, kind, text })
       // 实时推给界面：工作记录是"看得见的 agent"，不是跑完才出现的一坨
-      this.ctx.emit('run:step', { step, kind, text })
+      this.ctx.emit('run:step', { runId: state.id, step, kind, text })
+    }
+
+    const finish = (stopped: WorkbenchRun['stopped']): WorkbenchRun => {
+      // 老师插的话没被读到（这一轮正好结束了）：说出来，别让它悄悄消失
+      for (const missed of state.inbox.splice(0)) {
+        say(state.steps, 'gate', `没赶上：这一轮已经结束，老师这句话没有读进去——「${missed}」`)
+      }
+      const left = workspaceOf()
+      const result: WorkbenchRun = {
+        goal: request.goal,
+        steps: state.steps,
+        transcript: state.transcript,
+        stored: state.stored,
+        stopped,
+        ...(left === undefined ? {} : { workspace: left }),
+      }
+      this.ctx.emit('run:done', {
+        runId: state.id,
+        stopped,
+        steps: state.steps,
+        stored: state.stored,
+        workspace: workspace?.name ?? '',
+      })
+      this.runs.delete(state.id)
+      return result
     }
 
     if (!this.ctx.llm.configured) {
-      say(0, 'gate', '未配置模型密钥，工作台拒绝运行（不假装在干活）')
-      return { goal: request.goal, steps: 0, transcript, stored, stopped: 'no-llm' }
+      const missing = (this.ctx.llm.missing ?? ['模型配置']).join('、')
+      say(0, 'gate', `模型配置不完整（还缺 ${missing}），工作台拒绝运行（不假装在干活）：在「设置」页补齐`)
+      return finish('no-llm')
     }
 
     const messages: LlmMessage[] = [
-      { role: 'system', content: systemPrompt(request.blueprint, this.config.extraRules) },
+      { role: 'system', content: systemPrompt(request.blueprint, this.config.extraRules, workspace !== undefined) },
       { role: 'user', content: request.goal },
     ]
+    if (workspace !== undefined) {
+      say(0, 'tool', `工作区已就绪：${workspace.name}（${String(workspace.files.length)} 个文件）`)
+    }
 
-    let steps = 0
     let stopped: WorkbenchRun['stopped'] = 'max-steps'
 
-    while (steps < this.config.maxSteps) {
-      steps += 1
+    while (state.steps < this.config.maxSteps) {
+      // 老师插的话在**下一步**生效：这是"可插话"的落点，不是另起一轮
+      while (state.inbox.length > 0) {
+        const said = state.inbox.shift()
+        if (said === undefined) break
+        messages.push({ role: 'user', content: said })
+        say(state.steps, 'user', said)
+      }
+      if (state.stopRequested) {
+        say(state.steps, 'gate', '老师叫停：这一步之后不再继续（已完成的部分保留）')
+        stopped = 'stopped'
+        break
+      }
+
+      state.steps += 1
       // agent 循环天然串行：下一步做什么取决于上一步的回复
       // oxlint-disable-next-line no-await-in-loop
       const reply = await this.ctx.llm.chat(messages, this.tools())
-      if (reply.content !== null && reply.content !== '') say(steps, 'assistant', reply.content)
+      if (reply.content !== null && reply.content !== '') say(state.steps, 'assistant', reply.content)
 
       if (reply.toolCalls.length === 0) {
         stopped = 'done'
@@ -241,20 +430,38 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       for (const call of reply.toolCalls) {
         // 同一轮里的多个工具调用也必须串行：它们会改共享状态（题库、候选题表）
         // oxlint-disable-next-line no-await-in-loop
-        const outcome = await this.execute(call.name, call.arguments, request.blueprint)
-        say(steps, outcome.kind, outcome.text)
-        if (outcome.storedId !== undefined) stored.push(outcome.storedId)
+        const outcome = await this.execute(call.name, call.arguments, request.blueprint, workspace?.name ?? '')
+        say(state.steps, outcome.kind, outcome.text)
+        if (outcome.storedId !== undefined) state.stored.push(outcome.storedId)
         messages.push({ role: 'tool', toolCallId: call.id, content: JSON.stringify(outcome.payload) })
       }
     }
 
-    return { goal: request.goal, steps, transcript, stored, stopped }
+    return finish(stopped)
+  }
+
+  /** 打开本轮的工作区：给了名字就用它，否则用当前会话 id（都没有就不开——工作区是可配置能力） */
+  private openWorkspace(wsName: string | undefined): WorkspaceHandle | undefined {
+    const workspace = this.ctx.get('workspace')
+    if (workspace === undefined) return undefined
+    const fallback = this.ctx.get('session')?.current().id ?? `run-${String(Date.now())}`
+    const opened = workspace.open(wsName === undefined || wsName === '' ? fallback : wsName)
+    return {
+      name: opened.name,
+      path: opened.path,
+      files: opened.files,
+      list: () => workspace.list(opened.name),
+      read: (relPath, offset, limit) => workspace.read(opened.name, relPath, offset, limit),
+      write: (relPath, text) => workspace.write(opened.name, relPath, text),
+      run: (argv, timeoutMs) => workspace.run(opened.name, argv, timeoutMs),
+    }
   }
 
   private async execute(
     tool: string,
     rawArguments: string,
     blueprint: Blueprint,
+    workspaceName = '',
   ): Promise<{ kind: WorkbenchEvent['kind']; text: string; payload: unknown; storedId?: string }> {
     let args: Record<string, unknown> = {}
     try {
@@ -490,6 +697,54 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       }
     }
 
+    if (tool === 'ws_ls') {
+      const workspace = this.ctx.get('workspace')
+      if (workspace === undefined) return { kind: 'tool', text: 'ws_ls：没有工作区服务', payload: { error: '未接入工作区' } }
+      const files = workspace.list(workspaceName)
+      return {
+        kind: 'tool',
+        text: `ws_ls：${String(files.length)} 个文件${files.length === 0 ? '（空的：原件要先放进 in/）' : ''}`,
+        payload: { workspace: workspaceName, files },
+      }
+    }
+
+    if (tool === 'ws_read') {
+      const workspace = this.ctx.get('workspace')
+      if (workspace === undefined) return { kind: 'tool', text: 'ws_read：没有工作区服务', payload: { error: '未接入工作区' } }
+      const relPath = String(args.path ?? '')
+      const chunk = workspace.read(workspaceName, relPath, numberOr(args.offset, 0), numberOr(args.limit, 4000))
+      if (chunk === undefined) {
+        return { kind: 'tool', text: `ws_read：读不到 ${relPath}（可能是二进制，或路径不对）`, payload: { error: '读不到文件' } }
+      }
+      return {
+        kind: 'tool',
+        text: `ws_read：${relPath} 读到 ${String(chunk.text.length)} 字（共 ${String(chunk.total)}${chunk.next === undefined ? '，已到结尾' : `，下一个 offset=${String(chunk.next)}`}）`,
+        payload: { path: relPath, offset: numberOr(args.offset, 0), total: chunk.total, text: chunk.text },
+      }
+    }
+
+    if (tool === 'ws_write') {
+      const workspace = this.ctx.get('workspace')
+      if (workspace === undefined) return { kind: 'tool', text: 'ws_write：没有工作区服务', payload: { error: '未接入工作区' } }
+      const written = workspace.write(workspaceName, String(args.path ?? ''), String(args.text ?? ''))
+      if (written === undefined) {
+        return { kind: 'tool', text: 'ws_write：路径不合法（不许绝对路径或 ..）', payload: { error: '路径不合法' } }
+      }
+      return { kind: 'tool', text: `ws_write：${written.path}（${String(written.bytes)} 字节）`, payload: { path: written.path } }
+    }
+
+    if (tool === 'ws_run') {
+      const workspace = this.ctx.get('workspace')
+      if (workspace === undefined) return { kind: 'tool', text: 'ws_run：没有工作区服务', payload: { error: '未接入工作区' } }
+      const argv = Array.isArray(args.argv) ? args.argv.map(String) : []
+      const result = workspace.run(workspaceName, argv, numberOr(args.timeoutMs, undefined))
+      return {
+        kind: 'tool',
+        text: `ws_run：${argv.join(' ')}（${result.timedOut ? '超时终止' : `退出码 ${String(result.code ?? '?')}`}，${String(result.ms)} ms）`,
+        payload: { argv: result.argv, code: result.code, timedOut: result.timedOut, out: result.out, err: result.err },
+      }
+    }
+
     if (tool === 'kb_write') {
       const kb = this.ctx.get('kb')
       if (kb === undefined) return { kind: 'tool', text: 'kb_write：没有知识库服务', payload: { error: '未接入知识库' } }
@@ -566,7 +821,14 @@ const SERIALIZER_PROMPT = [
   '4. 不要输出 JSON 以外的任何内容。',
 ].join('\n')
 
-function systemPrompt(blueprint: Blueprint, extraRules: string): string {
+/** 取数字参数（模型有时给字符串），缺省时用 fallback */
+function numberOr(value: unknown, fallback: number | undefined): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value !== '' && Number.isFinite(Number(value))) return Number(value)
+  return fallback
+}
+
+function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = false): string {
   const rows = blueprint.blueprint
     .map((row) => `- ${row.key}：${row.knowledge.join('、')}｜${row.cognitive}｜${row.type}｜${row.score} 分 ×${row.count}`)
     .join('\n')
@@ -588,7 +850,13 @@ function systemPrompt(blueprint: Blueprint, extraRules: string): string {
     '   corpus_compare 自查是不是在抄原题，web_search 核查情境与数据是否真实。',
     '   **检索到的一切都只是素材，不是真值**：题目的正确性仍来自构造与符号计算；',
     '   任何题面都要过闸门——抄原题会被查重闸门拦下。',
-    extraRules === '' ? '' : `6. ${extraRules}`,
+    hasWorkspace
+      ? '6. 你有工作区（ws_ls / ws_read / ws_write / ws_run）：in/ 是原件副本，tmp/ 放你自己写的脚本，' +
+        'out/ 放产物。原件格式怪（PDF、表格、扫描件）就先写个脚本用 python3 转换再读；' +
+        '要跑的东西**先写成文件**（不许 -c 内联代码），跑出来的东西留在工作区里，老师能复查。' +
+        '⚠️ 工作区产物只是**草稿，不是真值**：题目结论仍然只能来自构造与符号计算，闸门才是裁判。'
+      : '',
+    extraRules === '' ? '' : `7. ${extraRules}`,
   ]
     .filter((line) => line !== '')
     .join('\n')

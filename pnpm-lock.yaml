@@ -74,6 +74,9 @@ importers:
       '@examharness/plugin-workbench':
         specifier: workspace:*
         version: link:packages/plugin-workbench
+      '@examharness/plugin-workspace':
+        specifier: workspace:*
+        version: link:packages/plugin-workspace
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -330,6 +333,18 @@ importers:
         version: 3.18.0
 
   packages/plugin-workbench:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.4
+        version: 4.0.4(@deepseek-ai/cordis-plugin-include@1.0.9)(@deepseek-ai/cordis-plugin-loader@1.0.5)
+      '@examharness/core':
+        specifier: workspace:*
+        version: link:../core
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+
+  packages/plugin-workspace:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.4

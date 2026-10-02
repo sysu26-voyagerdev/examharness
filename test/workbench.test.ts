@@ -140,7 +140,70 @@ describe('agent 工作台', () => {
     expect(run.stopped).toBe('no-llm')
     expect(run.steps).toBe(0)
     expect(ctx.bank.all()).toHaveLength(0)
-    expect(run.transcript[0]?.text).toContain('未配置模型密钥')
+    expect(run.transcript[0]?.text).toContain('模型配置不完整')
+  })
+
+  it('插话在**下一步**生效：老师的话进了上下文，也留在记录里', async () => {
+    const seen: string[][] = []
+    let runId = ''
+    // 慢模型：第一轮里把老师的话塞进去（模拟"agent 正在跑时老师插话"）
+    const ctx = await boot({
+      chat: (messages) => {
+        seen.push(messages.filter((message) => message.role === 'user').map((message) => message.content ?? ''))
+        if (seen.length === 1) {
+          expect(ctx.workbench.interject(runId, '别用动点，换个情境')).toBe(true)
+          // 带一个工具调用：循环才会进到第二步（否则这一轮就结束了）
+          return { content: '先看看题库现状。', toolCalls: [{ id: 'c1', name: 'bank_stats', arguments: '{}' }] }
+        }
+        return { content: '好。', toolCalls: [] }
+      },
+    })
+    // runId 来自事件（界面也是这么拿的）：start() 返回之前那一轮就已经开始了
+    ctx.on('run:started', (payload) => {
+      runId = payload.runId
+    })
+    const started = ctx.workbench.start({ goal: '出题', blueprint })
+    const run = await started.done
+
+    expect(run.stopped).toBe('done')
+    // 第二次调用模型时，老师的插话已经在 user 消息里
+    expect(seen.at(-1)?.some((text) => text.includes('别用动点'))).toBe(true)
+    // 记录里也看得到（界面上是"老师"那一行）
+    expect(run.transcript.some((event) => event.kind === 'user' && event.text === '别用动点，换个情境')).toBe(true)
+  })
+
+  it('叫停：这一步之后不再继续，已完成的部分保留，并如实标注', async () => {
+    let runId = ''
+    const ctx = await boot({
+      chat: () => {
+        expect(ctx.workbench.stop(runId)).toBe(true)
+        // 同样带一个工具调用：叫停是在**下一步之前**生效的
+        return { content: '我还在想。', toolCalls: [{ id: 'c1', name: 'bank_stats', arguments: '{}' }] }
+      },
+    })
+    ctx.on('run:started', (payload) => {
+      runId = payload.runId
+    })
+    const started = ctx.workbench.start({ goal: '出题', blueprint })
+    const run = await started.done
+
+    expect(run.stopped).toBe('stopped')
+    expect(run.transcript.some((event) => event.text.includes('老师叫停'))).toBe(true)
+    // 结束了就查不到这一轮（不然界面会以为它还在跑）
+    expect(ctx.workbench.active()).toHaveLength(0)
+    expect(ctx.workbench.interject(runId, '还在吗')).toBe(false)
+  })
+
+  it('同一时刻只允许一轮：再来一轮会被明确拒绝（做不到并行就别假装）', async () => {
+    const ctx = await boot({
+      chat: () => {
+        expect(() => ctx.workbench.start({ goal: '再来', blueprint })).toThrow(/已经有 agent 在跑/)
+        return { content: '收工。', toolCalls: [] }
+      },
+    })
+    const started = ctx.workbench.start({ goal: '出题', blueprint })
+    await started.done
+    expect(ctx.workbench.active()).toHaveLength(0)
   })
 
   it('真实 llm 插件在缺密钥时 configured = false', async () => {

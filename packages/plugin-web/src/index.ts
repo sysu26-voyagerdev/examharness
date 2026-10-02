@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { extname, resolve } from 'node:path'
+import { extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Blueprint, BlueprintRow, Item, SessionMeta } from '@examharness/core'
+import type { Blueprint, BlueprintRow, Item, SessionMeta, SettingsOp } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -15,7 +15,21 @@ import z from 'schemastery'
  */
 
 export const name = 'web'
-export const inject = ['bank', 'graph', 'construct', 'paper', 'figure', 'workbench', 'session', 'llm', 'settings', 'kb', 'corpus', 'websearch']
+export const inject = [
+  'bank',
+  'graph',
+  'construct',
+  'paper',
+  'figure',
+  'workbench',
+  'session',
+  'llm',
+  'settings',
+  'kb',
+  'corpus',
+  'websearch',
+  'workspace',
+]
 
 export const Config = z.object({
   port: z.number().default(8787),
@@ -184,6 +198,22 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.end(text)
 }
 
+/**
+ * 把某个知识库批次的**原件副本**铺进工作区的 in/。
+ * 原件本身不动手（它们是老师的资料）；工作区里的是副本，agent 随便折腾。
+ * 返回铺了几个文件；没接知识库/工作区、或批次不存在时返回 undefined（诚实地说"没铺"）。
+ */
+function seedFromKb(ctx: Context, workspaceName: string, batchId: string): number | undefined {
+  if (batchId === '') return undefined
+  const batch = ctx.kb.list().find((entry) => entry.id === batchId)
+  const dir = ctx.kb.dirOf(batchId)
+  if (batch === undefined || dir === undefined) return undefined
+  return ctx.workspace.seed(
+    workspaceName,
+    batch.files.map((file) => join(dir, file.name)),
+  )
+}
+
 export function apply(ctx: Context, config: WebConfig): void {
   const base = ctx.baseUrl === undefined ? process.cwd() : fileURLToPath(ctx.baseUrl)
   const clients = new Set<ServerResponse>()
@@ -199,7 +229,10 @@ export function apply(ctx: Context, config: WebConfig): void {
 
   ctx.on('item:stored', ({ item }) => broadcast('stored', summarize(item)))
   ctx.on('item:confirmed', ({ item, by }) => broadcast('confirmed', { ...summarize(item), by }))
+  ctx.on('run:started', (payload) => broadcast('run:started', payload))
   ctx.on('run:step', (payload) => broadcast('run:step', payload))
+  ctx.on('run:done', (payload) => broadcast('run:done', payload))
+  ctx.on('workspace:changed', (payload) => broadcast('workspace:changed', payload))
   ctx.on('kb:changed', (payload) => broadcast('kb:changed', payload))
   ctx.on('settings:changed', (payload) => broadcast('settings:changed', payload))
   ctx.on('item:rejected', ({ item, verdict }) => broadcast('rejected', { ...summarize(item), verdict }))
@@ -268,13 +301,81 @@ export function apply(ctx: Context, config: WebConfig): void {
       return
     }
 
+    // ── agent 循环：起一轮、看得见过程、能插话能叫停 ──────────
+    if (method === 'GET' && path === '/api/runs') {
+      send(res, 200, { active: ctx.workbench.active() })
+      return
+    }
+
     if (method === 'POST' && path === '/api/run') {
       const body = (await readBody(req)) as { goal?: string }
-      const run = await ctx.workbench.run({
-        goal: body.goal ?? `按蓝图出一份《${blueprint.paper.title}》`,
-        blueprint,
+      // 主 agent 也在工作区里干活：会话若绑了知识库，就把那批原件铺进 in/（副本，原件不动）
+      const meta = ctx.session.current()
+      const seeded = seedFromKb(ctx, meta.id, meta.kbId)
+      try {
+        const started = ctx.workbench.start({
+          goal: body.goal ?? `按蓝图出一份《${blueprint.paper.title}》`,
+          blueprint,
+          workspace: meta.id,
+        })
+        // HTTP 不等它跑完：立刻回 runId，过程走 SSE（界面看得见每一步）
+        send(res, 202, {
+          runId: started.runId,
+          workspace: started.workspace,
+          goal: body.goal ?? '',
+          ...(seeded === undefined ? {} : { seeded }),
+        })
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    if (method === 'POST' && path === '/api/run/interject') {
+      const body = (await readBody(req)) as { runId?: string; text?: string }
+      const ok = ctx.workbench.interject(String(body.runId ?? ''), String(body.text ?? ''))
+      send(res, ok ? 200 : 404, ok ? { ok } : { error: '这一轮已经不在跑了' })
+      return
+    }
+
+    if (method === 'POST' && path === '/api/run/stop') {
+      const body = (await readBody(req)) as { runId?: string }
+      const ok = ctx.workbench.stop(String(body.runId ?? ''))
+      send(res, ok ? 200 : 404, ok ? { ok } : { error: '这一轮已经不在跑了' })
+      return
+    }
+
+    // ── 工作区：agent 留下了什么，老师要能复查 ──────────────
+    if (method === 'GET' && path === '/api/workspace') {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      const wsName = url.searchParams.get('name') ?? ''
+      const wsPath = ctx.workspace.dirOf(wsName)
+      if (wsPath === undefined) {
+        send(res, 400, { error: '工作区名字不合法' })
+        return
+      }
+      send(res, 200, {
+        name: wsName,
+        path: wsPath,
+        venv: ctx.workspace.venvPython() ?? null,
+        files: ctx.workspace.list(wsName),
       })
-      send(res, 200, run)
+      return
+    }
+
+    if (method === 'GET' && path === '/api/workspace/file') {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      const chunk = ctx.workspace.read(
+        url.searchParams.get('name') ?? '',
+        url.searchParams.get('file') ?? '',
+        Number(url.searchParams.get('offset') ?? '0'),
+        4000,
+      )
+      if (chunk === undefined) {
+        send(res, 404, { error: '读不到这个文件（可能是二进制）' })
+        return
+      }
+      send(res, 200, chunk)
       return
     }
 
@@ -358,11 +459,16 @@ export function apply(ctx: Context, config: WebConfig): void {
 
     if (method === 'GET' && path === '/api/settings') {
       const stats = ctx.corpus.stats()
+      const app = ctx.settings.get()
+      const keyRef = app.model.apiKeyEnv
       send(res, 200, {
-        app: ctx.settings.get(),
+        // **脱敏**：密钥字段不进响应，只回"配没配 + 从哪来"（ADR-0022）
+        app: { ...app, model: { ...app.model, apiKey: ctx.settings.credentials.describe(keyRef) } },
+        revision: ctx.settings.revision(),
         runtime: {
           modelConfigured: ctx.llm.configured,
           modelName: ctx.llm.model,
+          modelSource: ctx.llm.source,
           corpusTotal: stats.total,
           corpusDistributable: stats.distributable,
           corpusBySource: stats.bySource,
@@ -376,8 +482,76 @@ export function apply(ctx: Context, config: WebConfig): void {
     }
 
     if (method === 'PATCH' && path === '/api/settings') {
-      const body = await readBody(req)
-      send(res, 200, ctx.settings.patch(body as never))
+      const body = (await readBody(req)) as { ops?: SettingsOp[]; expectedRevision?: number }
+      const ops = Array.isArray(body.ops) ? body.ops : []
+      if (ops.length === 0) {
+        send(res, 400, { error: '没有要改的字段（要按路径给 ops：{path, value}）' })
+        return
+      }
+      try {
+        ctx.settings.mutate(ops, typeof body.expectedRevision === 'number' ? body.expectedRevision : undefined)
+      } catch (error) {
+        const conflict = error instanceof Error && error.name === 'SettingsConflict'
+        send(res, conflict ? 409 : 400, {
+          error: error instanceof Error ? error.message : String(error),
+          ...(conflict ? { code: 'SETTINGS_CONFLICT' } : {}),
+        })
+        return
+      }
+      const updated = ctx.settings.get()
+      send(res, 200, {
+        app: { ...updated, model: { ...updated.model, apiKey: ctx.settings.credentials.describe(updated.model.apiKeyEnv) } },
+        revision: ctx.settings.revision(),
+      })
+      return
+    }
+
+    // 密钥：**只写不读**（写进去之后只会拿到"已配置/未配置"）
+    if (method === 'POST' && path === '/api/settings/credential') {
+      const body = (await readBody(req)) as { ref?: string; value?: string; unset?: boolean }
+      const ref = String(body.ref ?? ctx.settings.get().model.apiKeyEnv)
+      try {
+        const info =
+          body.unset === true ? ctx.settings.credentials.unset(ref) : ctx.settings.credentials.set(ref, String(body.value ?? ''))
+        send(res, 200, info)
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    // 拉可用模型列表（照 DSH：GET {baseURL}/models，结果不落盘）。密钥可以一次性带在请求里"先试后存"。
+    if (method === 'POST' && path === '/api/settings/models') {
+      const body = (await readBody(req)) as { baseUrl?: string; apiKey?: string }
+      const live = ctx.settings.get().model
+      const baseUrl = (body.baseUrl ?? live.baseUrl).replace(/\/+$/, '')
+      const key = body.apiKey ?? ctx.settings.credentials.get(live.apiKeyEnv)
+      if (baseUrl === '') {
+        send(res, 400, { error: '先填 API 地址（例如 https://api.deepseek.com/v1）' })
+        return
+      }
+      try {
+        const response = await fetch(`${baseUrl}/models`, {
+          headers: { accept: 'application/json', ...(key === '' ? {} : { authorization: `Bearer ${key}` }) },
+          signal: AbortSignal.timeout(15_000),
+        })
+        if (!response.ok) {
+          send(res, 502, { error: `${String(response.status)} ${response.statusText}（检查地址与密钥）` })
+          return
+        }
+        const text = await response.text()
+        if (text.length > 4_194_304) {
+          send(res, 502, { error: '模型列表太大（>4 MiB），不像正常的 /models 响应' })
+          return
+        }
+        const parsed = JSON.parse(text) as { data?: { id?: unknown; name?: unknown }[] }
+        const models = (parsed.data ?? [])
+          .flatMap((entry) => (typeof entry.id === 'string' && entry.id !== '' ? [{ id: entry.id, name: typeof entry.name === 'string' ? entry.name : entry.id }] : []))
+          .toSorted((a, b) => a.id.localeCompare(b.id))
+        send(res, 200, { models, source: body.apiKey === undefined ? ctx.settings.credentials.describe(live.apiKeyEnv).source : 'one-shot' })
+      } catch (error) {
+        send(res, 502, { error: `拉取失败：${error instanceof Error ? error.message : String(error)}` })
+      }
       return
     }
 
@@ -424,33 +598,54 @@ export function apply(ctx: Context, config: WebConfig): void {
         return
       }
       ctx.kb.mark(batch.id, 'ingesting', 'agent 正在整理')
+      // 原件副本铺进工作区：agent 可以拿 python / pdftotext 把 PDF、表格、扫描件转成文本再说
+      const seeded = seedFromKb(ctx, batch.id, batch.id)
       const files = batch.files.map((file) => file.name).join('、')
-      const run = await ctx.workbench.run({
+      const started = ctx.workbench.start({
         goal: [
           `把知识库「${batch.name}」整理进语料库（批次 ${batch.id}）。`,
           `文件：${files}`,
+          '',
+          `工作区：${batch.id}（ws_ls 看文件；原件副本在 in/，脚本写 tmp/，产物放 out/）`,
+          '原件不一定是纯文本：PDF/表格/扫描件先用工作区转换——',
+          '  · PDF 文字层：ws_run ["pdftotext","in/xx.pdf","out/xx.txt"]',
+          '  · 复杂版式/表格：写一个 tmp/*.py 用 python3 跑（venv 优先；pdfplumber 之类没装就先问老师）',
+          '  · 扫描件：需要 OCR（tesseract），转了也可能不理想——不行就如实说明。',
+          '要跑的东西先落成脚本文件再 ws_run，不许内联代码。',
+          '',
           '步骤：',
-          '1) kb_list 确认文件清单；',
-          '2) 逐个文件 kb_read 分片读（用返回的 next 作为下一次 offset，读到没有 next 为止）；',
-          '3) 只抽取**真实存在于原文**的题目，逐条 kb_write：',
+          '1) ws_ls + kb_list 确认手上有什么；',
+          '2) 把原件转成文本（如果需要），产物写 out/；',
+          '3) 分片读文本（ws_read 或 kb_read，用返回的 next 作为下一次 offset，读到没有 next 为止）；',
+          '4) 只抽取**真实存在于原文**的题目，逐条 kb_write：',
           '   {stem, answer?, knowledge: [知识点], type?, difficulty?}；',
           '   knowledge 用已学知识点表里的说法；没有把握的字段宁缺勿造。',
-          '4) 全部读完后 kb_mark 标 indexed，并说明抽了多少条、跳过了什么。',
+          '5) 全部读完后 kb_mark 标 indexed，并说明抽了多少条、跳过了什么、哪些文件没处理成。',
         ].join('\n'),
         blueprint: loadBlueprint(base),
+        workspace: batch.id,
       })
-      // 只有 agent 自己跑完（done）才算整理完成；步数用尽/没有模型都如实标成未完成
-      const done = run.stopped === 'done'
-      const updated = ctx.kb.mark(
-        batch.id,
-        done ? 'indexed' : 'failed',
-        done
-          ? `agent 整理完成：${String(run.steps)} 步`
-          : run.stopped === 'no-llm'
-            ? '模型未配置，无法整理'
-            : `agent 停在「${run.stopped}」：${String(run.steps)} 步`,
-      )
-      send(res, 200, { run, batch: updated })
+      // 异步收尾：跑完再落状态。只有 agent 自己跑完（done）才算整理完成；
+      // 步数用尽 / 没有模型 / 被叫停都如实标成未完成，并写清为什么。
+      void started.done
+        .then((run) => {
+          const done = run.stopped === 'done'
+          ctx.kb.mark(
+            batch.id,
+            done ? 'indexed' : 'failed',
+            done
+              ? `agent 整理完成：${String(run.steps)} 步`
+              : run.stopped === 'no-llm'
+                ? '模型未配置，无法整理'
+                : run.stopped === 'stopped'
+                  ? `被叫停（已跑 ${String(run.steps)} 步，抽到的记录已保留）`
+                  : `agent 停在「${run.stopped}」：${String(run.steps)} 步`,
+          )
+        })
+        .catch((error: unknown) => {
+          ctx.kb.mark(batch.id, 'failed', `整理出错：${error instanceof Error ? error.message : String(error)}`)
+        })
+      send(res, 202, { runId: started.runId, workspace: started.workspace, batch, seeded })
       return
     }
 

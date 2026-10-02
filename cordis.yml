@@ -4,8 +4,11 @@
   name: '@examharness/plugin-settings'
   config:
     path: data/settings.json
+    # 凭据文件：0600，只存密钥值；配置里只放**引用名**（密钥永不进设置文档）
+    credentials: data/credentials.json
     modelBaseUrl: ${EXAMHARNESS_BASE_URL}
     modelName: ${EXAMHARNESS_MODEL}
+    modelApiKeyEnv: EXAMHARNESS_API_KEY
     websearchEnabled: false
     websearchEndpoint: ''
     corpusDirs:
@@ -136,6 +139,18 @@
     extractDir: corpus/extracted
     index: data/kb.json
     maxTextBytes: 5242880
+
+# 工作区：agent 的手脚（in/ 原件 · tmp/ 脚本 · out/ 产物）。
+# **不是沙箱**（ADR-0020）：跑的是本机 python；边界是「白名单 + 不许内联代码 + 不许工作区外路径 + 超时」。
+# 装包默认关闭（allowInstall: false）：装什么是人的决定，不是 agent 的决定。
+- id: workspace
+  name: '@examharness/plugin-workspace'
+  config:
+    dir: data/workspaces
+    venv: .venv
+    allowInstall: false
+    timeoutMs: 60000
+    maxOutputBytes: 20000
 
 # 会话与卷子版本：多会话、版本、diff、局部重做、人工确认、冻结
 - id: session

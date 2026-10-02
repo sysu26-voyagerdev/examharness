@@ -137,6 +137,10 @@ export interface LlmReply {
 }
 
 export interface LlmApi {
+  /** 密钥从哪来（env / file / none）——**不给值**，只给来源 */
+  readonly source: CredentialSource
+  /** 还缺哪些配置（API 地址/密钥/模型名）——不完整就别发起调用，也别假装在跑 */
+  readonly missing?: readonly string[]
   /** 有没有配好密钥。没配好时工作台必须**明确拒绝**，而不是假装在干活 */
   readonly configured: boolean
   /** 当前模型名（要记进 prose.serializer，题面将来可重生成） */
@@ -147,12 +151,19 @@ export interface LlmApi {
 export interface WorkbenchRequest {
   goal: string
   blueprint: Blueprint
+  /**
+   * 这一轮在哪个工作区干（缺省用会话 id）。
+   * 工作区是 agent 的**手脚**：原件副本、自己写的脚本、跑出来的中间产物都落在这里，
+   * 每一步可复查（见 ADR-0020：可审计，但不是沙箱）。
+   */
+  workspace?: string
 }
 
 /** 工作台的每一步都留痕：这就是可审计的"命题组工作记录" */
 export interface WorkbenchEvent {
   step: number
-  kind: 'assistant' | 'tool' | 'gate'
+  /** user = 老师中途插的话（下一步读进上下文），不是 agent 的动作 */
+  kind: 'assistant' | 'tool' | 'gate' | 'user'
   text: string
 }
 
@@ -161,12 +172,33 @@ export interface WorkbenchRun {
   steps: number
   transcript: readonly WorkbenchEvent[]
   stored: readonly string[]
-  stopped: 'done' | 'max-steps' | 'no-llm'
+  stopped: 'done' | 'max-steps' | 'no-llm' | 'stopped'
+  /** 这一轮留下的工作区（模型没干活时是空的，但目录还是在） */
+  workspace?: { name: string; files: readonly WorkspaceFile[] }
 }
 
 /** agent 工作台：模型拿工具自己迭代，但收尾动作只能是"提交"，由闸门裁决 */
+export interface WorkbenchRunState {
+  id: string
+  goal: string
+  steps: number
+  workspace: string
+}
+
 export interface WorkbenchApi {
+  /** 跑到底（脚本与测试用） */
   run(request: WorkbenchRequest): Promise<WorkbenchRun>
+  /**
+   * 起一轮并**立刻返回 runId**：过程走 run:started / run:step / run:done 事件。
+   * 界面上看得见 agent 每一步在干什么，也能中途插话（下一步就生效）或叫停。
+   * 同一时刻只允许一轮——做不到并行就别假装能。
+   */
+  start(request: WorkbenchRequest): { runId: string; workspace: string; done: Promise<WorkbenchRun> }
+  /** 老师说一句：下一步读进上下文（返回 false = 这轮不在跑了） */
+  interject(runId: string, text: string): boolean
+  /** 让它在下一步之前停下来 */
+  stop(runId: string): boolean
+  active(): readonly WorkbenchRunState[]
 }
 
 // ── 设置（运行期覆盖层）────────────────────────────────────
@@ -175,7 +207,7 @@ export interface WorkbenchApi {
 
 export interface AppSettings {
   /** 模型：baseUrl 与 model 可改；密钥不在这里（走 ${VAR}） */
-  model: { baseUrl: string; model: string }
+  model: { baseUrl: string; model: string; /** 密钥存在哪个环境变量名下（配置里只放引用名） */ apiKeyEnv: string }
   /** 联网搜索：开关与网关地址 */
   websearch: { enabled: boolean; endpoint: string }
   /** 语料目录（上传的知识库会追加进这里） */
@@ -186,12 +218,54 @@ export interface AppSettings {
   gates: { corpusWordingMax: number; corpusNumbersMin: number; bankMaxSimilarity: number }
 }
 
+/**
+ * 路径化补丁：`{ path: ['model','baseUrl'], value: '...' }`。
+ *
+ * 为什么不是"整体替换"：界面拿到的是**脱敏视图**（密钥字段根本没发出去），
+ * 整体替换会把界面从没见过的密钥一起删掉。写入必须按路径说清改哪一片（照 DSH 的做法）。
+ * `unset: true` 表示删掉这一片（回到装机配置的值）。
+ */
+export interface SettingsOp {
+  path: readonly string[]
+  value?: unknown
+  unset?: boolean
+}
+
 export interface SettingsApi {
   get(): AppSettings
-  /** 局部更新并落盘，返回新值；同时广播 settings:changed */
+  /** 当前修订号：每次写入 +1。界面带旧号写入 = 有人在别处改过 → 明确冲突，不静默覆盖 */
+  revision(): number
+  /** 按路径改并落盘，返回新值；同时广播 settings:changed。修订号对不上抛 SettingsConflict */
+  mutate(ops: readonly SettingsOp[], expectedRevision?: number): AppSettings
+  /** 局部更新（内部用；等价于一组 set 操作） */
   patch(patch: DeepPartial<AppSettings>): AppSettings
   /** 哪些改动需要重启才能生效（诚实标注，不假装全部热更新） */
   restartRequired(): readonly string[]
+  /** 凭据（API 密钥一类）：值**只进不出**，对外只有 describe() */
+  credentials: CredentialsApi
+}
+
+/** 密钥的来源：环境变量（只读）· 本地凭据文件（可改）· 没有 */
+export type CredentialSource = 'env' | 'file' | 'none'
+
+/**
+ * 凭据描述——**故意没有值字段**：密钥只单向流入（DESIGN: DSH 的
+ * "Secret values cross in one direction only"）。界面据此渲染"已配置/未配置"。
+ */
+export interface CredentialInfo {
+  ref: string
+  configured: boolean
+  source: CredentialSource
+  /** 环境变量给的密钥不可从界面改（改了也不算数） */
+  writable: boolean
+}
+
+export interface CredentialsApi {
+  /** 取密钥值——只给服务端自己用（模型客户端、检索），绝不进 HTTP 响应 */
+  get(ref: string): string
+  describe(ref: string): CredentialInfo
+  set(ref: string, value: string): CredentialInfo
+  unset(ref: string): CredentialInfo
 }
 
 export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] }
@@ -212,6 +286,45 @@ export interface KbBatch {
   /** 整理进语料的条数 */
   records: number
   note?: string
+}
+
+// ── 工作区（agent 的手脚）─────────────────────────────────────
+// 一个工作区 = 一个目录：`in/`（原件副本）· `tmp/`（agent 自己写的脚本）· `out/`（产物）。
+// agent 在里面读文件、写脚本、跑 `python3`（venv 优先）与命令行工具，产出中间文件再交给别的工具。
+// **这是可审计，不是沙箱**：脚本落在目录里能被复查，但进程本身没有被隔离（ADR-0020）。
+
+export interface WorkspaceFile {
+  /** 相对工作区根目录的路径 */
+  path: string
+  bytes: number
+  at: string
+}
+
+export interface WorkspaceRun {
+  argv: readonly string[]
+  /** 退出码；被杀掉（超时）时为 null */
+  code: number | null
+  out: string
+  err: string
+  timedOut: boolean
+  ms: number
+}
+
+export interface WorkspaceApi {
+  /** 打开（必要时创建）工作区，返回目录绝对路径与现有文件 */
+  open(name: string): { name: string; path: string; files: readonly WorkspaceFile[] }
+  /** 把外部文件复制进 `in/`（原件只读副本，别在原件上动手） */
+  seed(name: string, sources: readonly string[]): number
+  list(name: string): readonly WorkspaceFile[]
+  /** 分片读（与 kb_read 同一套翻页语义） */
+  read(name: string, relPath: string, offset?: number, limit?: number): { text: string; total: number; next?: number } | undefined
+  write(name: string, relPath: string, text: string): { path: string; bytes: number } | undefined
+  /** 跑一条命令：cwd = 工作区，argv 逐个传参（不过 shell），可执行文件走白名单 */
+  run(name: string, argv: readonly string[], timeoutMs?: number): WorkspaceRun
+  /** 虚拟环境里的 python（没建 venv 时返回 undefined，工具会如实告诉 agent 怎么办） */
+  venvPython(): string | undefined
+  /** 工作区目录（界面要显示"agent 把东西放哪了"）；名字非法时 undefined */
+  dirOf(name: string): string | undefined
 }
 
 export interface KbApi {
@@ -428,5 +541,6 @@ declare module '@deepseek-ai/cordis' {
     session: SessionApi
     settings: SettingsApi
     kb: KbApi
+    workspace: WorkspaceApi
   }
 }

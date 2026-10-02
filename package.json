@@ -25,7 +25,10 @@
     "serve": "bash scripts/serve.sh start",
     "serve:stop": "bash scripts/serve.sh stop",
     "serve:status": "bash scripts/serve.sh status",
-    "ingest": "node bin.js --check-corpus"
+    "ingest": "node bin.js --check-corpus",
+    "venv": "bash scripts/venv.sh",
+    "venv:add": "bash scripts/venv.sh --add",
+    "venv:status": "bash scripts/venv.sh --status"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
@@ -49,7 +52,8 @@
     "@examharness/plugin-verify-symbolic": "workspace:*",
     "@examharness/plugin-web": "workspace:*",
     "@examharness/plugin-websearch": "workspace:*",
-    "@examharness/plugin-workbench": "workspace:*"
+    "@examharness/plugin-workbench": "workspace:*",
+    "@examharness/plugin-workspace": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -1,5 +1,5 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { LlmApi, LlmMessage, LlmReply, LlmToolCall, LlmToolSpec } from '@examharness/core'
+import type { CredentialSource, LlmApi, LlmMessage, LlmReply, LlmToolCall, LlmToolSpec } from '@examharness/core'
 import { expandEnv } from '@examharness/core'
 import z from 'schemastery'
 
@@ -93,20 +93,46 @@ export class LlmService extends Service implements LlmApi {
   static Config = Config
 
   private readonly config: LlmConfig
-  private readonly apiKey: string
+  /** 装机配置里展开出来的密钥（环境变量优先，见 key()） */
+  private readonly configKey: string
 
   constructor(ctx: Context, config: LlmConfig) {
     super(ctx, 'llm')
-    this.apiKey = expandEnv(config.apiKey)
-    this.config = {
-      ...config,
-      baseUrl: expandEnv(config.baseUrl) || 'https://api.openai.com/v1',
-      model: expandEnv(config.model) || 'gpt-4o-mini',
-    }
+    this.configKey = expandEnv(config.apiKey)
+    // 不发明默认地址：没配就是没配——"悄悄打 api.openai.com"会让老师以为系统坏了
+    this.config = { ...config, baseUrl: expandEnv(config.baseUrl), model: expandEnv(config.model) }
+  }
+
+  /**
+   * 密钥：**环境变量 > 本地凭据文件 > 装机配置**（照 DSH 的取值优先级）。
+   * 设置页写的密钥落 data/credentials.json（0600），从不回传给界面（ADR-0022）。
+   */
+  private key(): string {
+    const settings = this.ctx.get('settings')
+    if (settings === undefined) return this.configKey
+    const fromStore = settings.credentials.get(settings.get().model.apiKeyEnv)
+    return fromStore !== '' ? fromStore : this.configKey
   }
 
   get configured(): boolean {
-    return this.apiKey !== ''
+    return this.missing.length === 0
+  }
+
+  /** 还缺什么（界面与工作台照实说，别只说一句"未配置"） */
+  get missing(): readonly string[] {
+    const live = this.effective()
+    return [
+      live.baseUrl === '' ? 'API 地址' : '',
+      this.key() === '' ? '密钥' : '',
+      live.model === '' ? '模型名' : '',
+    ].filter((part) => part !== '')
+  }
+
+  /** 密钥的来源（给状态显示用，不给值） */
+  get source(): CredentialSource {
+    const settings = this.ctx.get('settings')
+    if (settings === undefined) return this.configKey === '' ? 'none' : 'env'
+    return settings.credentials.describe(settings.get().model.apiKeyEnv).source
   }
 
   get model(): string {
@@ -125,11 +151,11 @@ export class LlmService extends Service implements LlmApi {
   }
 
   async chat(messages: readonly LlmMessage[], tools?: readonly LlmToolSpec[]): Promise<LlmReply> {
-    if (!this.configured) throw new Error('未配置模型密钥（EXAMHARNESS_API_KEY）')
+    if (!this.configured) throw new Error('未配置模型密钥：在设置页填，或设环境变量 EXAMHARNESS_API_KEY')
     const active = this.effective()
     const response = await fetch(`${active.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${this.key()}` },
       body: JSON.stringify(buildPayload({ ...this.config, model: active.model }, messages, tools)),
       signal: AbortSignal.timeout(this.config.timeoutMs),
     })
