@@ -44,6 +44,15 @@ function tokenize(source) {
   return source.match(/\d+(?:\.\d+)?|[A-Za-z_]\w*|[+\-*/^()]/g) ?? []
 }
 
+/**
+ * 两个数是不是"同一个数"：**相对容差**，与 core 的 closeEnough、闸门用的是同一套规则。
+ * 绝对容差会把量级大的正确结果判错（真实踩过：1e-9 级别的浮点噪声被判"检验点不成立"）。
+ */
+function closeEnough(left, right, tolerance = 1e-6) {
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return left === right
+  return Math.abs(left - right) <= tolerance * Math.max(1, Math.abs(left), Math.abs(right))
+}
+
 function evaluate(source, variables, maxSteps = 4096, maxExponent = 64) {
   const tokens = tokenize(source)
   let position = 0
@@ -114,12 +123,12 @@ function discriminating(check) {
   } catch (error) {
     return `算不出来：${error.message}`
   }
-  if (Math.abs(baseline - check.expect) > 1e-6) return `对正确参数就不成立（算出 ${baseline}，期望 ${check.expect}）`
+  if (!closeEnough(baseline, check.expect)) return `对正确参数就不成立（算出 ${baseline}，期望 ${check.expect}）`
   for (const [name, value] of Object.entries(check.at)) {
     const delta = Math.abs(value) > 1 ? Math.abs(value) * 0.37 + 0.5 : 0.5
     for (const candidate of [value + delta, value - delta]) {
       try {
-        if (Math.abs(evaluate(check.expr, { ...check.at, [name]: candidate }) - check.expect) > 1e-6) return undefined
+        if (!closeEnough(evaluate(check.expr, { ...check.at, [name]: candidate }), check.expect)) return undefined
       } catch {
         return undefined
       }

@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
-import { evaluateExpression } from '@examharness/core'
+import { evaluateExpression, closeEnough } from '@examharness/core'
 import type { Verdict } from '@examharness/core'
 import z from 'schemastery'
 
@@ -21,7 +21,8 @@ export const evidenceKey = 'symbolic'
 
 export const Config = z.object({
   /** 根的代入误差容忍度 */
-  tolerance: z.number().default(1e-9),
+  /** 相对容差（|a-b| ≤ tol·max(1,|a|,|b|)）：按量级比，别按绝对差比 */
+  tolerance: z.number().default(1e-6),
 })
 
 export interface SymbolicConfig {
@@ -242,7 +243,7 @@ export function apply(ctx: Context, config: SymbolicConfig): void {
       for (const [index, point] of checks.entries()) {
         try {
           const value = evaluateExpression(point.expr, point.at)
-          if (Math.abs(value - point.expect) > config.tolerance) {
+          if (!closeEnough(value, point.expect, config.tolerance)) {
             return {
               pass: false,
               gate: name,

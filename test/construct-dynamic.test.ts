@@ -294,6 +294,38 @@ export function construct(slot, seed) {
 }
 `
 
+/**
+ * 带浮点噪声的检验点（真实被误判过的那种）。
+ * 注意它仍然要满足新的验收要求：**三种结构**（换给定、换问法）——
+ * 这里三个分支都保留"除不尽 → 代入必然带噪声"的检验点。
+ */
+const FLOAT_NOISE_MODULE = `
+export const kind = 'dynamic/float-noise'
+export const covers = ['配方']
+
+export function construct(slot, seed) {
+  const s = Math.abs(Math.round(seed))
+  const k = 1 + (s % 3)
+  const x0 = (1 + (s % 5)) / 7
+  const b = 2 + (s % 4)
+  const y0 = k * x0 + b
+  const shapes = [
+    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_0, y_0)$，求 $y_0$。', givens: ['k = ' + k, 'b = ' + b, 'x_0 = ' + x0], goals: ['求 y_0'] },
+    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_0, y_0)$，判断它是否经过点 $(0, ' + (y0 + 1) + ')$。', givens: ['k = ' + k, 'x_0 = ' + x0, 'b = ' + b], goals: ['判断是否经过给定点', '说明理由'] },
+    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_0, y_0)$ 和原点，求 $y_0$。', givens: ['图象经过原点', 'x_0 = ' + x0, 'k = ' + k], goals: ['求 y_0', '求这个一次函数的解析式'] },
+  ]
+  const shape = shapes[s % 3]
+  return {
+    params: { k, x0, b, y0 },
+    stem: shape.stem,
+    answer: 'y_0 = ' + y0,
+    givens: shape.givens,
+    goals: shape.goals,
+    checks: [{ expr: 'k*x0 + b - y0', at: { k, x0, b, y0 }, expect: 0 }],
+  }
+}
+`
+
 async function boot(): Promise<Context> {
   const ctx = new Context()
   ctx.baseUrl = pathToFileURL(ROOT).href
@@ -301,7 +333,7 @@ async function boot(): Promise<Context> {
     await ctx.plugin(graphPlugin, { path: 'seed/knowledge.json', learned: LEARNED }),
     await ctx.plugin(bankPlugin, { path: join(workdir, 'bank.jsonl') }),
     await ctx.plugin(scopePlugin, { forbid: [] }),
-    await ctx.plugin(symbolicPlugin, { tolerance: 1e-9 }),
+    await ctx.plugin(symbolicPlugin, { tolerance: 1e-6 }),
     await ctx.plugin(dedupPlugin, { maxSimilarity: 0.85, corpusWordingMax: 0.55, corpusNumbersMin: 0.8 }),
     await ctx.plugin(figurePlugin, { width: 480, height: 300, minPointGapPx: 14 }),
     await ctx.plugin(figureGate, { requireFigure: false }),
@@ -462,5 +494,22 @@ describe('agent 在运行时制作新题型', () => {
     expect(mine?.ok).toBe(false)
     expect(mine?.problems.join(' ')).toContain('确定性')
     expect(ctx.construct.kinds()).not.toContain('dynamic/random')
+  })
+  it('检验点的浮点噪声（1e-9 量级）不判错——按相对容差比，别按绝对差比', async () => {
+    // 真实被拦的例子：`ks*x0 + b` 算出 1.000000082740371e-9、期望 0，
+    // 绝对容差 1e-9 差一点点就判"检验点不成立"——那是量级噪声，不是数学错。
+    writeModule('float-noise', FLOAT_NOISE_MODULE)
+    const ctx = await boot()
+    const reports = await ctx.constructDynamic.loadAll()
+    const mine = reports.find((report) => report.kind === 'dynamic/float-noise')
+    expect(mine?.ok ? 'ok' : JSON.stringify(mine?.problems)).toBe('ok')
+
+    // 关键一步：**过闸门**（用户看到的报错是闸门给的，不是验收给的）
+    const item = ctx.construct.generate(
+      { key: 'Z6', knowledge: ['配方'], cognitive: '掌握', type: '解答', difficulty: [0.6, 0.85], score: 4, count: 1 },
+      7,
+    )
+    const result = await ctx.bank.submit(item)
+    expect(result.ok ? 'ok' : JSON.stringify(result.verdict)).toBe('ok')
   })
 })

@@ -92,7 +92,7 @@
 - id: verify-symbolic
   name: '@examharness/plugin-verify-symbolic'
   config:
-    tolerance: 1.0e-9
+    tolerance: 1.0e-6
 
 - id: verify-dedup
   name: '@examharness/plugin-verify-dedup'

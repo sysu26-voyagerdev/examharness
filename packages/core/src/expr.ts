@@ -121,19 +121,32 @@ function tokenize(source: string): string[] {
 }
 
 /**
+ * 两个数是不是"同一个数"：用**相对容差**。
+ *
+ * 为什么不能用绝对容差：`ks*x0 + b` 与构造函数各自算一遍，浮点误差是**与量级成比例**的。
+ * 真实踩过：`1.000000082740371e-9` 与期望的 0 差了一个绝对 1e-9 的阈值，
+ * 于是一道完全正确的题被判"检验点不成立"。判据要按数学事实，别按浮点外观。
+ */
+export function closeEnough(left: number, right: number, tolerance = 1e-6): boolean {
+  if (!Number.isFinite(left) || !Number.isFinite(right)) return left === right
+  const scale = Math.max(1, Math.abs(left), Math.abs(right))
+  return Math.abs(left - right) <= tolerance * scale
+}
+
+/**
  * 检验点是否**真的在检验**：把参数或答案动一点点，它必须失败。
  *
  * 这是框架侧、与题型无关的对抗性检查——它抓的是"写了个永远成立的检验点"
  * （比如 `1 = 1`）。没有这一条，"声明式检验点"就退化成自证。
  */
-export function checkPointIsDiscriminating(check: CheckPoint, tolerance = 1e-9): { ok: boolean; reason?: string } {
+export function checkPointIsDiscriminating(check: CheckPoint, tolerance = 1e-6): { ok: boolean; reason?: string } {
   let baseline: number
   try {
     baseline = evaluateExpression(check.expr, check.at)
   } catch (error) {
     return { ok: false, reason: `检验点本身算不出来：${error instanceof Error ? error.message : String(error)}` }
   }
-  if (Math.abs(baseline - check.expect) > tolerance) {
+  if (!closeEnough(baseline, check.expect, tolerance)) {
     return { ok: false, reason: `检验点对正确参数就不成立：算出 ${String(baseline)}，期望 ${String(check.expect)}` }
   }
 
@@ -144,7 +157,7 @@ export function checkPointIsDiscriminating(check: CheckPoint, tolerance = 1e-9):
     for (const candidate of [value + delta, value - delta]) {
       try {
         const moved = evaluateExpression(check.expr, { ...check.at, [name]: candidate })
-        if (Math.abs(moved - check.expect) > 1e-6) return { ok: true }
+        if (!closeEnough(moved, check.expect, tolerance)) return { ok: true }
       } catch {
         // 扰动后算不出来（比如除零）也算"检验点会失败"
         return { ok: true }

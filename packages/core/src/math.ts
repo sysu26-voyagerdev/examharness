@@ -1,5 +1,6 @@
 import katex from 'katex'
 import { normalize } from './json.js'
+import { closeEnough } from './expr.js'
 
 /**
  * 数学的**唯一渲染口**：LaTeX 进，MathML 出。
@@ -74,6 +75,56 @@ export function texToHtml(tex: string, display = true): string {
  * 把一段**混着数学的正文**渲染成 HTML：`$...$` 变 MathML，其余原样转义。
  * 模型写的题面就走这条路——它只负责在句子里放 `$...$`，数学本体来自构造。
  */
+/**
+ * 答案的"值签名"：把一段答案文字里的**数**取出来（分数按值算），字母序列单独取。
+ *
+ * 为什么要它：答案是人写的，同一个人不同次写出来也会不一样——
+ * `（1）平均数 = 6；（2）中位数 = 5.5` 与 `平均数 = 6；中位数 = 5.5` 是同一个答案，
+ * 带不带分问序号、带不带名称，都不该影响判定。**比的是数学事实，不是字符串。**
+ */
+export function answerValues(text: string): readonly number[] {
+  // 先剥掉分问序号（（1）(1)①第1问）——那是排版，不是答案的一部分
+  const clean = text
+    .replace(/[（(]\s*\d+\s*[)）]/g, ' ')
+    .replace(/第\s*\d+\s*问/g, ' ')
+    .replace(/[①-⑳]/g, ' ')
+  const values: number[] = []
+  // 分数（3/4）与小数、整数都算"数"
+  for (const match of clean.matchAll(/(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)|(-?\d+(?:\.\d+)?)/g)) {
+    if (match[1] !== undefined && match[2] !== undefined) {
+      const denominator = Number(match[2])
+      if (denominator !== 0) values.push(Number(match[1]) / denominator)
+      continue
+    }
+    if (match[3] !== undefined) values.push(Number(match[3]))
+  }
+  return values.toSorted((a, b) => a - b)
+}
+
+/** 答案里的字母/字母组合（x、y、AB、S、△ABC 都算）：判定"问的是不是同一类量" */
+export function answerLetters(text: string): readonly string[] {
+  return [...new Set((text.match(/[A-Za-z]+/g) ?? []).map((token) => token.toLowerCase()))].toSorted()
+}
+
+/**
+ * 两个答案是不是同一个答案：
+ *   1. **数值多重集**必须一致（容差比较，顺序无关）；
+ *   2. 构造侧的字母必须都出现在另一边（标签、名称、多写的量都不影响）。
+ * 反例（会被判不同）：`x = 2` vs `x = 3`（数值不同）；`5/12` vs `5/13`。
+ */
+export function sameAnswer(constructed: string, parsed: string, tolerance = 1e-6): boolean {
+  const left = answerValues(constructed)
+  const right = answerValues(parsed)
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index]
+    const b = right[index]
+    if (a === undefined || b === undefined || !closeEnough(a, b, tolerance)) return false
+  }
+  const letters = new Set(answerLetters(parsed))
+  return answerLetters(constructed).every((token) => letters.has(token))
+}
+
 /**
  * 一段文字里的数学片段（`$...$` / `$$...$$` 的内容）。
  * 闸门用它做两件事：**编译都过**、**公式里的数字都来自构造**——

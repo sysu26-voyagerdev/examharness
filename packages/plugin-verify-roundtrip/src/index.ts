@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Item, Verdict } from '@examharness/core'
-import { checkTex, mathSegments, normalize, numbers, parseJsonObject } from '@examharness/core'
+import { checkTex, mathSegments, normalize, numbers, parseJsonObject, sameAnswer } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -125,17 +125,16 @@ function bestGoalScore(instanceGoal: string, parsedGoals: readonly string[]): nu
 }
 
 /**
- * 答案是否一致：字面一致、**数值一致**、或"构造答案是回译答案的一部分"（「12」⊂「圆心 O 到弦 AB 的距离 = 12」）。
- * 老师看的是答案对不对，不是标注写没写。
+ * 答案是否一致：**按值比，不按字符串比**（`sameAnswer` 在 core 里，验收脚本用的是同一套规则）。
+ * 分问序号（（1）（2））、名称（"平均数 ="）、分隔符、书写顺序都不影响判定；
+ * 数值不同（`x = 2` vs `x = 3`）、分数不同（`5/12` vs `5/13`）照样拦下。
  */
 function answerMatches(constructed: string, parsed: string): boolean {
+  if (sameAnswer(constructed, parsed)) return true
+  // 兜底：字面包含（"12" ⊂ "…= 12"）或高度相似，视作同一答案
   const a = normalize(constructed)
   const b = normalize(parsed)
-  if (a === b || b.includes(a) || a.includes(b)) return true
-  const left = [...numbers(a)].toSorted().join(',')
-  const right = [...numbers(b)].toSorted().join(',')
-  if (left !== '' && left === right) return true
-  return similarText(a, b) >= 0.8
+  return a === b || b.includes(a) || similarText(a, b) >= 0.8
 }
 
 /** 构造侧声明的"问几问"：优先用分条的 goals，退回单条 goal */

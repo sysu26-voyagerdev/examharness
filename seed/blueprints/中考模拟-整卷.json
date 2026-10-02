@@ -7,18 +7,6 @@
   },
   "blueprint": [
     {
-      "key": "S1",
-      "knowledge": [
-        "实数与二次根式"
-      ],
-      "cognitive": "了解",
-      "type": "选择",
-      "count": 1,
-      "difficulty": [
-        0.85,
-        0.98
-      ],
-      "score": 3,
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 61,
@@ -32,12 +20,11 @@
           "实数与二次根式"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S2",
+      },
+      "knowledgeText": "实数与二次根式",
+      "key": "S1",
       "knowledge": [
-        "整式与因式分解"
+        "实数与二次根式"
       ],
       "cognitive": "了解",
       "type": "选择",
@@ -46,7 +33,9 @@
         0.85,
         0.98
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 74,
@@ -61,21 +50,22 @@
           "整式与因式分解"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S3",
+      },
+      "knowledgeText": "整式与因式分解",
+      "key": "S2",
       "knowledge": [
-        "四边形与特殊平行四边形"
+        "整式与因式分解"
       ],
-      "cognitive": "理解",
+      "cognitive": "了解",
       "type": "选择",
       "count": 1,
       "difficulty": [
         0.85,
         0.98
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 76,
@@ -90,21 +80,22 @@
           "四边形与特殊平行四边形"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S4",
+      },
+      "knowledgeText": "四边形与特殊平行四边形",
+      "key": "S3",
       "knowledge": [
-        "圆的性质"
+        "四边形与特殊平行四边形"
       ],
       "cognitive": "理解",
       "type": "选择",
       "count": 1,
       "difficulty": [
-        0.7,
-        0.9
+        0.85,
+        0.98
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 73,
@@ -119,12 +110,11 @@
           "圆的性质"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S5",
+      },
+      "knowledgeText": "圆的性质",
+      "key": "S4",
       "knowledge": [
-        "锐角三角函数"
+        "圆的性质"
       ],
       "cognitive": "理解",
       "type": "选择",
@@ -133,7 +123,9 @@
         0.7,
         0.9
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 74,
@@ -148,21 +140,22 @@
           "锐角三角函数"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S6",
+      },
+      "knowledgeText": "锐角三角函数",
+      "key": "S5",
       "knowledge": [
-        "一元二次方程"
+        "锐角三角函数"
       ],
-      "cognitive": "掌握",
+      "cognitive": "理解",
       "type": "选择",
       "count": 1,
       "difficulty": [
         0.7,
         0.9
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 70,
@@ -177,21 +170,22 @@
           "一元二次方程"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S7",
+      },
+      "knowledgeText": "一元二次方程",
+      "key": "S6",
       "knowledge": [
-        "相似三角形"
+        "一元二次方程"
       ],
       "cognitive": "掌握",
       "type": "选择",
       "count": 1,
       "difficulty": [
-        0.55,
-        0.8
+        0.7,
+        0.9
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 72,
@@ -206,21 +200,22 @@
           "相似三角形"
         ],
         "note": "可构造：相似比与线段计算，答案可代入核对"
-      }
-    },
-    {
-      "key": "S8",
+      },
+      "knowledgeText": "相似三角形",
+      "key": "S7",
       "knowledge": [
-        "反比例函数"
+        "相似三角形"
       ],
-      "cognitive": "运用",
+      "cognitive": "掌握",
       "type": "选择",
       "count": 1,
       "difficulty": [
         0.55,
         0.8
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 69,
@@ -235,21 +230,22 @@
           "反比例函数"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S9",
+      },
+      "knowledgeText": "反比例函数",
+      "key": "S8",
       "knowledge": [
-        "对称轴"
+        "反比例函数"
       ],
       "cognitive": "运用",
       "type": "选择",
       "count": 1,
       "difficulty": [
-        0.35,
-        0.6
+        0.55,
+        0.8
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 54,
@@ -264,12 +260,11 @@
           "对称轴"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S10",
+      },
+      "knowledgeText": "对称轴",
+      "key": "S9",
       "knowledge": [
-        "顶点式"
+        "对称轴"
       ],
       "cognitive": "运用",
       "type": "选择",
@@ -278,7 +273,9 @@
         0.35,
         0.6
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 61,
@@ -293,21 +290,22 @@
           "顶点式"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S11",
+      },
+      "knowledgeText": "顶点式",
+      "key": "S10",
       "knowledge": [
-        "统计与概率"
+        "顶点式"
       ],
-      "cognitive": "了解",
-      "type": "填空",
+      "cognitive": "运用",
+      "type": "选择",
       "count": 1,
       "difficulty": [
-        0.75,
-        0.92
+        0.35,
+        0.6
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 78,
@@ -322,21 +320,22 @@
           "统计与概率"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S12",
+      },
+      "knowledgeText": "统计与概率",
+      "key": "S11",
       "knowledge": [
-        "与坐标轴交点"
+        "统计与概率"
       ],
-      "cognitive": "理解",
+      "cognitive": "了解",
       "type": "填空",
       "count": 1,
       "difficulty": [
         0.75,
         0.92
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 74,
@@ -351,21 +350,22 @@
           "与坐标轴交点"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S13",
+      },
+      "knowledgeText": "与坐标轴交点",
+      "key": "S12",
       "knowledge": [
-        "一元二次方程"
+        "与坐标轴交点"
       ],
       "cognitive": "理解",
       "type": "填空",
       "count": 1,
       "difficulty": [
-        0.55,
-        0.8
+        0.75,
+        0.92
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 71,
@@ -380,21 +380,22 @@
           "一元二次方程"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S14",
+      },
+      "knowledgeText": "一元二次方程",
+      "key": "S13",
       "knowledge": [
-        "三角形与全等"
+        "一元二次方程"
       ],
-      "cognitive": "掌握",
+      "cognitive": "理解",
       "type": "填空",
       "count": 1,
       "difficulty": [
         0.55,
         0.8
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 74,
@@ -409,21 +410,22 @@
           "三角形与全等"
         ],
         "note": "证明题：没有可代入核对的答案，**不该硬造题型**"
-      }
-    },
-    {
-      "key": "S15",
+      },
+      "knowledgeText": "三角形与全等",
+      "key": "S14",
       "knowledge": [
-        "圆的性质"
+        "三角形与全等"
       ],
-      "cognitive": "运用",
+      "cognitive": "掌握",
       "type": "填空",
       "count": 1,
       "difficulty": [
-        0.35,
-        0.6
+        0.55,
+        0.8
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 64,
@@ -438,12 +440,11 @@
           "圆的性质"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S16",
+      },
+      "knowledgeText": "圆的性质",
+      "key": "S15",
       "knowledge": [
-        "规律与代数推理"
+        "圆的性质"
       ],
       "cognitive": "运用",
       "type": "填空",
@@ -452,7 +453,9 @@
         0.35,
         0.6
       ],
-      "score": 3,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 52,
@@ -467,21 +470,22 @@
           "规律与代数推理"
         ],
         "note": "可构造：数列/图形规律，答案可用通项公式核对"
-      }
-    },
-    {
-      "key": "S17",
+      },
+      "knowledgeText": "规律与代数推理",
+      "key": "S16",
       "knowledge": [
-        "实数与二次根式"
+        "规律与代数推理"
       ],
-      "cognitive": "了解",
-      "type": "解答",
+      "cognitive": "运用",
+      "type": "填空",
       "count": 1,
       "difficulty": [
-        0.75,
-        0.9
+        0.35,
+        0.6
       ],
-      "score": 9,
+      "score": 3
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 108,
@@ -496,21 +500,22 @@
           "实数与二次根式"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S18",
+      },
+      "knowledgeText": "实数与二次根式",
+      "key": "S17",
       "knowledge": [
-        "统计与概率"
+        "实数与二次根式"
       ],
       "cognitive": "了解",
       "type": "解答",
       "count": 1,
       "difficulty": [
-        0.6,
-        0.82
+        0.75,
+        0.9
       ],
-      "score": 9,
+      "score": 9
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 104,
@@ -525,21 +530,22 @@
           "统计与概率"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S19",
+      },
+      "knowledgeText": "统计与概率",
+      "key": "S18",
       "knowledge": [
-        "整式与因式分解"
+        "统计与概率"
       ],
-      "cognitive": "理解",
+      "cognitive": "了解",
       "type": "解答",
       "count": 1,
       "difficulty": [
         0.6,
         0.82
       ],
-      "score": 9,
+      "score": 9
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 82,
@@ -554,12 +560,11 @@
           "整式与因式分解"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S20",
+      },
+      "knowledgeText": "整式与因式分解",
+      "key": "S19",
       "knowledge": [
-        "一次函数"
+        "整式与因式分解"
       ],
       "cognitive": "理解",
       "type": "解答",
@@ -568,7 +573,9 @@
         0.6,
         0.82
       ],
-      "score": 9,
+      "score": 9
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 72,
@@ -583,21 +590,22 @@
           "一次函数"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S21",
+      },
+      "knowledgeText": "一次函数",
+      "key": "S20",
       "knowledge": [
-        "四边形与证明"
+        "一次函数"
       ],
-      "cognitive": "掌握",
+      "cognitive": "理解",
       "type": "解答",
       "count": 1,
       "difficulty": [
-        0.45,
-        0.7
+        0.6,
+        0.82
       ],
-      "score": 9,
+      "score": 9
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 72,
@@ -612,12 +620,11 @@
           "四边形与证明"
         ],
         "note": "证明题：同上"
-      }
-    },
-    {
-      "key": "S22",
+      },
+      "knowledgeText": "四边形与证明",
+      "key": "S21",
       "knowledge": [
-        "对称轴"
+        "四边形与证明"
       ],
       "cognitive": "掌握",
       "type": "解答",
@@ -626,7 +633,9 @@
         0.45,
         0.7
       ],
-      "score": 9,
+      "score": 9
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 69,
@@ -641,21 +650,22 @@
           "对称轴"
         ],
         "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
-    },
-    {
-      "key": "S23",
+      },
+      "knowledgeText": "对称轴",
+      "key": "S22",
       "knowledge": [
-        "二次函数综合"
+        "对称轴"
       ],
-      "cognitive": "运用",
+      "cognitive": "掌握",
       "type": "解答",
       "count": 1,
       "difficulty": [
-        0.3,
-        0.55
+        0.45,
+        0.7
       ],
-      "score": 9,
+      "score": 9
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 60,
@@ -670,21 +680,22 @@
           "二次函数综合"
         ],
         "note": "可构造：抛物线与直线交点、面积，答案可代入核对"
-      }
-    },
-    {
-      "key": "S24",
+      },
+      "knowledgeText": "二次函数综合",
+      "key": "S23",
       "knowledge": [
-        "圆与切线"
+        "二次函数综合"
       ],
-      "cognitive": "运用",
+      "cognitive": "灵活运用",
       "type": "解答",
       "count": 1,
       "difficulty": [
-        0.15,
-        0.4
+        0.3,
+        0.55
       ],
-      "score": 9,
+      "score": 9
+    },
+    {
       "_evidence": {
         "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
         "supportPapers": 48,
@@ -699,23 +710,25 @@
           "圆与切线"
         ],
         "note": "证明题：同上"
-      }
+      },
+      "knowledgeText": "圆与切线",
+      "key": "S24",
+      "knowledge": [
+        "圆与切线"
+      ],
+      "cognitive": "灵活运用",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.15,
+        0.4
+      ],
+      "score": 9
     }
   ],
   "constraints": {
     "forbidKnowledge": [
       "动点问题"
     ]
-  },
-  "meta": {
-    "source": "data/zhenti/suggested-blueprint.json（scripts/zhenti_stats.py 生成）",
-    "basis": {
-      "paperCount": 183,
-      "sameScorePapers": 81,
-      "structureSupport": 15,
-      "structure": "选择10题 + 填空6题 + 解答8题",
-      "structureSamples": 15
-    },
-    "mapping": "课标领域 → 构造器能认的知识点（DOMAIN_TO_KNOWLEDGE）"
   }
 }

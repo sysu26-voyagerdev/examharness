@@ -358,4 +358,56 @@ describe('回译闸门', () => {
     expect(verdict?.gate).toBe('verify-roundtrip')
     expect(verdict?.reason).toContain('答案不一致')
   })
+  it('答案带分问序号/名称不算错：同一个答案换个写法必须放行（真实被拦的例子）', async () => {
+    // 界面上真实被拦下的一对：
+    //   回译得到「平均数 = 6；中位数 = 5.5；众数 = 6」
+    //   构造答案是「（1）平均数 = 6；（2）中位数 = 5.5；（3）众数 = 6」
+    // 这是同一个答案。判定必须比**值**，不比字符串（见 core 的 sameAnswer）。
+    const ctx = await boot(
+      brain({
+        serialize: false,
+        parse: () => ({
+          goals: ['求这组数据的平均数', '求这组数据的中位数', '求这组数据的众数'],
+          givensCount: 1,
+          answer: '平均数 = 6；中位数 = 5.5；众数 = 6',
+          numbers: [],
+        }),
+      }),
+    )
+    const base = ctx.construct.generate({ ...SLOT, key: 'S18-1', count: 1 }, SEED)
+    const item: Item = {
+      ...base,
+      instance: {
+        ...base.instance,
+        goal: '求平均数 求中位数 求众数',
+        goals: ['求这组数据的平均数', '求这组数据的中位数', '求这组数据的众数'],
+        givens: ['一组数据'],
+      },
+      witness: { ...base.witness, answer: '（1）平均数 = 6；（2）中位数 = 5.5；（3）众数 = 6' },
+      prose: { ...base.prose, serializer: { model: 'fake-writer', version: 1 } },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok ? 'ok' : JSON.stringify(result.verdict)).toBe('ok')
+  })
+
+  it('分数换个写法（5/12 与 5/13）不算同一个答案 → 照样拦', async () => {
+    const ctx = await boot(
+      brain({
+        serialize: false,
+        parse: () => ({ goals: ['求对称轴'], givensCount: 3, answer: '5/13', numbers: [] }),
+      }),
+    )
+    const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
+    const item: Item = {
+      ...base,
+      instance: { ...base.instance, goal: '求对称轴', goals: ['求对称轴'], givens: ['a', 'b', 'c'] },
+      witness: { ...base.witness, answer: '5/12' },
+      prose: { ...base.prose, serializer: { model: 'fake-writer', version: 1 } },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok).toBe(false)
+    expect(result.ok ? '' : result.verdict.reason).toContain('答案不一致')
+  })
 })
