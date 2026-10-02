@@ -1,0 +1,351 @@
+{
+  "paper": {
+    "title": "中考数学模拟卷",
+    "totalScore": 120,
+    "minutes": 120,
+    "className": "初三(2)班"
+  },
+  "blueprint": [
+    {
+      "key": "X1",
+      "knowledge": [
+        "实数与二次根式"
+      ],
+      "cognitive": "理解",
+      "type": "选择",
+      "count": 1,
+      "difficulty": [
+        0.45,
+        0.7
+      ],
+      "score": 3
+    },
+    {
+      "key": "X2",
+      "knowledge": [
+        "整式与因式分解"
+      ],
+      "cognitive": "掌握",
+      "type": "选择",
+      "count": 1,
+      "difficulty": [
+        0.45,
+        0.7
+      ],
+      "score": 3
+    },
+    {
+      "key": "X3",
+      "knowledge": [
+        "一元二次方程"
+      ],
+      "cognitive": "掌握",
+      "type": "选择",
+      "count": 1,
+      "difficulty": [
+        0.45,
+        0.7
+      ],
+      "score": 3
+    },
+    {
+      "key": "X4",
+      "knowledge": [
+        "对称轴"
+      ],
+      "cognitive": "理解",
+      "type": "选择",
+      "count": 1,
+      "difficulty": [
+        0.45,
+        0.7
+      ],
+      "score": 3
+    },
+    {
+      "key": "X5",
+      "knowledge": [
+        "反比例函数"
+      ],
+      "cognitive": "理解",
+      "type": "选择",
+      "count": 1,
+      "difficulty": [
+        0.45,
+        0.7
+      ],
+      "score": 3
+    },
+    {
+      "key": "X6",
+      "knowledge": [
+        "三角形与全等"
+      ],
+      "cognitive": "掌握",
+      "type": "选择",
+      "count": 1,
+      "difficulty": [
+        0.45,
+        0.7
+      ],
+      "score": 3
+    },
+    {
+      "key": "X7",
+      "knowledge": [
+        "四边形与特殊平行四边形"
+      ],
+      "cognitive": "掌握",
+      "type": "选择",
+      "count": 1,
+      "difficulty": [
+        0.45,
+        0.7
+      ],
+      "score": 3
+    },
+    {
+      "key": "X8",
+      "knowledge": [
+        "圆的性质"
+      ],
+      "cognitive": "理解",
+      "type": "选择",
+      "count": 1,
+      "difficulty": [
+        0.45,
+        0.7
+      ],
+      "score": 3
+    },
+    {
+      "key": "X9",
+      "knowledge": [
+        "统计与概率"
+      ],
+      "cognitive": "理解",
+      "type": "选择",
+      "count": 1,
+      "difficulty": [
+        0.45,
+        0.7
+      ],
+      "score": 3
+    },
+    {
+      "key": "X10",
+      "knowledge": [
+        "顶点式"
+      ],
+      "cognitive": "掌握",
+      "type": "选择",
+      "count": 1,
+      "difficulty": [
+        0.45,
+        0.7
+      ],
+      "score": 3
+    },
+    {
+      "key": "T1",
+      "knowledge": [
+        "与坐标轴交点"
+      ],
+      "cognitive": "理解",
+      "type": "填空",
+      "count": 1,
+      "difficulty": [
+        0.5,
+        0.8
+      ],
+      "score": 3
+    },
+    {
+      "key": "T2",
+      "knowledge": [
+        "一元一次不等式"
+      ],
+      "cognitive": "掌握",
+      "type": "填空",
+      "count": 1,
+      "difficulty": [
+        0.5,
+        0.8
+      ],
+      "score": 3
+    },
+    {
+      "key": "T3",
+      "knowledge": [
+        "相似三角形"
+      ],
+      "cognitive": "掌握",
+      "type": "填空",
+      "count": 1,
+      "difficulty": [
+        0.5,
+        0.8
+      ],
+      "score": 3
+    },
+    {
+      "key": "T4",
+      "knowledge": [
+        "锐角三角函数"
+      ],
+      "cognitive": "理解",
+      "type": "填空",
+      "count": 1,
+      "difficulty": [
+        0.5,
+        0.8
+      ],
+      "score": 3
+    },
+    {
+      "key": "T5",
+      "knowledge": [
+        "对称轴"
+      ],
+      "cognitive": "掌握",
+      "type": "填空",
+      "count": 1,
+      "difficulty": [
+        0.5,
+        0.8
+      ],
+      "score": 3
+    },
+    {
+      "key": "T6",
+      "knowledge": [
+        "规律与代数推理"
+      ],
+      "cognitive": "灵活运用",
+      "type": "填空",
+      "count": 1,
+      "difficulty": [
+        0.5,
+        0.8
+      ],
+      "score": 3
+    },
+    {
+      "key": "J8",
+      "knowledge": [
+        "二次函数综合"
+      ],
+      "cognitive": "灵活运用",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.8,
+        0.95
+      ],
+      "score": 10
+    },
+    {
+      "key": "J1",
+      "knowledge": [
+        "实数运算与化简求值"
+      ],
+      "cognitive": "掌握",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.6,
+        0.9
+      ],
+      "score": 8
+    },
+    {
+      "key": "J2",
+      "knowledge": [
+        "一元二次方程"
+      ],
+      "cognitive": "掌握",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.6,
+        0.9
+      ],
+      "score": 8
+    },
+    {
+      "key": "J3",
+      "knowledge": [
+        "统计与概率"
+      ],
+      "cognitive": "掌握",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.6,
+        0.9
+      ],
+      "score": 8
+    },
+    {
+      "key": "J4",
+      "knowledge": [
+        "与坐标轴交点"
+      ],
+      "cognitive": "掌握",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.6,
+        0.9
+      ],
+      "score": 9
+    },
+    {
+      "key": "J5",
+      "knowledge": [
+        "四边形与证明"
+      ],
+      "cognitive": "掌握",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.6,
+        0.9
+      ],
+      "score": 9
+    },
+    {
+      "key": "J6",
+      "knowledge": [
+        "圆与切线"
+      ],
+      "cognitive": "灵活运用",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.6,
+        0.9
+      ],
+      "score": 10
+    },
+    {
+      "key": "J7",
+      "knowledge": [
+        "顶点式"
+      ],
+      "cognitive": "灵活运用",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.6,
+        0.9
+      ],
+      "score": 10
+    }
+  ],
+  "constraints": {
+    "forbidKnowledge": [
+      "动点问题"
+    ]
+  }
+}

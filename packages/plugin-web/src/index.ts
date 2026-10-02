@@ -226,6 +226,15 @@ function slotProgressOf(ctx: Context, blueprint: Blueprint): { key: string; know
   })
 }
 
+/** 把库里所有资料铺进工作区（会话没绑定某一批时的兜底） */
+function seedAllKb(ctx: Context, workspaceName: string): number | undefined {
+  const batches = ctx.kb.list()
+  if (batches.length === 0) return undefined
+  const paths = batches.flatMap((batch) => [...ctx.kb.sourcePaths(batch.id)])
+  if (paths.length === 0) return undefined
+  return ctx.workspace.seedLinks(workspaceName, paths)
+}
+
 function briefOf(ctx: Context, blueprint: Blueprint): string {
   const progress = slotProgressOf(ctx, blueprint)
   const missing = progress.filter((slot) => slot.have < slot.want)
@@ -241,7 +250,11 @@ function briefOf(ctx: Context, blueprint: Blueprint): string {
     `本卷禁用：${blueprint.constraints.forbidKnowledge.join('、') || '无'}`,
     batches.length === 0
       ? '资料：还没有导入任何资料（没有可参考的真实题，查重只对自家题库）'
-      : `资料：${batches.map((batch) => `${batch.name}（${batch.status === 'indexed' ? `${String(batch.records)} 条` : '未整理'}，${String(batch.files.length)} 份文件）`).join('；')}`,
+      : [
+          `资料：${batches.map((batch) => `${batch.name}（${batch.status === 'indexed' ? `${String(batch.records)} 条` : '未整理'}，${String(batch.files.length)} 份文件）`).join('；')}`,
+          '资料文件已经铺在工作区的 in/ 里（ws_ls 看清单）；PDF 多半是扫描件：',
+          '先 doc_extract 整份读成文字（会自动 OCR，结果落在 out/extract/），再按需要 ws_grep / ws_read 取用。',
+        ].join('\n'),
   ]
   return lines.join('\n')
 }
@@ -399,7 +412,9 @@ export function apply(ctx: Context, config: WebConfig): void {
       const body = (await readBody(req)) as { goal?: string; brief?: boolean }
       // 主 agent 也在工作区里干活：会话若绑了知识库，就把那批原件铺进 in/（副本，原件不动）
       const meta = ctx.session.current()
-      const seeded = seedFromKb(ctx, meta.id, meta.kbId)
+      // 资料要**看得见**：优先用会话绑定的那批；没绑就把库里的资料都铺进来
+      // （以前只在整理资料时才铺，结果主 agent 的工作区是空的，"我传的资料呢"就是这么来的）
+      const seeded = seedFromKb(ctx, meta.id, meta.kbId) ?? seedAllKb(ctx, meta.id)
       try {
         const brief = briefOf(ctx, blueprint)
         const started = ctx.workbench.start({
