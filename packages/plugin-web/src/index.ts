@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
+import { renderMathInText, texToMathml } from '@examharness/core'
 import type { Blueprint, BlueprintRow, Item, SessionMeta, SettingsOp } from '@examharness/core'
 import z from 'schemastery'
 
@@ -88,19 +89,25 @@ function sessionView(
       bindings: version.bindings,
     })),
     diff: ctx.session.diff(),
+    // 会话记录：老师说的、agent 做的、闸门判的，按时间排好（刷新页面不丢）
+    log: ctx.session.log(),
   }
 }
 
-/** 导出为 HTML（Word 能直接打开；图内嵌，公式以原文呈现） */
+/** 导出为 HTML（Word 能直接打开；图内嵌，公式是 MathML——Word 与浏览器都认） */
 export function renderPaperHtml(meta: SessionMeta, items: readonly Item[], figureOf: (item: Item) => string): string {
   const rows = items
     .map((item, index) => {
-      const options = (item.prose.options ?? []).map((option) => `${option.key}. ${option.text}`).join('　　')
+      const options = (item.prose.options ?? [])
+        .map((option) => `${option.key}. ${renderMathInText(option.text)}`)
+        .join('　　')
       const figure = figureOf(item)
+      const stemTex = item.prose.tex?.stem
       return [
         `<div class="q">`,
         `<div class="head"><b>${String(index + 1)}.</b>（${item.slot.type}，${String(item.slot.score)} 分）</div>`,
-        `<div class="stem">${item.prose.stem}</div>`,
+        `<div class="stem">${renderMathInText(item.prose.stem)}</div>`,
+        stemTex === undefined ? '' : `<div class="formula">${texToMathml(stemTex)}</div>`,
         options === '' ? '' : `<div class="opts">${options}</div>`,
         figure === '' ? '' : `<div class="fig">${figure}</div>`,
         `</div>`,
@@ -111,8 +118,11 @@ export function renderPaperHtml(meta: SessionMeta, items: readonly Item[], figur
   const answers = items
     .map(
       (item, index) =>
-        `<div class="a"><b>${String(index + 1)}.</b> ${item.prose.answerText}<ol>${item.prose.solution
-          .map((step) => `<li>${step}</li>`)
+        `<div class="a"><b>${String(index + 1)}.</b> ${renderMathInText(item.prose.answerText)}<ol>${item.prose.solution
+          .map((step, stepIndex) => {
+            const tex = item.prose.tex?.solution?.[stepIndex]
+            return `<li>${renderMathInText(step)}${tex === undefined ? '' : `<div class="formula">${texToMathml(tex)}</div>`}</li>`
+          })
           .join('')}</ol></div>`,
     )
     .join('\n')
@@ -227,15 +237,36 @@ export function apply(ctx: Context, config: WebConfig): void {
     for (const client of clients) client.write(payload)
   }
 
-  ctx.on('item:stored', ({ item }) => broadcast('stored', summarize(item)))
-  ctx.on('item:confirmed', ({ item, by }) => broadcast('confirmed', { ...summarize(item), by }))
-  ctx.on('run:started', (payload) => broadcast('run:started', payload))
-  ctx.on('run:step', (payload) => broadcast('run:step', payload))
+  ctx.on('item:stored', ({ item }) => {
+    ctx.session.appendLog({ kind: 'verdict', text: `入库：第 ${item.slot.key} 题` })
+    broadcast('stored', summarize(item))
+  })
+  ctx.on('item:confirmed', ({ item, by }) => {
+    ctx.session.appendLog({ kind: 'verdict', text: `${by} 确认了第 ${item.slot.key} 题` })
+    broadcast('confirmed', { ...summarize(item), by })
+  })
+  ctx.on('run:started', ({ runId, goal, workspace }) => {
+    ctx.session.appendLog({ kind: 'user', text: goal, runId })
+    broadcast('run:started', { runId, goal, workspace })
+  })
+  ctx.on('run:step', (payload) => {
+    ctx.session.appendLog({
+      kind: payload.kind === 'user' ? 'user' : payload.kind,
+      text: payload.text,
+      runId: payload.runId,
+    })
+    broadcast('run:step', payload)
+  })
   ctx.on('run:done', (payload) => broadcast('run:done', payload))
   ctx.on('workspace:changed', (payload) => broadcast('workspace:changed', payload))
   ctx.on('kb:changed', (payload) => broadcast('kb:changed', payload))
   ctx.on('settings:changed', (payload) => broadcast('settings:changed', payload))
-  ctx.on('item:rejected', ({ item, verdict }) => broadcast('rejected', { ...summarize(item), verdict }))
+  ctx.on('item:rejected', ({ item, verdict }) => {
+    // 判定联合类型：只有失败那一支带 gate/reason
+    const why = verdict.pass ? '（判定说通过，但仍被拦下）' : `没通过「${verdict.gate}」：${verdict.reason}`
+    ctx.session.appendLog({ kind: 'verdict', text: why })
+    broadcast('rejected', { ...summarize(item), verdict })
+  })
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     const method = req.method ?? 'GET'
@@ -562,12 +593,19 @@ export function apply(ctx: Context, config: WebConfig): void {
     }
 
     if (method === 'POST' && path === '/api/kb/upload') {
-      const body = (await readBody(req)) as { name?: string; files?: { name?: string; text?: string }[] }
-      const files = (body.files ?? []).flatMap((file) =>
-        typeof file.name === 'string' && typeof file.text === 'string' ? [{ name: file.name, text: file.text }] : [],
-      )
+      const body = (await readBody(req)) as {
+        name?: string
+        files?: { name?: string; text?: string; base64?: string }[]
+      }
+      const files: { name: string; text?: string; base64?: string }[] = (body.files ?? []).flatMap((file) => {
+        if (typeof file.name !== 'string') return []
+        // 文本给 text，二进制给 base64（PDF / Word / 图片按原样存，整理时再解析）
+        if (typeof file.text === 'string') return [{ name: file.name, text: file.text }] as { name: string; text?: string; base64?: string }[]
+        if (typeof file.base64 === 'string') return [{ name: file.name, base64: file.base64 }] as { name: string; text?: string; base64?: string }[]
+        return [] as { name: string; text?: string; base64?: string }[]
+      })
       if (files.length === 0) {
-        send(res, 400, { error: '没有可用的文本文件（PDF/扫描件请先转文本）' })
+        send(res, 400, { error: '没有可用的文件：文本给 text，PDF/图片给 base64' })
         return
       }
       send(res, 200, ctx.kb.upload(body.name ?? '', files))
@@ -597,7 +635,7 @@ export function apply(ctx: Context, config: WebConfig): void {
         send(res, 404, { error: '没有这个知识库' })
         return
       }
-      ctx.kb.mark(batch.id, 'ingesting', 'agent 正在整理')
+      ctx.kb.mark(batch.id, 'ingesting', '正在整理')
       // 原件副本铺进工作区：agent 可以拿 python / pdftotext 把 PDF、表格、扫描件转成文本再说
       const seeded = seedFromKb(ctx, batch.id, batch.id)
       const files = batch.files.map((file) => file.name).join('、')
@@ -607,11 +645,12 @@ export function apply(ctx: Context, config: WebConfig): void {
           `文件：${files}`,
           '',
           `工作区：${batch.id}（ws_ls 看文件；原件副本在 in/，脚本写 tmp/，产物放 out/）`,
-          '原件不一定是纯文本：PDF/表格/扫描件先用工作区转换——',
-          '  · PDF 文字层：ws_run ["pdftotext","in/xx.pdf","out/xx.txt"]',
-          '  · 复杂版式/表格：写一个 tmp/*.py 用 python3 跑（venv 优先；pdfplumber 之类没装就先问老师）',
-          '  · 扫描件：需要 OCR（tesseract），转了也可能不理想——不行就如实说明。',
-          '要跑的东西先落成脚本文件再 ws_run，不许内联代码。',
+          '原件不一定是纯文本。**先用内置工具读**（它自己会挑读法，PDF 扫描件会自动 OCR）：',
+          '  · doc_probe {"path":"in/xx.pdf"}  看是什么、多少页、要不要 OCR',
+          '  · doc_extract {"path":"in/xx.pdf"} 读成文字（PDF / Word / Excel / 图片都行）',
+          '  · doc_ocr {"path":"in/xx.png"}   图片或扫描件专用',
+          '读不了的（版式太怪、扫描太糊、缺语言包）它会说清原因；那时再自己写脚本：',
+          '  先 ws_write 写 tmp/*.py，再 ws_run ["python3","tmp/x.py"]（不许内联代码）。',
           '',
           '步骤：',
           '1) ws_ls + kb_list 确认手上有什么；',
@@ -637,9 +676,7 @@ export function apply(ctx: Context, config: WebConfig): void {
               ? `agent 整理完成：${String(run.steps)} 步`
               : run.stopped === 'no-llm'
                 ? '模型未配置，无法整理'
-                : run.stopped === 'stopped'
-                  ? `被叫停（已跑 ${String(run.steps)} 步，抽到的记录已保留）`
-                  : `agent 停在「${run.stopped}」：${String(run.steps)} 步`,
+                : `已按停：跑了 ${String(run.steps)} 步，抽到的记录都保留着`,
           )
         })
         .catch((error: unknown) => {
@@ -745,6 +782,7 @@ export function apply(ctx: Context, config: WebConfig): void {
 
 /** 推给界面的最小投影：不要整个 Item 糊过去 */
 function summarizeWith(item: Item, figureSvg: string): Record<string, unknown> {
+  const tex = item.prose.tex
   return {
     id: item.id,
     slot: item.slot.key,
@@ -754,6 +792,19 @@ function summarizeWith(item: Item, figureSvg: string): Record<string, unknown> {
     lifecycle: item.lifecycle,
     stem: item.prose.stem,
     answer: item.prose.answerText,
+    // 正文里的 $...$ 与构造给的 LaTeX 都在服务端渲染成 MathML：界面不引数学库
+    stemHtml: renderMathInText(item.prose.stem),
+    answerHtml: renderMathInText(item.prose.answerText),
+    solutionHtml: item.prose.solution.map((step) => renderMathInText(step)),
+    ...(tex === undefined
+      ? {}
+      : {
+          tex: {
+            ...(tex.stem === undefined ? {} : { stem: tex.stem, stemMath: texToMathml(tex.stem) }),
+            ...(tex.answer === undefined ? {} : { answer: tex.answer, answerMath: texToMathml(tex.answer) }),
+            solution: (tex.solution ?? []).map((part) => ({ tex: part, math: texToMathml(part) })),
+          },
+        }),
     figure: figureSvg,
     constructor: item.provenance.constructor,
     seed: item.provenance.seed,

@@ -11,6 +11,7 @@ import * as paperPlugin from '@examharness/plugin-paper'
 import * as dedupPlugin from '@examharness/plugin-verify-dedup'
 import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
+import { checkTex, renderMathInText } from '@examharness/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 /**
@@ -100,5 +101,36 @@ describe('组卷', () => {
     expect(first.order).toEqual(second.order)
     expect(ctx.bank.all()).toHaveLength(countAfterFirst)
     expect(second.gaps).toHaveLength(0)
+  })
+})
+
+/**
+ * 构造器给出的 LaTeX 必须**真的能渲染**。
+ * 踩过的坑：模板字符串里写 `\right` 会被当成转义（`\r` 是回车），
+ * 结果公式悄悄变成 `ight|`，编译还照样"成功"——这种错只能靠断言挡住。
+ */
+describe('题面里的 LaTeX', () => {
+  it('构造器给出的公式没有转义残留，且都能编译', async () => {
+    const ctx = await boot()
+    const row = blueprint.blueprint[0]
+    if (row === undefined) throw new Error('蓝图是空的')
+    const built = ctx.construct.generate({ ...row, key: 'S1-tex', count: 1 }, 42)
+    const tex = built.prose.tex
+    expect(tex).toBeDefined()
+    const fragments = [tex?.stem ?? '', tex?.answer ?? '', ...(tex?.solution ?? [])]
+
+    for (const fragment of fragments) {
+      // 控制字符 = 反斜杠被吃掉过（`\r` 会变成回车）
+      const hasControl = [...fragment].some((char) => char.charCodeAt(0) < 32)
+      expect(hasControl).toBe(false)
+      expect(checkTex(fragment).ok).toBe(true)
+    }
+    // 反斜杠还活着：既要有真正的命令，又不能出现"被吃掉反斜杠"的裸词
+    const joined = fragments.join(' ')
+    expect(joined).toContain('\\left')
+    expect(joined).not.toMatch(/(?<!\\)(dfrac|left|right|quad|cdot)/)
+
+    // 正文里嵌的数学也要能编译
+    expect(renderMathInText('求 $x_{1} = 3$ 与 $y = x^{2}$')).toContain('<math')
   })
 })

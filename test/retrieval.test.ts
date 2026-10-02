@@ -84,11 +84,21 @@ function model(seen: LlmToolSpec[][]) {
   }
 }
 
-/** 一个"不管怎样都想联网"的模型：用来验证关掉时会被明确拒绝 */
-const alwaysWebSearch = (): LlmReply => ({
-  content: null,
-  toolCalls: [{ id: 'w1', name: 'web_search', arguments: JSON.stringify({ query: '课标 二次函数' }) }],
-})
+/**
+ * 一个"想联网"的模型：第一次调用被拒之后就会收手（真模型也是这样——
+ * 工作台里没有步数上限，所以假模型必须自己会停，不能永远举手）。
+ */
+function wantsWebSearch(): (messages: readonly LlmMessage[]) => LlmReply {
+  let asked = false
+  return () => {
+    if (asked) return { content: '那就算了吧。', toolCalls: [] }
+    asked = true
+    return {
+      content: null,
+      toolCalls: [{ id: 'w1', name: 'web_search', arguments: JSON.stringify({ query: '课标 二次函数' }) }],
+    }
+  }
+}
 
 function fakeLlm(chat: (messages: readonly LlmMessage[], tools?: readonly LlmToolSpec[]) => LlmReply) {
   return {
@@ -139,7 +149,7 @@ async function boot(options: {
   if (options.websearch !== undefined) {
     fibers.push(await context.plugin(fakeWebSearch(options.websearch)))
   }
-  fibers.push(await context.plugin(workbenchPlugin, { maxSteps: 8, extraRules: '' }))
+  fibers.push(await context.plugin(workbenchPlugin, { extraRules: '' }))
   return context
 }
 
@@ -204,7 +214,7 @@ describe('检索能力', () => {
   })
 
   it('联网搜索关着时，即使模型硬调也只会得到明确拒绝', async () => {
-    const ctx = await boot({ chat: alwaysWebSearch, withCorpus: true, websearch: false })
+    const ctx = await boot({ chat: wantsWebSearch(), withCorpus: true, websearch: false })
     const run = await ctx.workbench.run({ goal: '出题', blueprint })
 
     expect(run.transcript.some((event) => event.text.includes('未启用联网搜索'))).toBe(true)

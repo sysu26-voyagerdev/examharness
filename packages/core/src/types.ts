@@ -57,6 +57,18 @@ export interface Prose {
   options?: readonly Option[]
   answerText: string
   solution: readonly string[]
+  /**
+   * 数学的 **LaTeX 版**：由**构造器**给出（不是模型写的）。
+   *
+   * 为什么要单独一份：正文是给人读的散文，数学必须是可编译、可渲染、可比对的东西。
+   * 模型只负责把 LaTeX **嵌进**句子（`$...$`），不允许自己改里头的数学（R1）。
+   * 回译闸门会拿 LaTeX 里的数字与构造参数比对——写歪了会被拦下。
+   */
+  tex?: {
+    stem?: string
+    answer?: string
+    solution?: readonly string[]
+  }
   /** 序列化用的模型与版本：题面可重生成，故留版本 */
   serializer: { model: string; version: number }
 }

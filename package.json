@@ -28,7 +28,8 @@
     "ingest": "node bin.js --check-corpus",
     "venv": "bash scripts/venv.sh",
     "venv:add": "bash scripts/venv.sh --add",
-    "venv:status": "bash scripts/venv.sh --status"
+    "venv:status": "bash scripts/venv.sh --status",
+    "ocr:lang": "bash scripts/ocr-lang.sh"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
@@ -38,6 +39,7 @@
     "@examharness/plugin-bank": "workspace:*",
     "@examharness/plugin-construct-parabola": "workspace:*",
     "@examharness/plugin-corpus": "workspace:*",
+    "@examharness/plugin-doc": "workspace:*",
     "@examharness/plugin-figure": "workspace:*",
     "@examharness/plugin-graph": "workspace:*",
     "@examharness/plugin-kb": "workspace:*",
@@ -53,7 +55,9 @@
     "@examharness/plugin-web": "workspace:*",
     "@examharness/plugin-websearch": "workspace:*",
     "@examharness/plugin-workbench": "workspace:*",
-    "@examharness/plugin-workspace": "workspace:*"
+    "@examharness/plugin-workspace": "workspace:*",
+    "@types/katex": "^0.16.8",
+    "katex": "^0.18.10"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
-import type { Verdict } from '@examharness/core'
-import { normalize, parseJsonObject } from '@examharness/core'
+import type { Item, Verdict } from '@examharness/core'
+import { checkTex, normalize, numbers, parseJsonObject } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -64,10 +64,59 @@ function goalMatches(instanceGoal: string, parsedGoal: string): boolean {
   return tokens.some((token) => normalized.includes(normalize(token)))
 }
 
+/**
+ * LaTeX 这一层也要卡：公式写歪了（下标写错、括号漏了）不该等到老师看见，
+ * 而且**公式里的数字必须与构造实例一致**——否则就是"构造是对的、写出来是另一道题"。
+ */
+function checkTexLayer(item: Item): Verdict | undefined {
+  const tex = item.prose.tex
+  if (tex === undefined) return undefined
+  const fragments: [string, string][] = [
+    ...(tex.stem === undefined ? [] : ([['题面公式', tex.stem]] as [string, string][])),
+    ...(tex.answer === undefined ? [] : ([['答案公式', tex.answer]] as [string, string][])),
+    ...(tex.solution ?? []).map((part, index) => [`解析第 ${String(index + 1)} 步`, part] as [string, string]),
+  ]
+  for (const [label, fragment] of fragments) {
+    const result = checkTex(fragment)
+    if (!result.ok) {
+      return {
+        pass: false,
+        gate: name,
+        reason: `${label}的 LaTeX 编译不过：${result.error}`,
+        fixable: true,
+        hint: '数学由构造给出，别自己改写公式；只把它嵌进句子里',
+      }
+    }
+  }
+
+  // **题面公式**的数字必须是构造参数里出现过的：题面说的就是那道题，数字不许飘。
+  // 答案与解析里会出现**推导出来的量**（比如两点间距离 = |x₂ − x₁|），那些本来就不在参数里，
+  // 所以只对题面做这条检查——多查一步会把正确的推导当成错的。
+  if (tex.stem !== undefined) {
+    const allowed = new Set(numbers(JSON.stringify(item.instance.params)))
+    for (const value of numbers(tex.stem)) {
+      if (!allowed.has(value)) {
+        return {
+          pass: false,
+          gate: name,
+          reason: `题面公式里出现了构造参数里没有的数字（${value}）`,
+          fixable: true,
+          hint: '题面公式必须照着构造写，数字不要手改',
+        }
+      }
+    }
+  }
+  return undefined
+}
+
 export function apply(ctx: Context, config: RoundTripConfig): void {
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict
+
+    // LaTeX 层对**任何**序列化方式都成立（模板也一样），先卡它
+    const texVerdict = checkTexLayer(item)
+    if (texVerdict !== undefined) return { ...verdict, ...texVerdict }
 
     // 模板序列化是确定性的：不需要往返（也就不会白花一次模型调用）
     if (item.prose.serializer.model === 'template') return verdict

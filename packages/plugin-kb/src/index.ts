@@ -28,8 +28,9 @@ export const Config = z.object({
   extractDir: z.string().default('corpus/extracted'),
   /** 整理状态索引 */
   index: z.string().default('data/kb.json'),
-  /** 单个文件上限（文本；超了请先切分） */
+  /** 单个文件上限（超了先切分：几十 MB 的扫描件请分册） */
   maxTextBytes: z.number().default(5_242_880),
+  maxFileBytes: z.number().default(20_971_520),
 })
 
 export interface KbConfig {
@@ -37,6 +38,7 @@ export interface KbConfig {
   extractDir: string
   index: string
   maxTextBytes: number
+  maxFileBytes: number
 }
 
 export class KbService extends Service implements KbApi {
@@ -65,16 +67,21 @@ export class KbService extends Service implements KbApi {
     return this.batches
   }
 
-  upload(title: string, files: readonly { name: string; text: string }[]): KbBatch {
+  upload(title: string, files: readonly { name: string; text?: string; base64?: string }[]): KbBatch {
     const id = `kb-${String(Date.now())}`
     const dir = join(this.dir, id)
     mkdirSync(dir, { recursive: true })
     const stored: { name: string; bytes: number }[] = []
     for (const file of files) {
       const safe = file.name.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_').slice(0, 120)
-      const text = file.text.slice(0, this.config.maxTextBytes)
-      writeFileSync(join(dir, safe), text, 'utf8')
-      stored.push({ name: safe, bytes: Buffer.byteLength(text, 'utf8') })
+      // 二进制按原样存（PDF / Word / 图片）：这类文件当文本读会直接毁掉
+      const body =
+        file.base64 === undefined
+          ? Buffer.from((file.text ?? '').slice(0, this.config.maxTextBytes), 'utf8')
+          : Buffer.from(file.base64, 'base64').subarray(0, this.config.maxFileBytes)
+      if (body.length === 0) continue
+      writeFileSync(join(dir, safe), body)
+      stored.push({ name: safe, bytes: body.length })
     }
     const batch: KbBatch = {
       id,

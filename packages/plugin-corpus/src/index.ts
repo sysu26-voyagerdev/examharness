@@ -3,7 +3,7 @@ import { basename, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { CorpusApi, CorpusHit, CorpusRecord } from '@examharness/core'
-import { normalize } from '@examharness/core'
+import { normalize, numbers } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -65,10 +65,6 @@ export function similarity(left: string, right: string): number {
 }
 
 /** 题面里出现的数字集合——数学题"是不是同一道"，主要看这个 */
-export function numbers(text: string): Set<string> {
-  return new Set(normalize(text).match(/\d+(?:\.\d+)?/g) ?? [])
-}
-
 export function numberSimilarity(left: string, right: string): number {
   return jaccard(numbers(left), numbers(right))
 }

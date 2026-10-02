@@ -40,15 +40,19 @@ export const inject = ['llm', 'graph', 'bank', 'construct']
  */
 
 export const Config = z.object({
-  maxSteps: z.number().default(8),
   /** 会话约定之外，额外给模型的硬规矩 */
   extraRules: z.string().default(''),
 })
 
 export interface WorkbenchConfig {
-  maxSteps: number
   extraRules: string
 }
+
+/**
+ * **没有步数上限**（ADR-0006：不为成本做架构）。
+ * 停下这一轮的方式只有两个：模型自己不再调工具，或者老师说停。
+ * 加一个人为的步数帽子，等于让"跑到一半被砍断"变成正常现象——那是把成本问题伪装成产品行为。
+ */
 
 interface Candidate {
   id: string
@@ -207,6 +211,34 @@ const WORKSPACE_TOOLS: readonly LlmToolSpec[] = [
   },
 ]
 
+const DOC_TOOLS: readonly LlmToolSpec[] = [
+  {
+    name: 'doc_probe',
+    description: '看一份文件是什么、多少页、要不要 OCR。拿到陌生资料先问它。',
+    parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
+  },
+  {
+    name: 'doc_extract',
+    description:
+      '把工作区里的文件读成文字（按后缀自动选读法：文本 / PDF / Word / Excel）。' +
+      'PDF 若是扫描件会自动转 OCR。读不了会如实说为什么。',
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string' }, ocr: { type: 'boolean' } },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'doc_ocr',
+    description: '对图片或扫描版 PDF 做 OCR（识别文字，可能有错字——不确定就按不确定处理）。',
+    parameters: {
+      type: 'object',
+      properties: { path: { type: 'string' }, lang: { type: 'string' } },
+      required: ['path'],
+    },
+  },
+]
+
 const KB_TOOLS: readonly LlmToolSpec[] = [
   {
     name: 'kb_list',
@@ -277,6 +309,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     if (this.ctx.get('kb') !== undefined) tools.push(...KB_TOOLS)
     // 工作区对**所有** agent 开放：主 agent 也要能处理原件、写脚本、跑东西
     if (this.ctx.get('workspace') !== undefined) tools.push(...WORKSPACE_TOOLS)
+    // 内置读文档/OCR：常见格式不必现写脚本（读不了的还是可以用 ws_run 自己来）
+    if (this.ctx.get('doc')?.available() === true) tools.push(...DOC_TOOLS)
     return tools
   }
 
@@ -399,9 +433,9 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       say(0, 'tool', `工作区已就绪：${workspace.name}（${String(workspace.files.length)} 个文件）`)
     }
 
-    let stopped: WorkbenchRun['stopped'] = 'max-steps'
+    let stopped: WorkbenchRun['stopped'] = 'done'
 
-    while (state.steps < this.config.maxSteps) {
+    for (;;) {
       // 老师插的话在**下一步**生效：这是"可插话"的落点，不是另起一轮
       while (state.inbox.length > 0) {
         const said = state.inbox.shift()
@@ -694,6 +728,46 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         kind: 'tool',
         text: `kb_read：读到 ${String(chunk.text.length)} 字（共 ${String(chunk.total)}${chunk.next === undefined ? '，已到结尾' : `，下一个 offset=${String(chunk.next)}`}）`,
         payload: chunk,
+      }
+    }
+
+    if (tool === 'doc_probe' || tool === 'doc_extract' || tool === 'doc_ocr') {
+      const doc = this.ctx.get('doc')
+      if (doc === undefined || !doc.available()) {
+        return { kind: 'tool', text: `${tool}：没有接文档工具`, payload: { error: '未接入文档工具' } }
+      }
+      const path = String(args.path ?? '')
+      const result =
+        tool === 'doc_probe'
+          ? doc.probe(workspaceName, path)
+          : tool === 'doc_ocr'
+            ? doc.ocr(workspaceName, path, typeof args.lang === 'string' ? args.lang : undefined)
+            : doc.extract(workspaceName, path, { ocr: args.ocr === true })
+      const label = tool === 'doc_probe' ? '看了' : tool === 'doc_ocr' ? '识别' : '读了'
+      if (!result.ok) {
+        // 失败也要把 note 带上：缺语言包 / 没装库 / 扫描太糊，模型才知道下一步怎么办
+        const why = [result.error ?? '读取失败', ...result.notes].filter((part) => part !== '').join('；')
+        return { kind: 'tool', text: `${tool}：${path} 读不了（${why}）`, payload: { error: why, path } }
+      }
+      const shape =
+        result.kind === 'pdf' && result.pages !== undefined
+          ? `${String(result.pages)} 页`
+          : result.kind === 'image'
+            ? '图片'
+            : result.kind
+      const tail = result.truncated === true ? `，先给你前 ${String(result.text.length)} 字` : ''
+      const notes = result.notes.length === 0 ? '' : `（${result.notes.join('；')}）`
+      return {
+        kind: 'tool',
+        text: `${tool}：${label} ${path}，${shape}，共 ${String(result.chars)} 字${tail}${notes}`,
+        payload: {
+          path,
+          kind: result.kind,
+          chars: result.chars,
+          truncated: result.truncated ?? false,
+          notes: result.notes,
+          text: result.text,
+        },
       }
     }
 

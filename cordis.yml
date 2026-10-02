@@ -14,7 +14,6 @@
     corpusDirs:
       - corpus/questions
       - corpus/textbooks
-      - seed/corpus
       - corpus/extracted
     defaultClassName: 初三(2)班
     defaultProgress: 九上·22章·第2课时
@@ -50,10 +49,11 @@
 - id: corpus
   name: '@examharness/plugin-corpus'
   config:
+    # 语料目录默认**空的**：没有真资料就没有语料，
+    # 别拿编的"真题"充数（那会让原创度凭据变成假的）。老师在「资料」页上传真资料即可。
     dirs:
       - corpus/questions
       - corpus/textbooks
-      - seed/corpus
       - corpus/extracted
     minLength: 8
     maxSimilarity: 0.6
@@ -152,19 +152,30 @@
     timeoutMs: 60000
     maxOutputBytes: 20000
 
+# 文档与 OCR：PDF / Word / Excel / 图片 一次读成文字（工具给模型用，不是让模型现写脚本）
+# 语言包：pnpm ocr:lang（下到 data/tessdata，不需要 sudo）
+- id: doc
+  name: '@examharness/plugin-doc'
+  config:
+    script: scripts/extract.py
+    maxChars: 20000
+    timeoutMs: 240000
+
 # 会话与卷子版本：多会话、版本、diff、局部重做、人工确认、冻结
 - id: session
   name: '@examharness/plugin-session'
   config:
     path: data/sessions.json
+    logPath: data/session-log.json
     defaultBlueprint: seed/blueprint.json
     defaultClass: 初三(2)班
     defaultProgress: 九上·22章·第2课时
 
+# agent 工作台：没有步数上限——停下来的是模型自己，或者老师按停（ADR-0006）
 - id: workbench
   name: '@examharness/plugin-workbench'
   config:
-    maxSteps: 8
+    extraRules: ''
 
 - id: web
   name: '@examharness/plugin-web'

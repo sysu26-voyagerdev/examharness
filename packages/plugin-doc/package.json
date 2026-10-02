@@ -1,5 +1,5 @@
 {
-  "name": "@examharness/core",
+  "name": "@examharness/plugin-doc",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -15,9 +15,7 @@
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
-    "katex": "^0.18.10"
-  },
-  "devDependencies": {
-    "@types/katex": "^0.16.0"
+    "@examharness/core": "workspace:*",
+    "schemastery": "^3.18.0"
   }
 }

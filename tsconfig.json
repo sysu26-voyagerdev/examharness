@@ -59,6 +59,9 @@
       "path": "./packages/plugin-workspace"
     },
     {
+      "path": "./packages/plugin-doc"
+    },
+    {
       "path": "./packages/plugin-web"
     }
   ]

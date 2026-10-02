@@ -172,7 +172,7 @@ export interface WorkbenchRun {
   steps: number
   transcript: readonly WorkbenchEvent[]
   stored: readonly string[]
-  stopped: 'done' | 'max-steps' | 'no-llm' | 'stopped'
+  stopped: 'done' | 'no-llm' | 'stopped'
   /** 这一轮留下的工作区（模型没干活时是空的，但目录还是在） */
   workspace?: { name: string; files: readonly WorkspaceFile[] }
 }
@@ -327,10 +327,41 @@ export interface WorkspaceApi {
   dirOf(name: string): string | undefined
 }
 
+// ── 文档与 OCR（内置工具：常见的格式一次读成文字）────────────
+// 模型不必为 PDF/Word/Excel/图片每次现写脚本；读不了的（版式太怪、扫描太糊）如实说。
+
+export interface DocExtract {
+  ok: boolean
+  /** text / pdf / docx / xlsx / image / unknown */
+  kind: string
+  chars: number
+  text: string
+  /** 说明：缺语言包、没有文字层、编码不是 UTF-8……都要说清 */
+  notes: readonly string[]
+  pages?: number
+  truncated?: boolean
+  needsOcr?: boolean
+  error?: string
+}
+
+export interface DocApi {
+  /** 脚本在不在（不在就说明没装好，别假装能读） */
+  available(): boolean
+  /** 这是什么文件、要不要 OCR */
+  probe(workspace: string, path: string): DocExtract
+  /** 按后缀自动选读法；PDF 可加 ocr */
+  extract(workspace: string, path: string, options?: { ocr?: boolean }): DocExtract
+  /** 图片或扫描版 PDF 的 OCR */
+  ocr(workspace: string, path: string, lang?: string): DocExtract
+}
+
 export interface KbApi {
   list(): readonly KbBatch[]
-  /** 上传一批文本文件（PDF/扫描件请先转文本；二进制不支持） */
-  upload(name: string, files: readonly { name: string; text: string }[]): KbBatch
+  /**
+   * 上传一批资料。文本给 `text`，二进制（PDF / Word / 图片）给 `base64`——
+   * 会按原样存进工作区，整理时由内置的读文档工具解析（不要把它当文本读，那会毁掉文件）。
+   */
+  upload(name: string, files: readonly { name: string; text?: string; base64?: string }[]): KbBatch
   /** 读某个知识库里的文件（给 agent 用；分页切片，避免一次糊进上下文） */
   read(batchId: string, fileName: string, offset?: number, limit?: number): { text: string; total: number; next?: number } | undefined
   /** agent 整理时逐条写入语料 */
@@ -394,10 +425,26 @@ export interface SlotChange {
   to?: string
 }
 
+/**
+ * 会话记录里的一行。**这不是"聊天记录"的装饰**：它是这个会话发生过什么的凭据，
+ * 刷新页面之后还在（只存在内存里的记录会在刷新时消失，那才是假的东西）。
+ */
+export interface SessionLogEntry {
+  id: string
+  at: string
+  /** user = 老师说的；其余是系统/agent 侧 */
+  kind: 'user' | 'assistant' | 'tool' | 'gate' | 'verdict'
+  text: string
+  runId?: string
+}
+
 export interface SessionApi {
   list(): readonly SessionMeta[]
   /** 会话分组 */
   groups(): readonly SessionGroup[]
+  /** 会话记录：追加一行 / 读全部（刷新后仍在） */
+  appendLog(entry: Omit<SessionLogEntry, 'id' | 'at'>): SessionLogEntry | undefined
+  log(): readonly SessionLogEntry[]
   createGroup(title: string): SessionGroup
   renameGroup(id: string, title: string): SessionGroup | undefined
   /** 把会话挪到某个分组（'' = 移出分组） */
@@ -542,5 +589,6 @@ declare module '@deepseek-ai/cordis' {
     settings: SettingsApi
     kb: KbApi
     workspace: WorkspaceApi
+    doc: DocApi
   }
 }

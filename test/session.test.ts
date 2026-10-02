@@ -251,6 +251,29 @@ describe('会话分组', () => {
   })
 })
 
+describe('会话记录', () => {
+  it('记录落盘：刷新（重开服务）之后还在；冻结的会话不再记', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'examharness-log-'))
+    scratch.push(dir)
+    const file = join(dir, 'sessions.json')
+
+    const first = await boot({ sessionPath: file })
+    first.session.appendLog({ kind: 'user', text: '按蓝图出一份课后作业卷', runId: 'r1' })
+    first.session.appendLog({ kind: 'gate', text: '入库：S1', runId: 'r1' })
+    expect(first.session.log().map((entry) => entry.text)).toEqual(['按蓝图出一份课后作业卷', '入库：S1'])
+    expect(first.session.log()[0]?.at).toBeTruthy()
+
+    // 换一个进程实例读同一个文件——记录是**这个会话的**，不该随着内存消失
+    const second = await boot({ sessionPath: file })
+    expect(second.session.log().map((entry) => entry.text)).toEqual(['按蓝图出一份课后作业卷', '入库：S1'])
+
+    // 冻结之后不再记新东西（冻结 = 这一版到此为止）
+    second.session.freeze()
+    expect(second.session.appendLog({ kind: 'user', text: '再来一次' })).toBeUndefined()
+    expect(second.session.log()).toHaveLength(2)
+  })
+})
+
 describe('导出', () => {
   it('HTML 与 Markdown 都含题干、答案、解析与图', async () => {
     const ctx = await boot()

@@ -45,6 +45,13 @@ function poly(b: number, c: number): string {
   return `y = x²${bs}${cs}`
 }
 
+/** 同一个多项式的 LaTeX 写法（正文显示用这个；上面的纯文本留给闸门做数字比对） */
+function polyTex(b: number, c: number): string {
+  const bs = b === 0 ? '' : b > 0 ? ` + ${b}x` : ` - ${-b}x`
+  const cs = c === 0 ? '' : c > 0 ? ` + ${c}` : ` - ${-c}`
+  return `y = x^{2}${bs}${cs}`
+}
+
 export class ConstructService extends Service implements ConstructApi {
   static Config = Config
 
@@ -159,6 +166,24 @@ export function createParabolaRoots(config: ConstructConfig): Constructor {
         ...(options === undefined ? {} : { options }),
         answerText: answer,
         solution: [`令 y = 0： (x − ${r1})(x − ${r2}) = 0`, `得 x₁ = ${r1}，x₂ = ${r2}`, `所以${answer}`],
+        // 数学本体用 LaTeX 给一份（构造给真值，模型只负责把它嵌进句子里）
+        tex: {
+          stem: `${polyTex(b, c)}`,
+          answer: wantsAxis
+            ? `x = ${h}`
+            : wantsVertex
+              ? `\\left(${h},\\,${k}\\right)`
+              : `\\left|x_{2} - x_{1}\\right| = ${length}`,
+          solution: [
+            `(x - ${r1})(x - ${r2}) = 0`,
+            `x_{1} = ${r1},\\quad x_{2} = ${r2}`,
+            wantsAxis
+              ? `x = \\dfrac{x_{1} + x_{2}}{2} = ${h}`
+              : wantsVertex
+                ? `\\left(\\dfrac{x_{1} + x_{2}}{2},\\,f\\left(\\dfrac{x_{1} + x_{2}}{2}\\right)\\right) = \\left(${h},\\,${k}\\right)`
+                : `AB = \\left|x_{2} - x_{1}\\right| = ${length}`,
+          ],
+        },
         serializer: { model: 'template', version: 1 },
       },
       figure: { spec: figure, renderer: 'template' },

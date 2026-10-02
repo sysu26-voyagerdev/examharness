@@ -10,6 +10,7 @@ import type {
   PaperGap,
   PaperVersion,
   SessionApi,
+  SessionLogEntry,
   SessionMeta,
   SlotBinding,
   SlotChange,
@@ -39,6 +40,8 @@ export const Config = z.object({
 
 export interface SessionConfig {
   path: string
+  /** 没配就挨着会话文件放（`<path>.log.json`）——少一个字段不该让整个会话服务起不来 */
+  logPath?: string
   defaultBlueprint: string
   defaultClass: string
   defaultProgress: string
@@ -60,26 +63,58 @@ interface Store {
   groups: SessionGroup[]
 }
 
+/** 会话记录留最近这么多条（再久远的翻不到了，但文件不会无限长） */
+const LOG_LIMIT = 500
+
 export class SessionService extends Service implements SessionApi {
   static Config = Config
 
   private readonly config: SessionConfig
   private readonly file: string
+  private readonly logFile: string
   private store: Store
+  /** 每个会话一条记录（刷新页面不丢；这是"这个会话发生过什么"的凭据） */
+  private logs = new Map<string, SessionLogEntry[]>()
+  private logCounter = 0
 
   constructor(ctx: Context, config: SessionConfig) {
     super(ctx, 'session')
     const base = ctx.baseUrl === undefined ? process.cwd() : fileURLToPath(ctx.baseUrl)
     this.config = config
     this.file = resolve(base, config.path)
+    this.logFile = resolve(base, config.logPath ?? `${config.path}.log.json`)
     this.base = base
     this.store = this.load() ?? this.seed()
     this.save()
+    this.loadLogs()
   }
 
   private readonly base: string
 
   // ── 会话 CRUD ────────────────────────────────────────────
+
+  /** 追加一行会话记录；会话冻结后不再记（冻结 = 这一版到此为止） */
+  appendLog(entry: Omit<SessionLogEntry, 'id' | 'at'>): SessionLogEntry | undefined {
+    const current = this.currentRecord()
+    if (current === undefined || current.meta.frozen) return undefined
+    const row: SessionLogEntry = {
+      id: `l${String(Date.now())}-${String((this.logCounter += 1))}`,
+      at: new Date().toISOString(),
+      ...entry,
+    }
+    this.logs.set(current.meta.id, [...(this.logs.get(current.meta.id) ?? []), row].slice(-LOG_LIMIT))
+    this.saveLogs()
+    return row
+  }
+
+  log(): readonly SessionLogEntry[] {
+    const current = this.currentRecord()
+    return current === undefined ? [] : (this.logs.get(current.meta.id) ?? [])
+  }
+
+  private currentRecord(): SessionRecord | undefined {
+    return this.store.sessions.find((entry) => entry.meta.id === this.store.currentId)
+  }
 
   list(): readonly SessionMeta[] {
     return this.store.sessions.map((record) => record.meta)
@@ -353,6 +388,25 @@ export class SessionService extends Service implements SessionApi {
   private save(): void {
     mkdirSync(dirname(this.file), { recursive: true })
     writeFileSync(this.file, JSON.stringify(this.store, null, 1), 'utf8')
+  }
+
+  /** 记录单独存一份：它是流水，别和卷子版本混在一个文件里 */
+  private saveLogs(): void {
+    mkdirSync(dirname(this.logFile), { recursive: true })
+    writeFileSync(this.logFile, JSON.stringify(Object.fromEntries(this.logs), null, 1), 'utf8')
+  }
+
+  private loadLogs(): void {
+    if (!existsSync(this.logFile)) return
+    try {
+      const parsed = JSON.parse(readFileSync(this.logFile, 'utf8')) as Record<string, SessionLogEntry[]>
+      for (const [id, rows] of Object.entries(parsed)) {
+        if (Array.isArray(rows)) this.logs.set(id, rows)
+      }
+      this.logCounter = [...this.logs.values()].reduce((sum, rows) => sum + rows.length, 0)
+    } catch {
+      /* 记录坏了就当没有：不能因为流水读不出来而打不开卷子 */
+    }
   }
 }
 

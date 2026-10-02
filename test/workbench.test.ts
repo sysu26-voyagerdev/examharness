@@ -90,7 +90,7 @@ async function boot(options: {
     await context.plugin(figurePlugin, { width: 480, height: 300, minPointGapPx: 14 }),
     await context.plugin(figureGate, { requireFigure: false }),
     await context.plugin(constructPlugin, { rootRange: [-4, 5] }),
-    await context.plugin(workbenchPlugin, { maxSteps: 8, extraRules: '' }),
+    await context.plugin(workbenchPlugin, { extraRules: '' }),
   )
   return context
 }
