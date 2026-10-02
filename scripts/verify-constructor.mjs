@@ -225,6 +225,21 @@ for (let index = 0; index < samples && problems.length === 0; index += 1) {
   if (sampleMs > LIMITS.perSampleMs) problems.push(`第 ${index + 1} 条构造用了 ${sampleMs} ms（上限 ${LIMITS.perSampleMs}）：太慢或陷进循环了`)
   if (Date.now() - startedAt > LIMITS.totalMs) problems.push(`验收总耗时超过 ${LIMITS.totalMs} ms`)
 
+  // **同种子必须造出同一道题**：题目的 id 是由参数算出来的，"换一道"、"复用已入库的题"、
+  // 组卷重来都靠这条。以前这里只写在文档里、没真的查——用 Math.random()/Date.now() 的模块
+  // 会照样通过验收，然后在组卷时表现成"同一题位反复出不一样的东西"。
+  let again
+  try {
+    again = module.construct(slot, seed)
+  } catch (error) {
+    problems.push(`第 ${index + 1} 条构造第二次就抛错（说明它有内部状态）：${error instanceof Error ? error.message : String(error)}`)
+    break
+  }
+  if (JSON.stringify(again) !== JSON.stringify(built)) {
+    problems.push(`第 ${index + 1} 条：同一种子两次构造结果不一样——题目必须是种子的确定性函数（不许用 Math.random / Date.now / 模块级计数器）`)
+    break
+  }
+
   if (typeof built?.stem !== 'string' || built.stem.trim() === '') problems.push('题面是空的')
   if (typeof built?.answer !== 'string' || built.answer.trim() === '') problems.push('answer 必须是字符串')
   if (built?.params === undefined || typeof built.params !== 'object') problems.push('没有 params：闸门与验收都靠它')

@@ -140,6 +140,21 @@ export function construct(slot, seed) {
 }
 `
 
+/** 作弊模块五：用 Math.random 出题（同一种子两次不一样） */
+const NONDETERMINISTIC_MODULE = `
+export const kind = 'dynamic/random'
+export const covers = ['最值']
+export function construct(slot, seed) {
+  const x = 1 + Math.floor(Math.random() * 7)
+  return {
+    params: { x, y: 2 * x },
+    stem: '求 ' + x + ' 的两倍',
+    answer: 'y=' + (2 * x),
+    checks: [{ expr: 'y - 2*x', at: { x, y: 2 * x }, expect: 0 }],
+  }
+}
+`
+
 /** 同一个路径被改写的两版（用来钉住"重交生效的是新代码"） */
 const rewriteModule = (tag: string): string => `
 export const kind = 'dynamic/rewrite'
@@ -312,5 +327,14 @@ describe('agent 在运行时制作新题型', () => {
     const report = await ctx.constructDynamic.loadOne(join(workdir, 'constructors', 'rewrite.mjs'))
     expect(report.ok).toBe(true)
     expect(ctx.construct.generate(slot, 3).witness.answer.startsWith('v2')).toBe(true)
+  })
+  it('同一种子两次不一样（用了 Math.random）→ 判不确定，不注册', async () => {
+    writeModule('random', NONDETERMINISTIC_MODULE)
+    const ctx = await boot()
+    const reports = await ctx.constructDynamic.loadAll()
+    const mine = reports.find((report) => report.file.endsWith('random.mjs'))
+    expect(mine?.ok).toBe(false)
+    expect(mine?.problems.join(' ')).toContain('确定性')
+    expect(ctx.construct.kinds()).not.toContain('dynamic/random')
   })
 })
