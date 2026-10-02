@@ -59,9 +59,10 @@ describe('组卷', () => {
     const paper = await ctx.paper.assemble(blueprint)
 
     expect(paper.gaps).toHaveLength(0)
-    expect(paper.slots.map((slot) => slot.key)).toEqual(['S1-1', 'S2-1'])
-    expect(paper.totalScore).toBe(20)
-    expect(paper.scoreGap).toBe(blueprint.paper.totalScore - 20)
+    expect(paper.slots.map((slot) => slot.key)).toEqual(blueprint.blueprint.map((row) => `${row.key}-1`))
+    expect(paper.totalScore).toBe(blueprint.paper.totalScore)
+    // 卷头分数与题位合计一致时，不该有差额（差额是"卷头写了更多分"才出现的）
+    expect(paper.scoreGap).toBe(0)
 
     const mids = paper.order.map((id) => {
       const item = ctx.bank.get(id)

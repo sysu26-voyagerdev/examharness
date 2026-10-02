@@ -54,7 +54,7 @@ function sessionView(
 ): Record<string, unknown> {
   const meta = ctx.session.current()
   const latest = ctx.session.latest()
-  const blueprint = loadBlueprint(base)
+  const blueprint = sessionBlueprint(ctx)
   const slots = [...(latest?.bindings ?? [])]
     .toSorted((a, b) => a.slot.localeCompare(b.slot))
     .flatMap((binding) => {
@@ -181,8 +181,14 @@ const MIME: Readonly<Record<string, string>> = {
   '.png': 'image/png',
 }
 
-function loadBlueprint(base: string): Blueprint {
-  return JSON.parse(readFileSync(resolve(base, 'seed/blueprint.json'), 'utf8')) as Blueprint
+/**
+ * 现在该用哪份蓝图 = **会话绑定的那一份**。
+ *
+ * 踩过的坑：这里原来直接读 seed/blueprint.json（默认那份），于是老师改了题位、
+ * 甚至换了整份蓝图，agent 和界面看到的还是默认那份——"改了题位它好像没看见"就是这么来的。
+ */
+function sessionBlueprint(ctx: Context): Blueprint {
+  return ctx.session.blueprint()
 }
 
 function readBody(req: IncomingMessage): Promise<unknown> {
@@ -265,7 +271,7 @@ function seedFromKb(ctx: Context, workspaceName: string, batchId: string): numbe
 export function apply(ctx: Context, config: WebConfig): void {
   const base = ctx.baseUrl === undefined ? process.cwd() : fileURLToPath(ctx.baseUrl)
   const clients = new Set<ServerResponse>()
-  const blueprint = loadBlueprint(base)
+  const blueprint = sessionBlueprint(ctx)
   /** 图由 spec 现渲染（骨架阶段不做文件缓存） */
   const summarize = (item: Item): Record<string, unknown> =>
     summarizeWith(item, ctx.figure.renderItem(item)?.svg ?? '')
@@ -485,7 +491,54 @@ export function apply(ctx: Context, config: WebConfig): void {
       return
     }
 
-    // ── 蓝图：题位是老师下发的，必须能看能改 ──────────────
+    // ── 蓝图库：老师手上是一套模板，不是一个蓝图 ──────────
+    if (method === 'GET' && path === '/api/blueprints') {
+      const source = ctx.session.blueprintSource()
+      send(res, 200, { blueprints: ctx.session.blueprintList(), current: source.path, revision: source.revision })
+      return
+    }
+
+    if (method === 'POST' && path === '/api/blueprints') {
+      const body = (await readBody(req)) as { name?: string; blueprint?: Blueprint }
+      if (body.blueprint === undefined) {
+        send(res, 400, { error: '没有蓝图内容' })
+        return
+      }
+      try {
+        send(res, 200, ctx.session.blueprintCreate(String(body.name ?? ''), body.blueprint, 'teacher'))
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    if (method === 'PATCH' && path === '/api/blueprints') {
+      const body = (await readBody(req)) as { name?: string; patch?: BlueprintPatch; expectedRevision?: string }
+      if (body.patch === undefined) {
+        send(res, 400, { error: '没有要改的内容' })
+        return
+      }
+      try {
+        send(res, 200, {
+          blueprint: ctx.session.blueprintUpdate(String(body.name ?? ''), body.patch, body.expectedRevision),
+        })
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    if (method === 'POST' && path === '/api/blueprints/use') {
+      const body = (await readBody(req)) as { name?: string }
+      try {
+        send(res, 200, ctx.session.blueprintUse(String(body.name ?? '')))
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    // ── 当前会话的蓝图：题位是老师下发的，必须能看能改 ──────
     if (method === 'GET' && path === '/api/session/blueprint') {
       const source = ctx.session.blueprintSource()
       send(res, 200, { blueprint: ctx.session.blueprint(), path: source.path, revision: source.revision })
@@ -755,7 +808,7 @@ export function apply(ctx: Context, config: WebConfig): void {
           '   knowledge 用已学知识点表里的说法；没有把握的字段宁缺勿造。',
           '5) 全部读完后 kb_mark 标 indexed，并说明抽了多少条、跳过了什么、哪些文件没处理成。',
         ].join('\n'),
-        blueprint: loadBlueprint(base),
+        blueprint: sessionBlueprint(ctx),
         workspace: batch.id,
         label: `整理「${batch.name}」（${String(batch.files.length)} 份资料）`,
       })

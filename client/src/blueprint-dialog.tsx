@@ -31,8 +31,9 @@ import type { BlueprintRowView, BlueprintView } from './types.js'
  * 卷头分数按题位自动算，不再出现"卷头 100 分、题位 20 分"这种自相矛盾。
  */
 
-const COGNITIVE = ['了解', '理解', '掌握', '综合'] as const
-const TYPES = ['选择', '填空', '解答', '作图'] as const
+// 与 core 的枚举保持一致：**别给用户系统不认的选项**
+const COGNITIVE = ['了解', '理解', '掌握', '灵活运用'] as const
+const TYPES = ['选择', '填空', '解答'] as const
 
 const emptyRow = (index: number): BlueprintRowView => ({
   key: `S${String(index)}`,

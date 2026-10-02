@@ -54,6 +54,18 @@ export interface BlueprintRowView {
   score: number
 }
 
+/** 库里一份蓝图的摘要 */
+export interface BlueprintInfoView {
+  name: string
+  path: string
+  title: string
+  totalScore: number
+  minutes: number
+  slots: number
+  builtin: boolean
+  createdBy?: 'agent' | 'teacher'
+}
+
 export interface BlueprintView {
   paper: { title: string; totalScore: number; minutes: number; className: string }
   blueprint: readonly BlueprintRowView[]

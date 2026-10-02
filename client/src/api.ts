@@ -1,4 +1,5 @@
 import type {
+  BlueprintInfoView,
   BlueprintRowView,
   BlueprintView,
   CredentialInfoView,
@@ -139,6 +140,19 @@ export const ingestKb = (
 
 export const createSession = (patch: Partial<SessionMetaView> = {}): Promise<SessionMetaView> =>
   send('POST', '/api/sessions', patch).then((r) => json<SessionMetaView>(r))
+
+/** 蓝图库：老师手上是一套模板（课后作业 / 单元测验 / …），不是一个蓝图 */
+export const listBlueprints = (): Promise<{
+  blueprints: readonly BlueprintInfoView[]
+  current: string
+  revision: string
+}> => fetch('/api/blueprints').then((r) => json<{ blueprints: readonly BlueprintInfoView[]; current: string; revision: string }>(r))
+
+export const createBlueprint = (name: string, blueprint: BlueprintView): Promise<BlueprintInfoView> =>
+  send('POST', '/api/blueprints', { name, blueprint }).then((r) => json<BlueprintInfoView>(r))
+
+export const useBlueprint = (name: string): Promise<SessionMetaView> =>
+  send('POST', '/api/blueprints/use', { name }).then((r) => json<SessionMetaView>(r))
 
 /** 蓝图（卷头 + 题位表）：题位是老师下发的，能读能改 */
 export const getBlueprint = (): Promise<{ blueprint: BlueprintView; path: string; revision: string }> =>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import EditNoteOutlinedIcon from '@mui/icons-material/EditNoteOutlined'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import SendIcon from '@mui/icons-material/Send'
@@ -15,6 +15,7 @@ import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
+import MenuItem from '@mui/material/MenuItem'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
@@ -23,7 +24,7 @@ import { useApp } from '../app-context.js'
 import { BlueprintDialog } from '../blueprint-dialog.js'
 import { EvidenceView, FilesView, KnowledgeView, PaperView, Timeline } from '../components.js'
 import { forWorkspace } from '../log.js'
-import type { ItemView, SlotChangeView, VersionView } from '../types.js'
+import type { BlueprintInfoView, ItemView, SlotChangeView, VersionView } from '../types.js'
 
 const TABS = [
   { key: 'paper', label: '试卷' },
@@ -54,6 +55,20 @@ export function WorkPage(): React.JSX.Element {
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('paper')
   const [viewVersion, setViewVersion] = useState<number | null>(null)
   const [editingBlueprint, setEditingBlueprint] = useState(false)
+  const [library, setLibrary] = useState<readonly BlueprintInfoView[]>([])
+
+  const reloadLibrary = (): void => {
+    void api
+      .listBlueprints()
+      .then((next) => setLibrary(next.blueprints))
+      .catch(() => setLibrary([]))
+  }
+
+  useEffect(() => {
+    reloadLibrary()
+  }, [session?.meta.blueprintPath])
+
+  const currentName = library.find((entry) => entry.path === session?.meta.blueprintPath)?.name ?? ''
 
   const versions = session?.versions ?? []
   const latest = versions.at(-1)
@@ -132,6 +147,26 @@ export function WorkPage(): React.JSX.Element {
               ))
             )}
             <Box sx={{ flex: 1 }} />
+            <TextField
+              select
+              value={currentName}
+              disabled={busy !== '' || frozen || library.length === 0}
+              onChange={(event) =>
+                void app.guard('blueprint', async () => {
+                  await api.useBlueprint(event.target.value)
+                  await app.reload()
+                  reloadLibrary()
+                })
+              }
+              sx={{ minWidth: 200 }}
+            >
+              {library.map((entry) => (
+                <MenuItem key={entry.name} value={entry.name}>
+                  {entry.name}（{String(entry.slots)} 题位 · {String(entry.totalScore)} 分）
+                  {entry.createdBy === 'agent' ? '　草稿' : ''}
+                </MenuItem>
+              ))}
+            </TextField>
             {running === null && (
               <Button
                 variant="contained"
@@ -203,7 +238,7 @@ export function WorkPage(): React.JSX.Element {
             ))}
           </Tabs>
           <Button size="small" startIcon={<EditNoteOutlinedIcon />} disabled={busy !== '' || frozen} onClick={() => setEditingBlueprint(true)} sx={{ mr: 1 }}>
-            蓝图
+            改这份蓝图
           </Button>
         </Stack>
         {versions.length > 1 && (
@@ -260,7 +295,14 @@ export function WorkPage(): React.JSX.Element {
         </Box>
       </Card>
 
-      {editingBlueprint && <BlueprintDialog onClose={() => setEditingBlueprint(false)} />}
+      {editingBlueprint && (
+        <BlueprintDialog
+          onClose={() => {
+            setEditingBlueprint(false)
+            reloadLibrary()
+          }}
+        />
+      )}
     </Box>
   )
 }

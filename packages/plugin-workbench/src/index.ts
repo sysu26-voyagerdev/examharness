@@ -2,6 +2,8 @@ import { Service, type Context } from '@deepseek-ai/cordis'
 import { parseJsonObject } from '@examharness/core'
 import type {
   Blueprint,
+  Cognitive,
+  QuestionType,
   BlueprintRow,
   Item,
   LlmMessage,
@@ -228,6 +230,70 @@ const WORKSPACE_TOOLS: readonly LlmToolSpec[] = [
   },
 ]
 
+/** 题位里允许的水平与题型（写错就退回默认，别让坏值进蓝图） */
+const COGNITIVE = new Set(['了解', '理解', '掌握', '灵活运用'])
+const QUESTION_TYPE = new Set(['选择', '填空', '解答'])
+
+const BLUEPRINT_TOOLS: readonly LlmToolSpec[] = [
+  {
+    name: 'blueprint_list',
+    description:
+      '看蓝图库里有哪些模板（课后作业、单元测验……）。' +
+      '**老师要的卷子规格和现在这份不一样时，先看库，别硬改共享模板。**',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'blueprint_read',
+    description: '读一份蓝图的卷头与题位表（题位 key、知识点、水平、题型、道数、分值、难度）。',
+    parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+  },
+  {
+    name: 'blueprint_create',
+    description:
+      '新建一份蓝图（会存成**你的草稿**，老师改完才算数）。题位只能写构造器覆盖得了的知识点：' +
+      '与坐标轴交点 / 对称轴 / 顶点式；写别的会变成组卷时补不上的缺口。',
+    parameters: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        title: { type: 'string' },
+        minutes: { type: 'number' },
+        slots: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string' },
+              knowledge: { type: 'array', items: { type: 'string' } },
+              cognitive: { type: 'string' },
+              type: { type: 'string' },
+              count: { type: 'number' },
+              score: { type: 'number' },
+              difficulty: { type: 'array', items: { type: 'number' } },
+            },
+            required: ['knowledge'],
+          },
+        },
+      },
+      required: ['name', 'slots'],
+    },
+  },
+  {
+    name: 'blueprint_update',
+    description: '改库里某一份蓝图（共享文件：会检查修订号，别人刚改过就报冲突）。',
+    parameters: {
+      type: 'object',
+      properties: { name: { type: 'string' }, patch: { type: 'object' }, expectedRevision: { type: 'string' } },
+      required: ['name', 'patch'],
+    },
+  },
+  {
+    name: 'blueprint_use',
+    description: '把这个会话改用库里的某一份蓝图（已出的题留在题库里，不会丢）：然后按新题位继续出题。',
+    parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+  },
+]
+
 const PAPER_TOOL: LlmToolSpec = {
   name: 'assemble_paper',
   description:
@@ -336,8 +402,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     if (this.ctx.get('workspace') !== undefined) tools.push(...WORKSPACE_TOOLS)
     // 内置读文档/OCR：常见格式不必现写脚本（读不了的还是可以用 ws_run 自己来）
     if (this.ctx.get('doc')?.available() === true) tools.push(...DOC_TOOLS)
-    // 组卷是收尾动作：题位齐了就该排成卷子，否则老师根本看不到成品
-    if (this.ctx.get('session') !== undefined) tools.push(PAPER_TOOL)
+    // 组卷是收尾动作；蓝图库让 agent 能"换一份合适的模板再出"
+    if (this.ctx.get('session') !== undefined) tools.push(PAPER_TOOL, ...BLUEPRINT_TOOLS)
     return tools
   }
 
@@ -781,6 +847,107 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         kind: 'tool',
         text: `kb_read：读到 ${String(chunk.text.length)} 字（共 ${String(chunk.total)}${chunk.next === undefined ? '，已到结尾' : `，下一个 offset=${String(chunk.next)}`}）`,
         payload: chunk,
+      }
+    }
+
+    if (tool.startsWith('blueprint_')) {
+      const session = this.ctx.get('session')
+      if (session === undefined) return { kind: 'tool', text: `${tool}：没有会话服务`, payload: { error: '未接入会话' } }
+
+      if (tool === 'blueprint_list') {
+        const library = session.blueprintList()
+        const current = session.blueprintSource().path
+        return {
+          kind: 'tool',
+          text: `blueprint_list：库里有 ${String(library.length)} 份\n${library
+            .map((info) => `  · ${info.name}｜${info.title}｜${String(info.slots)} 个题位｜${String(info.totalScore)} 分${info.path === current ? '（当前会话在用）' : ''}${info.createdBy === 'agent' ? '（agent 建的草稿）' : ''}`)
+            .join('\n')}`,
+          payload: { blueprints: library, current },
+        }
+      }
+
+      if (tool === 'blueprint_read') {
+        const bluepName = String(args.name ?? '')
+        try {
+          const readBack = session.blueprintRead(bluepName)
+          return {
+            kind: 'tool',
+            text: `blueprint_read：${bluepName}（${String(readBack.blueprint.length)} 个题位，${String(readBack.paper.totalScore)} 分）`,
+            payload: { name: bluepName, blueprint: readBack },
+          }
+        } catch (error) {
+          return { kind: 'tool', text: `blueprint_read：读不到「${bluepName}」`, payload: { error: String(error) } }
+        }
+      }
+
+      if (tool === 'blueprint_update') {
+        try {
+          const next = session.blueprintUpdate(
+            String(args.name ?? ''),
+            (args.patch ?? {}) as never,
+            typeof args.expectedRevision === 'string' ? args.expectedRevision : undefined,
+          )
+          return {
+            kind: 'tool',
+            text: `blueprint_update：${String(args.name ?? '')} 已更新（${String(next.blueprint.length)} 个题位，${String(next.paper.totalScore)} 分）`,
+            payload: { blueprint: next },
+          }
+        } catch (error) {
+          return { kind: 'tool', text: `blueprint_update：没改成（${error instanceof Error ? error.message : String(error)}）`, payload: { error: String(error) } }
+        }
+      }
+
+      if (tool === 'blueprint_use') {
+        try {
+          const meta = session.blueprintUse(String(args.name ?? ''))
+          return {
+            kind: 'tool',
+            text: `blueprint_use：这个会话改用「${String(args.name ?? '')}」（蓝图为 ${meta.blueprintPath}）。下一步按新题位看缺口。`,
+            payload: { blueprintPath: meta.blueprintPath },
+          }
+        } catch (error) {
+          return { kind: 'tool', text: `blueprint_use：换不了（${error instanceof Error ? error.message : String(error)}）`, payload: { error: String(error) } }
+        }
+      }
+
+      // blueprint_create
+      try {
+        const slots = Array.isArray(args.slots) ? args.slots : []
+        const rows = slots.map((entry, index) => {
+          const slot = entry as Record<string, unknown>
+          const raw = Array.isArray(slot.difficulty) ? slot.difficulty.map(Number) : [0.6, 0.85]
+          const difficulty: [number, number] = [raw[0] ?? 0.6, raw[1] ?? 0.85]
+          return {
+            key: typeof slot.key === 'string' && slot.key !== '' ? slot.key : `S${String(index + 1)}`,
+            knowledge: Array.isArray(slot.knowledge) ? slot.knowledge.map(String) : [],
+            cognitive: COGNITIVE.has(String(slot.cognitive)) ? (String(slot.cognitive) as Cognitive) : ('掌握' as Cognitive),
+            type: QUESTION_TYPE.has(String(slot.type)) ? (String(slot.type) as QuestionType) : ('解答' as QuestionType),
+            count: typeof slot.count === 'number' ? slot.count : 1,
+            difficulty,
+            score: typeof slot.score === 'number' ? slot.score : 10,
+          }
+        })
+        const created = session.blueprintCreate(
+          String(args.name ?? ''),
+          {
+            paper: {
+              title: typeof args.title === 'string' ? args.title : String(args.name ?? '新蓝图'),
+              totalScore: rows.reduce((sum, row) => sum + row.score * row.count, 0),
+              minutes: typeof args.minutes === 'number' ? args.minutes : 40,
+              className: '初三(2)班',
+            },
+            blueprint: rows,
+            constraints: { forbidKnowledge: ['实际问题建模', '动点问题'] },
+          },
+          'agent',
+        )
+        return {
+          kind: 'tool',
+          text: `blueprint_create：建好了「${created.name}」（${String(created.slots)} 个题位，${String(created.totalScore)} 分）。告诉老师这是你起的草稿，让他过一眼；要现在就用来出题，再调 blueprint_use。`,
+          payload: { blueprint: created },
+        }
+      } catch (error) {
+        return { kind: 'tool', text: `blueprint_create：没建成（${error instanceof Error ? error.message : String(error)}）`, payload: { error: String(error) } }
       }
     }
 

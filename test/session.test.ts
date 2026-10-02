@@ -101,15 +101,16 @@ describe('会话与版本', () => {
     const version = await ctx.session.assemble()
 
     expect(version.version).toBe(1)
-    expect(version.bindings).toHaveLength(2)
-    expect(version.totalScore).toBe(20)
+    expect(version.bindings).toHaveLength(blueprint.blueprint.length)
+    expect(version.totalScore).toBe(blueprint.paper.totalScore)
     expect(version.reason).toBe('组卷')
     expect(ctx.session.current().className).toBe('初三(2)班')
 
     // 换了蓝图（多一个题位）后再组一次：diff 应当报出 added
+    // 用一个模板里没有的编号（S99），免得跟着模板内容走
     const wider = structuredClone(blueprint)
     const extra = firstRow()
-    wider.blueprint = [...wider.blueprint, { ...extra, key: 'S3' }]
+    wider.blueprint = [...wider.blueprint, { ...extra, key: 'S99' }]
     const dir = mkdtempSync(join(tmpdir(), 'examharness-bp-'))
     scratch.push(dir)
     const extraPath = join(dir, 'blueprint-wide.json')
@@ -118,8 +119,8 @@ describe('会话与版本', () => {
     await ctx.session.assemble('换蓝图')
 
     const diff = ctx.session.diff(1, 2)
-    expect(diff.find((change) => change.slot === 'S3-1')?.change).toBe('added')
-    expect(diff.filter((change) => change.change === 'same').length).toBe(2)
+    expect(diff.find((change) => change.slot === 'S99-1')?.change).toBe('added')
+    expect(diff.filter((change) => change.change === 'same').length).toBe(blueprint.blueprint.length)
   })
 
   it('局部重做：只换一个题位、守住蓝图约束、产生 v2 且 diff 标为 replaced', async () => {

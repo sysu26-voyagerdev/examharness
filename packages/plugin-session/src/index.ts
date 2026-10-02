@@ -1,10 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import { fnv1a } from '@examharness/core'
 import type {
   Blueprint,
+  BlueprintInfo,
   BlueprintPatch,
   SessionGroup,
   BlueprintRow,
@@ -44,6 +45,7 @@ export interface SessionConfig {
   path: string
   /** 没配就挨着会话文件放（`<path>.log.json`）——少一个字段不该让整个会话服务起不来 */
   logPath?: string
+  blueprintsDir?: string
   defaultBlueprint: string
   defaultClass: string
   defaultProgress: string
@@ -82,7 +84,7 @@ export class SessionService extends Service implements SessionApi {
   constructor(ctx: Context, config: SessionConfig) {
     super(ctx, 'session')
     const base = ctx.baseUrl === undefined ? process.cwd() : fileURLToPath(ctx.baseUrl)
-    this.config = config
+    this.config = { ...config, blueprintsDir: config.blueprintsDir ?? 'seed/blueprints' }
     this.file = resolve(base, config.path)
     this.logFile = resolve(base, config.logPath ?? `${config.path}.log.json`)
     this.base = base
@@ -326,6 +328,87 @@ export class SessionService extends Service implements SessionApi {
     return this.blueprintOf(this.current())
   }
 
+  /**
+   * 蓝图库：**老师手上是一套模板，不是一个蓝图**（课后作业、单元测验、期中卷…）。
+   * 内置的随仓库走（seed/blueprints），自己和 agent 新建的放 data/blueprints。
+   */
+  blueprintList(): readonly BlueprintInfo[] {
+    const out: BlueprintInfo[] = []
+    const dirs = [this.config.blueprintsDir ?? 'seed/blueprints', 'data/blueprints']
+    for (const dir of dirs) {
+      const abs = resolve(this.base, dir)
+      if (!existsSync(abs)) continue
+      for (const file of readdirSync(abs)) {
+        if (!file.endsWith('.json')) continue
+        const full = resolve(abs, file)
+        try {
+          const parsed = JSON.parse(readFileSync(full, 'utf8')) as Blueprint & { createdBy?: 'agent' | 'teacher' }
+          if (!Array.isArray(parsed.blueprint)) continue
+          out.push({
+            name: file.replace(/\.json$/, ''),
+            path: `${dir}/${file}`,
+            title: parsed.paper.title,
+            totalScore: parsed.paper.totalScore,
+            minutes: parsed.paper.minutes,
+            slots: parsed.blueprint.length,
+            builtin: dir === (this.config.blueprintsDir ?? 'seed/blueprints'),
+            ...(parsed.createdBy === undefined ? {} : { createdBy: parsed.createdBy }),
+          })
+        } catch {
+          /* 坏的蓝图列不出来，但也不该让整个库挂掉 */
+        }
+      }
+    }
+    return out
+  }
+
+  blueprintRead(bluepName: string): Blueprint {
+    return JSON.parse(readFileSync(this.blueprintFile(bluepName), 'utf8')) as Blueprint
+  }
+
+  /** 新建一份蓝图（agent 也用它）：默认落在 data/blueprints，不碰仓库里内置的那些 */
+  blueprintCreate(bluepName: string, blueprint: Blueprint, createdBy: 'agent' | 'teacher' = 'teacher'): BlueprintInfo {
+    const safe = safeName(bluepName)
+    const file = resolve(this.base, 'data/blueprints', `${safe}.json`)
+    if (existsSync(file)) throw new Error(`已经有一份蓝图叫「${bluepName}」了：换个名字，或者去改那一份`)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, JSON.stringify({ ...blueprint, createdBy }, null, 2), 'utf8')
+    return this.blueprintList().find((info) => info.name === safe) ?? {
+      name: safe,
+      path: `data/blueprints/${safe}.json`,
+      title: blueprint.paper.title,
+      totalScore: blueprint.paper.totalScore,
+      minutes: blueprint.paper.minutes,
+      slots: blueprint.blueprint.length,
+      builtin: false,
+      createdBy,
+    }
+  }
+
+  /** 改库里任意一份（共享文件，带修订号防互相覆盖） */
+  blueprintUpdate(bluepName: string, patch: BlueprintPatch, expectedRevision?: string): Blueprint {
+    const file = this.blueprintFile(bluepName)
+    const actual = revisionOf(file)
+    if (expectedRevision !== undefined && expectedRevision !== actual) {
+      throw new Error(`这份蓝图刚被别处改过（你手上是 ${expectedRevision}，现在是 ${actual}）：重新读一遍再改`)
+    }
+    const after = normalizeBlueprint(JSON.parse(readFileSync(file, 'utf8')) as Blueprint, patch)
+    writeFileSync(file, JSON.stringify(after, null, 2), 'utf8')
+    return after
+  }
+
+  /** 这个会话就用这份蓝图（题位随之变化；已出的题留在题库里，不会丢） */
+  blueprintUse(bluepName: string): SessionMeta {
+    const path = relative(this.base, this.blueprintFile(bluepName)).split('\\').join('/')
+    return this.update({ blueprintPath: path })
+  }
+
+  private blueprintFile(bluepName: string): string {
+    const found = this.blueprintList().find((info) => info.name === bluepName)
+    if (found === undefined) throw new Error(`库里没有蓝图「${bluepName}」`)
+    return resolve(this.base, found.path)
+  }
+
   /** 当前蓝图的来源（路径 + 修订号）：界面靠它判断"是不是被别人改过了" */
   blueprintSource(): { path: string; revision: string } {
     const meta = this.current()
@@ -350,21 +433,7 @@ export class SessionService extends Service implements SessionApi {
     }
 
     const before = JSON.parse(readFileSync(file, 'utf8')) as Blueprint
-    // 逐行规整：空编号补上、道数与分值至少是 1（别把 0 分的题位写进蓝图）
-    const rows = (patch.blueprint ?? before.blueprint).map((row) => ({
-      key: row.key === '' ? nextKey(before.blueprint) : row.key,
-      knowledge: row.knowledge,
-      cognitive: row.cognitive,
-      type: row.type,
-      count: Math.max(1, Math.round(row.count)),
-      difficulty: row.difficulty,
-      score: Math.max(1, Math.round(row.score)),
-    }))
-    const after: Blueprint = {
-      paper: { ...before.paper, ...patch.paper, totalScore: rows.reduce((sum, row) => sum + row.score * row.count, 0) },
-      blueprint: rows,
-      constraints: { ...before.constraints, ...patch.constraints },
-    }
+    const after = normalizeBlueprint(before, patch)
     writeFileSync(file, JSON.stringify(after, null, 2), 'utf8')
     return after
   }
@@ -457,6 +526,32 @@ export class SessionService extends Service implements SessionApi {
       /* 记录坏了就当没有：不能因为流水读不出来而打不开卷子 */
     }
   }
+}
+
+/**
+ * 规整一份蓝图：空编号补上、道数与分值至少是 1，**卷头分数按题位算**。
+ * "卷头 100 分、题位只有 20 分"这种自相矛盾，从入口就掐掉。
+ */
+function normalizeBlueprint(before: Blueprint, patch: BlueprintPatch): Blueprint {
+  const rows = (patch.blueprint ?? before.blueprint).map((row) => ({
+    key: row.key === '' ? nextKey(before.blueprint) : row.key,
+    knowledge: row.knowledge,
+    cognitive: row.cognitive,
+    type: row.type,
+    count: Math.max(1, Math.round(row.count)),
+    difficulty: row.difficulty,
+    score: Math.max(1, Math.round(row.score)),
+  }))
+  return {
+    paper: { ...before.paper, ...patch.paper, totalScore: rows.reduce((sum, row) => sum + row.score * row.count, 0) },
+    blueprint: rows,
+    constraints: { ...before.constraints, ...patch.constraints },
+  }
+}
+
+/** 蓝图文件名：别让名字里带路径分隔符 */
+function safeName(raw: string): string {
+  return raw.replace(/[\\/:*?"<>|]/g, '_').trim().slice(0, 60) || `蓝图-${String(Date.now())}`
 }
 
 /** 蓝图文件的修订号（内容哈希）：共享文件靠它发现"别人刚改过" */

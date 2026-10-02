@@ -444,6 +444,20 @@ export interface PaperVersion {
   gaps: readonly PaperGap[]
 }
 
+/** 库里一份蓝图的摘要（列表用；不把整份题位表拖出来） */
+export interface BlueprintInfo {
+  name: string
+  path: string
+  title: string
+  totalScore: number
+  minutes: number
+  slots: number
+  /** 随仓库走的内置模板（不能被删） */
+  builtin: boolean
+  /** 谁建的：agent 建的算草稿，老师要过一眼（不是权限，只是标注） */
+  createdBy?: 'agent' | 'teacher'
+}
+
 /** 蓝图的可改部分：卷头与题位表（题位 key 保留原样，新增的自动编号） */
 export interface BlueprintPatch {
   paper?: Partial<Blueprint['paper']>
@@ -491,6 +505,13 @@ export interface SessionApi {
   blueprint(): Blueprint
   /** 蓝图从哪个文件来、什么修订号（共享文件要靠它发现冲突） */
   blueprintSource(): { path: string; revision: string }
+  /** 蓝图库：老师手上是一套模板（课后作业 / 单元测验 / …），不是一个蓝图 */
+  blueprintList(): readonly BlueprintInfo[]
+  blueprintRead(name: string): Blueprint
+  blueprintCreate(name: string, blueprint: Blueprint, createdBy?: 'agent' | 'teacher'): BlueprintInfo
+  blueprintUpdate(name: string, patch: BlueprintPatch, expectedRevision?: string): Blueprint
+  /** 这个会话改用库里的某一份（已出的题留在题库里，不丢） */
+  blueprintUse(name: string): SessionMeta
   /** 改蓝图（共享文件；带修订号防互相覆盖） */
   updateBlueprint(patch: BlueprintPatch, expectedRevision?: string): Blueprint
   /** 会话记录：追加一行 / 读全部（刷新后仍在） */

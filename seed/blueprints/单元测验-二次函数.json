@@ -1,0 +1,100 @@
+{
+  "paper": {
+    "title": "二次函数 · 单元测验",
+    "totalScore": 60,
+    "minutes": 45,
+    "className": "初三(2)班"
+  },
+  "blueprint": [
+    {
+      "key": "S1",
+      "knowledge": [
+        "与坐标轴交点"
+      ],
+      "cognitive": "理解",
+      "type": "选择",
+      "count": 2,
+      "difficulty": [
+        0.5,
+        0.7
+      ],
+      "score": 5
+    },
+    {
+      "key": "S2",
+      "knowledge": [
+        "对称轴"
+      ],
+      "cognitive": "理解",
+      "type": "填空",
+      "count": 2,
+      "difficulty": [
+        0.55,
+        0.75
+      ],
+      "score": 5
+    },
+    {
+      "key": "S3",
+      "knowledge": [
+        "顶点式"
+      ],
+      "cognitive": "掌握",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.7,
+        0.9
+      ],
+      "score": 10
+    },
+    {
+      "key": "S4",
+      "knowledge": [
+        "与坐标轴交点"
+      ],
+      "cognitive": "掌握",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.65,
+        0.85
+      ],
+      "score": 10
+    },
+    {
+      "key": "S5",
+      "knowledge": [
+        "对称轴"
+      ],
+      "cognitive": "掌握",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.7,
+        0.9
+      ],
+      "score": 10
+    },
+    {
+      "key": "S6",
+      "knowledge": [
+        "顶点式"
+      ],
+      "cognitive": "灵活运用",
+      "type": "解答",
+      "count": 1,
+      "difficulty": [
+        0.75,
+        0.95
+      ],
+      "score": 10
+    }
+  ],
+  "constraints": {
+    "forbidKnowledge": [
+      "实际问题建模",
+      "动点问题"
+    ]
+  }
+}
