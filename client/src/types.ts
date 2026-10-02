@@ -236,15 +236,47 @@ export interface RunView {
   transcript: readonly RunEventView[]
   stored: readonly string[]
   stopped: 'done' | 'no-llm' | 'stopped' | 'error'
+  /** 子任务的短名字与它的父（没有父 = 老师直接起的一轮） */
+  label?: string
+  parent?: string
   /** 这一轮留下的工作区 */
   workspace?: { name: string; files: readonly WorkspaceFileView[] }
 }
 
 /** agent 循环的生命周期信号（SSE 里的 run:*） */
 export type RunSignal =
-  | { kind: 'started'; runId: string; goal: string; workspace: string }
-  | { kind: 'step'; runId?: string; step: number; stepKind: RunEventView['kind']; text: string; workspace: string }
-  | { kind: 'done'; runId: string; stopped: RunView['stopped']; steps: number; stored: readonly string[]; workspace: string }
+  | { kind: 'started'; runId: string; goal: string; workspace: string; label?: string; parent?: string }
+  | {
+      kind: 'step'
+      runId?: string
+      step: number
+      stepKind: RunEventView['kind']
+      text: string
+      workspace: string
+      agent?: string
+    }
+  | { kind: 'busy'; runId: string; agent: string; what: string; workspace: string }
+  | {
+      kind: 'done'
+      runId: string
+      stopped: RunView['stopped']
+      steps: number
+      stored: readonly string[]
+      workspace: string
+      label?: string
+      parent?: string
+    }
+
+/** 界面上的一个 agent（主线或子任务）：用来显示"谁在干什么、走到第几步" */
+export interface RunAgentView {
+  id: string
+  goal: string
+  steps: number
+  workspace: string
+  label?: string
+  /** 谁派的（没有 = 老师直接起的一轮） */
+  parent?: string
+}
 
 export interface LiveEvent {
   kind:

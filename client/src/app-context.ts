@@ -1,5 +1,14 @@
 import { createContext, useContext } from 'react'
-import type { KbListView, LiveEvent, LogEntryView, SessionView, SessionsView, SettingsView, StateView } from './types.js'
+import type {
+  KbListView,
+  LiveEvent,
+  LogEntryView,
+  RunAgentView,
+  SessionView,
+  SessionsView,
+  SettingsView,
+  StateView,
+} from './types.js'
 
 /**
  * 外壳与页面共享的东西：**服务端的投影 + 一个受控的动作入口**。
@@ -15,8 +24,12 @@ export interface AppValue {
   kb: KbListView | null
   /** 会话记录（一条时间线）：来自服务端，跑起来时本地先接上增量 */
   log: readonly LogEntryView[]
-  /** 正在跑的那一轮（没有就是 null） */
-  running: { runId: string; goal: string; workspace: string } | null
+  /** 正在跑的主线（没有就是 null） */
+  running: RunAgentView | null
+  /** 正在跑的**所有** agent：主线 + 子任务（子任务是 agent 自己派的） */
+  agents: readonly RunAgentView[]
+  /** 正在做的动作（工具名 + 开始时间）：界面显示"正在…（已 n 秒）" */
+  doing: { what: string; agent: string; at: number } | null
   live: readonly LiveEvent[]
   /** 正在进行的动作（'' = 空闲） */
   busy: string

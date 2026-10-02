@@ -135,6 +135,32 @@ function collapseRepeats(entries: readonly LogEntryView[]): readonly LogEntryVie
   return out
 }
 
+/**
+ * 底部那条**实时状态**：「正在 ws_grep…（已 12 秒）」。
+ *
+ * 为什么要有：一次模型调用加一次工具可能几十秒没有任何输出，
+ * 界面静悄悄的时候，老师会以为它死了（用户原话："看不到 agent 的实时工作，
+ * 让用户干等待会以为没工作"）。所以工具一开跑就推一条 run:busy，这里秒数跳着走。
+ */
+export function DoingRow({ doing, since }: { doing: { what: string; agent: string } | null; since: number }): React.JSX.Element | null {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    if (doing === null) return undefined
+    const timer = window.setInterval(() => tick((previous) => previous + 1), 1000)
+    return () => window.clearInterval(timer)
+  }, [doing])
+  if (doing === null) return null
+  const seconds = Math.max(0, Math.round((Date.now() - since) / 1000))
+  return (
+    <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', px: 2.5, py: 1.5 }}>
+      <CircularProgress size={14} thickness={5} />
+      <Typography variant="caption" color="text.secondary">
+        正在 {toolLabel(doing.what)}…（{seconds} 秒）
+      </Typography>
+    </Stack>
+  )
+}
+
 export function Timeline({ entries, running }: { entries: readonly LogEntryView[]; running: boolean }): React.JSX.Element {
   const endRef = useRef<HTMLDivElement | null>(null)
   const boxRef = useRef<HTMLDivElement | null>(null)

@@ -38,7 +38,7 @@ export function construct(slot, seed) {
     return {
       params: { mode: 0, k: k, b: b, x1: x1, y1: y1, x2: x2, y2: y2, x3: x3, y3: y3, xin: xin, on: inside ? 1 : 0 },
       stem: "已知一次函数的图象经过点 $A(" + x1 + "," + y1 + ")$ 和点 $B(" + x2 + "," + y2 + ")$。\n（1）求这个一次函数的解析式；\n（2）求它的图象与 $x$ 轴交点的坐标；\n（3）判断点 $P(" + x3 + "," + y3 + ")$ 是否在这个函数的图象上。",
-      answer: n3("$" + exprOf(k, b) + "$", "$(" + xin + ",0)$", inside ? "\u70b9 $P$ \u5728\u56fe\u8c61\u4e0a" : "\u70b9 $P$ \u4e0d\u5728\u56fe\u8c61\u4e0a"),
+      answer: n3(exprOf(k, b), "(" + xin + ",0)", inside ? "\u70b9 P \u5728\u56fe\u8c61\u4e0a" : "\u70b9 P \u4e0d\u5728\u56fe\u8c61\u4e0a"),
       goal: "由两点求一次函数解析式，并研究图象与坐标轴的交点及点与图象的位置关系",
       goals: ["求这个一次函数的解析式", "求图象与 $x$ 轴交点的坐标", "判断点 $P$ 是否在图象上"],
       givens: [
@@ -76,7 +76,7 @@ export function construct(slot, seed) {
     return {
       params: { mode: 1, p: p, c: c, n: n, money: money, y0: y0, n2: n2b, y1: yy, left: y0 - c },
       stem: "某文具店中的笔记本每本 " + p + " 元，每次邮购还要付邮费 " + c + " 元。设一次邮购 $x$ 本笔记本共付 $y$ 元。\n（1）求 $y$ 与 $x$ 之间的函数关系式；\n（2）求一次邮购 " + n + " 本笔记本共付多少元；\n（3）若一次邮购共付了 " + y0 + " 元，求这次邮购笔记本的本数不超过多少本。",
-      answer: n3("$" + exprOf(p, c) + "$", "$" + money + "$", "$" + n2b + "$"),
+      answer: n3(exprOf(p, c), money + " \u5143", n2b + " \u672c"),
       goal: "由实际情境列出一次函数关系式并解决实际问题",
       goals: ["求 $y$ 与 $x$ 之间的函数关系式", "求邮购 " + n + " 本所需的费用", "求付款 " + y0 + " 元时最多能邮购的本数"],
       givens: [
@@ -114,7 +114,7 @@ export function construct(slot, seed) {
     return {
       params: { mode: 2, k: k, b: b, bx: bx, xin: xin, h: h, dx: dx, area: area },
       stem: "已知一次函数 $" + exprOf(k, b) + "$。\n（1）求它的图象与 $x$ 轴、$y$ 轴的交点坐标；\n（2）求它的图象与两坐标轴围成的三角形的面积。",
-      answer: n2("$(" + xin + ",0)$\uff0c$(0," + b + ")$", "$" + area + "$"),
+      answer: n2("(" + xin + ",0)\uff0c(0," + b + ")", "\u9762\u79ef " + area),
       goal: "求一次函数图象与坐标轴的交点及围成的三角形面积",
       goals: ["求图象与 $x$ 轴、$y$ 轴的交点坐标", "求图象与两坐标轴围成的三角形面积"],
       givens: ["一次函数 $" + exprOf(k, b) + "$"],
@@ -145,8 +145,8 @@ export function construct(slot, seed) {
   return {
     params: { mode: 3, ka: ka, ba: ba, kb: kb, bb: bb, x0: x0, y0: y0, dh: dh, dx: dx, area: area },
     stem: "已知两条直线 $l_{1}$：$" + exprOf(ka, ba) + "$ 与 $l_{2}$：$" + exprOf(kb, bb) + "$。\n（1）求这两条直线的交点坐标；\n（2）求这两条直线与 $y$ 轴围成的三角形的面积。",
-    answer: n2("$(" + x0 + "," + y0 + ")$", "$" + area + "$"),
-    goal: "求两条直线的交点，并求它们与 $y$ 轴围成的三角形面积",
+    answer: n2("(" + x0 + "," + y0 + ")", "\u9762\u79ef " + area),
+    goal: "求两条直线的交点，并求它们与 y 轴围成的三角形面积",
     goals: ["求两条直线的交点坐标", "求这两条直线与 $y$ 轴围成的三角形面积"],
     givens: [
       "直线 $l_{1}$：$" + exprOf(ka, ba) + "$",

@@ -40,7 +40,16 @@ import { SessionsPage } from './pages/SessionsPage.js'
 import { SettingsPage } from './pages/SettingsPage.js'
 import { WorkPage } from './pages/WorkPage.js'
 import { useRoute } from './router.js'
-import type { KbListView, LiveEvent, LogEntryView, SessionView, SessionsView, SettingsView, StateView } from './types.js'
+import type {
+  KbListView,
+  LiveEvent,
+  LogEntryView,
+  RunAgentView,
+  SessionView,
+  SessionsView,
+  SettingsView,
+  StateView,
+} from './types.js'
 
 const NAV = [
   { key: 'work', label: '工作台', icon: <ScienceOutlinedIcon /> },
@@ -63,7 +72,11 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
   const [settings, setSettings] = useState<SettingsView | null>(null)
   const [kb, setKb] = useState<KbListView | null>(null)
   const [log, setLog] = useState<readonly LogEntryView[]>([])
-  const [running, setRunning] = useState<{ runId: string; goal: string; workspace: string } | null>(null)
+  const [runs, setRuns] = useState<readonly RunAgentView[]>([])
+  /** 主线（老师直接起的那一轮）：没有就是空闲 */
+  const running = runs.find((run) => run.parent === undefined) ?? null
+  /** 正在做的动作（工具名 + 什么时候开始的），用来显示"正在…（已 n 秒）" */
+  const [doing, setDoing] = useState<{ what: string; agent: string; at: number } | null>(null)
   const [live, setLive] = useState<readonly LiveEvent[]>([])
   const [busy, setBusy] = useState('')
   // 当前在跑的那一轮属于哪个工作区：判定事件要跟着它走（用 ref，避免闭包拿到旧值）
@@ -97,12 +110,32 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       },
       (signal) => {
         if (signal.kind === 'started') {
-          runningNow.current = signal.workspace
-          setRunning({ runId: signal.runId, goal: signal.goal, workspace: signal.workspace })
+          // 主线换工作区时，判定事件跟着主线走；子任务不改这个
+          if (signal.parent === undefined) runningNow.current = signal.workspace
+          setRuns((previous) => [
+            ...previous.filter((run) => run.id !== signal.runId),
+            {
+              id: signal.runId,
+              goal: signal.goal,
+              steps: 0,
+              workspace: signal.workspace,
+              ...(signal.label === undefined ? {} : { label: signal.label }),
+              ...(signal.parent === undefined ? {} : { parent: signal.parent }),
+            },
+          ])
+        }
+        if (signal.kind === 'busy') {
+          setDoing({ what: signal.what, agent: signal.agent, at: Date.now() })
+        }
+        if (signal.kind === 'step') {
+          setRuns((previous) =>
+            previous.map((run) => (run.id === signal.runId ? { ...run, steps: Math.max(run.steps, signal.step) } : run)),
+          )
         }
         if (signal.kind === 'done') {
-          if (signal.workspace === runningNow.current) runningNow.current = ''
-          setRunning((current) => (current?.runId === signal.runId ? null : current))
+          if (signal.parent === undefined && signal.workspace === runningNow.current) runningNow.current = ''
+          setRuns((previous) => previous.filter((run) => run.id !== signal.runId))
+          setDoing((current) => (current?.agent === signal.runId ? null : current))
         } else setLog((previous) => appendSignal(previous, signal))
       },
     )
@@ -138,7 +171,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
     async (text: string): Promise<void> => {
       if (running === null) return
       await guard('interject', async () => {
-        await api.interjectRun(running.runId, text)
+        await api.interjectRun(running.id, text)
       })
     },
     [guard, running],
@@ -147,7 +180,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
   const stopRun = useCallback(async (): Promise<void> => {
     if (running === null) return
     await guard('stop', async () => {
-      await api.stopRun(running.runId)
+      await api.stopRun(running.id)
     })
   }, [guard, running])
 
@@ -160,6 +193,8 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       kb,
       log,
       running,
+      agents: runs,
+      doing,
       live,
       busy,
       error,

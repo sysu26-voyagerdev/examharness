@@ -435,7 +435,8 @@ describe('agent 在运行时制作新题型', () => {
     expect(ctx.construct.kinds()).not.toContain('dynamic/hang')
     // 宿主进程还活着，而且没有偷偷注册
     expect(ctx.construct.kinds()).toContain('parabola/roots')
-  })
+    // 这条**故意**等一个进程被内存上限杀掉：机器忙的时候 5 秒不够（默认超时是 5 秒）
+  }, 30_000)
 
   it('模块声明的结构（goal / givens / 题面公式）原样进 Item——题面公式不许串成答案', async () => {
     writeModule('declared', DECLARED_MODULE)

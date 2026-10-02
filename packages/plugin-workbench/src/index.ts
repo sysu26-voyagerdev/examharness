@@ -14,6 +14,7 @@ import type {
   WorkbenchEvent,
   WorkbenchRequest,
   WorkbenchRun,
+  WorkbenchRunState,
   WorkspaceFile,
   WorkspaceRun,
 } from "@examharness/core";
@@ -51,11 +52,14 @@ export const Config = z.object({
    * 资料动辄几十万字，全塞进去必然爆；超了就截断，并**如实告诉模型**完整内容在哪个文件里。
    */
   toolResultLimit: z.number().default(6000),
+  /** 一个 agent 最多同时派几个子任务（并发上限；子任务各自是一轮完整的循环） */
+  maxChildren: z.number().default(4),
 });
 
 export interface WorkbenchConfig {
   extraRules: string;
   toolResultLimit: number;
+  maxChildren: number;
 }
 
 /**
@@ -74,6 +78,12 @@ interface Candidate {
 interface RunState {
   id: string;
   request: WorkbenchRequest;
+  /** 子任务的短标签（显示用） */
+  label?: string;
+  /** 谁派的（没有 = 老师直接起的） */
+  parent?: string;
+  /** 这一轮自己的候选题表：两轮并行时不能共用（会互相覆盖） */
+  candidates: Map<string, Candidate>;
   workspace?: WorkspaceHandle;
   transcript: WorkbenchEvent[];
   stored: string[];
@@ -279,6 +289,39 @@ function writeConstructor(kindName: string, code: string, temporary = false): st
 /** 题位里允许的水平与题型（写错就退回默认，别让坏值进蓝图） */
 const COGNITIVE = new Set(["了解", "理解", "掌握", "灵活运用"]);
 const QUESTION_TYPE = new Set(["选择", "填空", "解答"]);
+
+const AGENT_TOOLS: readonly LlmToolSpec[] = [
+  {
+    name: "spawn_agent",
+    description:
+      "**派一个子 agent 去干一件独立的事**（它有自己的上下文，可以与你并行）：" +
+      "例如「去真题里统计这个题位的问法」「把这几道题的答案逐条核对一遍」「读那几本书、抽出统计与概率的例题」。\n" +
+      "它和你用同一份资料、同一个题库，但它**看不到你的对话**——目标要写完整（做什么、做到什么算好、产出放哪）。\n" +
+      "派完你可以继续干自己的事；用 agent_status 看它们做到哪了，用 agent_wait 收结果。",
+    parameters: {
+      type: "object",
+      properties: {
+        goal: { type: "string", description: "这个子任务要做什么（完整、自包含）" },
+        label: { type: "string", description: "短名字（界面上显示成「在做什么」）" },
+      },
+      required: ["goal"],
+    },
+  },
+  {
+    name: "agent_status",
+    description: "看派出去的子 agent 做到哪一步了（各自的步数与最近一句话）。",
+    parameters: { type: "object", properties: {}, required: [] },
+  },
+  {
+    name: "agent_wait",
+    description: "等一个（或所有）子 agent 干完，把它最后的交代拿回来。",
+    parameters: {
+      type: "object",
+      properties: { agentId: { type: "string", description: "不填就等全部" } },
+      required: [],
+    },
+  },
+];
 
 const GAP_TOOL: LlmToolSpec = {
   name: "gap_report",
@@ -506,8 +549,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   static Config = Config;
 
   private readonly config: WorkbenchConfig;
-  private readonly candidates = new Map<string, Candidate>();
-  /** 正在跑的轮次（同一时刻最多一轮，见 start()） */
+  /** 正在跑的轮次（顶层最多一轮；子任务可以并行，见 start()） */
   private readonly runs = new Map<string, RunState>();
   private counter = 0;
 
@@ -533,6 +575,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     if (this.ctx.get("session") !== undefined) tools.push(PAPER_TOOL, ...BLUEPRINT_TOOLS);
     // 运行时制作新题型：写模块 → 框架验收 → 通过即生效
     if (this.ctx.get("constructDynamic") !== undefined) tools.push(CONSTRUCTOR_TOOL, GAP_TOOL);
+    // 派子 agent：独立的事可以并行做（子任务看不到主对话，目标要写完整）
+    tools.push(...AGENT_TOOLS);
     return tools;
   }
 
@@ -555,15 +599,31 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     workspace: string;
     done: Promise<WorkbenchRun>;
   } {
-    if (this.runs.size > 0) {
-      const running = [...this.runs.values()][0];
-      throw new Error(`已经有 agent 在跑（${running?.id ?? "?"}）：等它结束，或者让它停下来`);
+    const isChild = request.parent !== undefined && request.parent !== "";
+    // 顶层轮次仍然只允许一个（那是老师的工作台）；**子任务可以并行**——
+    // 主线在写题型的时候，另一个子 agent 可以去读真题、核对数据。
+    if (!isChild) {
+      const top = [...this.runs.values()].filter((state) => (state.parent ?? "") === "");
+      if (top.length > 0) {
+        const running = top[0];
+        throw new Error(`已经有 agent 在跑（${running?.id ?? "?"}）：等它结束，或者让它停下来`);
+      }
+    } else {
+      const siblings = [...this.runs.values()].filter((state) => state.parent === request.parent);
+      if (siblings.length >= this.config.maxChildren) {
+        throw new Error(
+          `同一个 agent 最多同时派 ${String(this.config.maxChildren)} 个子任务：先 agent_wait 收掉几个再派`,
+        );
+      }
     }
     const id = `r${String(Date.now())}-${String((this.counter += 1))}`;
     const workspace = this.openWorkspace(request.workspace);
     const state: RunState = {
       id,
       request,
+      ...(request.label === undefined ? {} : { label: request.label }),
+      ...(request.parent === undefined ? {} : { parent: request.parent }),
+      candidates: new Map<string, Candidate>(),
       // done 在下面 loop 起好之后填（RunState 需要它，但 loop 又需要 state）
       done: Promise.resolve({
         goal: request.goal,
@@ -580,13 +640,12 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       steps: 0,
     };
     this.runs.set(id, state);
-    // 候选题表是**本轮**的：上一轮的候选不该在这一轮还能被提交
-    this.candidates.clear();
     this.ctx.emit("run:started", {
       runId: id,
       goal: request.goal,
       workspace: workspace?.name ?? "",
       ...(request.label === undefined ? {} : { label: request.label }),
+      ...(request.parent === undefined ? {} : { parent: request.parent }),
     });
     state.done = this.loop(state);
     return { runId: id, workspace: workspace?.name ?? "", done: state.done };
@@ -664,13 +723,14 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     return true;
   }
 
-  active(): readonly { id: string; goal: string; steps: number; workspace: string }[] {
-    return [...this.runs.values()].map((state) => ({
-      id: state.id,
-      goal: state.request.goal,
-      steps: state.steps,
-      workspace: state.workspace?.name ?? "",
-    }));
+  active(): readonly WorkbenchRunState[] {
+    return [...this.runs.values()].map((state) =>
+      Object.assign(
+        { id: state.id, goal: state.request.goal, steps: state.steps, workspace: state.workspace?.name ?? "" },
+        state.label === undefined ? {} : { label: state.label },
+        state.parent === undefined ? {} : { parent: state.parent },
+      ),
+    );
   }
 
   private async loop(state: RunState): Promise<WorkbenchRun> {
@@ -686,6 +746,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         kind,
         text,
         workspace: workspace?.name ?? "",
+        // 子任务与主线共用一条时间线：带上是谁做的
+        agent: state.id,
       });
     };
 
@@ -709,6 +771,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         steps: state.steps,
         stored: state.stored,
         workspace: workspace?.name ?? "",
+        ...(state.label === undefined ? {} : { label: state.label }),
+        ...(state.parent === undefined ? {} : { parent: state.parent }),
       });
       this.runs.delete(state.id);
       return result;
@@ -777,12 +841,15 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         for (const call of reply.toolCalls) {
           // 同一轮里的多个工具调用也必须串行：它们会改共享状态（题库、候选题表）
           // oxlint-disable-next-line no-await-in-loop
-          const outcome = await this.execute(
-            call.name,
-            call.arguments,
-            request.blueprint,
-            workspace?.name ?? "",
-          );
+          // 先推一条"正要做什么"：一次工具可能跑几十秒，只在结束时推消息，界面看着像卡住
+          this.ctx.emit("run:busy", {
+            runId: state.id,
+            agent: state.id,
+            what: call.name,
+            workspace: workspace?.name ?? "",
+          });
+          // oxlint-disable-next-line no-await-in-loop -- 工具必须串行（共享状态）
+          const outcome = await this.execute(state, call.name, call.arguments, request.blueprint, workspace?.name ?? "");
           say(state.steps, outcome.kind, outcome.text);
           if (outcome.storedId !== undefined) state.stored.push(outcome.storedId);
           messages.push({
@@ -824,6 +891,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   }
 
   private async execute(
+    state: RunState,
     tool: string,
     rawArguments: string,
     blueprint: Blueprint,
@@ -882,7 +950,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
             : byKind(slotSpec, seed, wanted);
         this.counter += 1;
         const candidateId = `cand-${this.counter}`;
-        this.candidates.set(candidateId, { id: candidateId, slot: row, item });
+        state.candidates.set(candidateId, { id: candidateId, slot: row, item });
         return {
           kind: "tool",
           text: `construct_item：${candidateId}（${item.prose.stem}）`,
@@ -904,7 +972,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
 
     if (tool === "serialize_item") {
       const candidateId = String(args.candidateId ?? "");
-      const candidate = this.candidates.get(candidateId);
+      const candidate = state.candidates.get(candidateId);
       if (candidate === undefined) {
         return {
           kind: "tool",
@@ -916,7 +984,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       if (typeof written === "string") {
         return { kind: "tool", text: `serialize_item：${written}`, payload: { error: written } };
       }
-      this.candidates.set(candidateId, { ...candidate, item: written });
+      state.candidates.set(candidateId, { ...candidate, item: written });
       return {
         kind: "tool",
         text: `serialize_item：题面已写（${String(written.prose.stem.length)} 字，执笔者 ${this.ctx.llm.model}）\n${written.prose.stem}`,
@@ -926,7 +994,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
 
     if (tool === "submit_item") {
       const candidateId = String(args.candidateId ?? "");
-      const candidate = this.candidates.get(candidateId);
+      const candidate = state.candidates.get(candidateId);
       if (candidate === undefined) {
         return {
           kind: "tool",
@@ -945,7 +1013,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           return { kind: "tool", text: `submit_item：题面没写成（${written}）`, payload: { error: written } };
         }
         item = written;
-        this.candidates.set(candidateId, { ...candidate, item });
+        state.candidates.set(candidateId, { ...candidate, item });
       }
       const result = await this.ctx.bank.submit(item);
       if (result.ok) {
@@ -1138,6 +1206,80 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         kind: "tool",
         text: `kb_read：读到 ${String(chunk.text.length)} 字（共 ${String(chunk.total)}${chunk.next === undefined ? "，已到结尾" : `，下一个 offset=${String(chunk.next)}`}）`,
         payload: chunk,
+      };
+    }
+
+    if (tool === "spawn_agent" || tool === "agent_status" || tool === "agent_wait") {
+      const children = (): readonly RunState[] =>
+        [...this.runs.values()].filter((entry) => entry.parent === state.id);
+      const line = (entry: RunState): string => {
+        const last = entry.transcript.toReversed().find((event) => event.kind !== "user");
+        const title = entry.label ?? entry.id;
+        return `${title}（${entry.id}）：${String(entry.steps)} 步｜${last?.text.slice(0, 80) ?? "刚开始"}`
+      };
+
+      if (tool === "spawn_agent") {
+        const goal = String(args.goal ?? "").trim();
+        if (goal === "") return { kind: "tool", text: "spawn_agent：goal 不能为空", payload: { error: "参数不全" } };
+        try {
+          const child = this.start({
+            goal,
+            blueprint: state.request.blueprint,
+            parent: state.id,
+            ...(args.label === undefined ? {} : { label: String(args.label) }),
+            // 子任务在**同一个会话工作区**里干活：in/ 里的资料、out/ 里的产物它都看得见
+            workspace: state.workspace?.name ?? state.request.workspace ?? "",
+          });
+          const label = args.label === undefined ? String(children().length) + " 号子任务" : String(args.label);
+          return {
+            kind: "tool",
+            text: `spawn_agent：派出了一个子 agent（${child.runId}，${label}）。它和你并行干活，用 agent_status 看进度、agent_wait 收结果。`,
+            payload: { agentId: child.runId, label },
+          };
+        } catch (error) {
+          return {
+            kind: "tool",
+            text: `spawn_agent：派不出去（${error instanceof Error ? error.message : String(error)}）`,
+            payload: { error: "派不出去" },
+          };
+        }
+      }
+
+      if (tool === "agent_status") {
+        const list = children();
+        if (list.length === 0) {
+          return { kind: "tool", text: "agent_status：你还没有派过子 agent。", payload: { agents: [] } };
+        }
+        return {
+          kind: "tool",
+          text: `agent_status：${String(list.length)} 个\n${list.map((entry) => `  · ${line(entry)}`).join("\n")}`,
+          payload: {
+            agents: list.map((entry) => ({
+              id: entry.id,
+              label: entry.label ?? "",
+              steps: entry.steps,
+              last: entry.transcript.toReversed().find((event) => event.kind !== "user")?.text ?? "",
+            })),
+          },
+        };
+      }
+
+      // agent_wait：等一个或全部
+      const wanted = typeof args.agentId === "string" && args.agentId !== "" ? String(args.agentId) : undefined;
+      const targets = wanted === undefined ? children() : children().filter((entry) => entry.id === wanted);
+      if (targets.length === 0) {
+        return { kind: "tool", text: "agent_wait：没有要等的子 agent。", payload: { error: "没有子任务" } };
+      }
+      // oxlint-disable-next-line no-await-in-loop
+      await Promise.all(targets.map((entry) => entry.done));
+      const summaries = targets.map((entry) => {
+        const said = entry.transcript.toReversed().find((event) => event.kind === "assistant")?.text ?? "（没有留话）";
+        return `· ${entry.label ?? entry.id}（${String(entry.steps)} 步，入库 ${String(entry.stored.length)} 道）\n${said}`;
+      });
+      return {
+        kind: "tool",
+        text: `agent_wait：${String(targets.length)} 个子 agent 都干完了\n${summaries.join("\n")}`,
+        payload: { done: targets.map((entry) => ({ id: entry.id, label: entry.label ?? "", steps: entry.steps, stored: entry.stored.length })) },
       };
     }
 

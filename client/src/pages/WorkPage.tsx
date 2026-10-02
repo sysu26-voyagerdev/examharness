@@ -22,7 +22,7 @@ import Typography from '@mui/material/Typography'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import { BlueprintDialog } from '../blueprint-dialog.js'
-import { EvidenceView, FilesView, KnowledgeView, PaperView, Timeline } from '../components.js'
+import { DoingRow, EvidenceView, FilesView, KnowledgeView, PaperView, Timeline } from '../components.js'
 import { forWorkspace } from '../log.js'
 import type { BlueprintInfoView, ItemView, SlotChangeView, VersionView } from '../types.js'
 
@@ -49,13 +49,15 @@ export function diffVersions(before: VersionView | undefined, after: VersionView
 
 export function WorkPage(): React.JSX.Element {
   const app = useApp()
-  const { session, state, log, running, busy } = app
+  const { session, state, log, running, agents, doing, busy } = app
 
   const [draft, setDraft] = useState('')
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('paper')
   const [viewVersion, setViewVersion] = useState<number | null>(null)
   const [editingBlueprint, setEditingBlueprint] = useState(false)
   const [library, setLibrary] = useState<readonly BlueprintInfoView[]>([])
+  /** 时间线看谁的活：默认主线；子任务单独看（不然两边的记录会串成一片） */
+  const [focusAgent, setFocusAgent] = useState('')
 
   const reloadLibrary = (): void => {
     void api
@@ -97,7 +99,13 @@ export function WorkPage(): React.JSX.Element {
   const ready = progress.length > 0 && missing.length === 0
   const assembled = versions.length > 0
   // 只显示**这个会话**的活：资料整理是另一条（在「资料」页看）
-  const entries = useMemo(() => forWorkspace(log, session?.meta.id ?? ''), [log, session?.meta.id])
+  const here = useMemo(() => forWorkspace(log, session?.meta.id ?? ''), [log, session?.meta.id])
+  const children = agents.filter((agent) => agent.parent !== undefined)
+  const shownAgent = agents.find((agent) => agent.id === focusAgent) ?? running ?? undefined
+  const entries = useMemo(
+    () => (shownAgent === undefined ? here : here.filter((entry) => entry.runId === shownAgent.id)),
+    [here, shownAgent],
+  )
 
   const send = (): void => {
     const text = draft.trim()
@@ -194,8 +202,40 @@ export function WorkPage(): React.JSX.Element {
           </Stack>
         </Box>
         <Divider />
-        <Box sx={{ flex: 1, minHeight: 0 }}>
-          <Timeline entries={entries} running={running !== null} />
+        {/* 谁在干活：主线 + agent 自己派出去的子任务（它们并行跑，记录要分得开） */}
+        {(running !== null || children.length > 0) && (
+          <Stack direction="row" spacing={1} sx={{ px: 2, py: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+            {running !== null && (
+              <Chip
+                size="small"
+                variant={shownAgent?.id === running.id ? 'filled' : 'outlined'}
+                color={shownAgent?.id === running.id ? 'primary' : 'default'}
+                label={`主线 · ${String(running.steps)} 步`}
+                onClick={() => setFocusAgent(running.id)}
+              />
+            )}
+            {children.map((agent) => (
+              <Tooltip key={agent.id} title={agent.goal}>
+                <Chip
+                  size="small"
+                  variant={shownAgent?.id === agent.id ? 'filled' : 'outlined'}
+                  color={shownAgent?.id === agent.id ? 'secondary' : 'default'}
+                  label={`${agent.label ?? '子任务'} · ${String(agent.steps)} 步`}
+                  onClick={() => setFocusAgent(agent.id)}
+                />
+              </Tooltip>
+            ))}
+            <Box sx={{ flex: 1 }} />
+            <Typography variant="caption" color="text.secondary">
+              {running === null ? '都干完了' : '在跑'}
+            </Typography>
+          </Stack>
+        )}
+        <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <Box sx={{ flex: 1, minHeight: 0 }}>
+            <Timeline entries={entries} running={running !== null} />
+          </Box>
+          <DoingRow doing={doing} since={doing?.at ?? Date.now()} />
         </Box>
         <CardContent sx={{ borderTop: 1, borderColor: 'divider', py: 2, bgcolor: 'action.hover' }}>
           {running !== null && (

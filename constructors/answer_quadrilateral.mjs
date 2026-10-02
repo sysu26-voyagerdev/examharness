@@ -29,7 +29,7 @@ export function construct(slot, seed) {
       answer: n3("AC=" + hyp, "\u9762\u79ef " + area, "\u9762\u79ef " + (area / 2)),
       goal: "用矩形的性质与勾股定理求对角线和面积",
       goals: ["求对角线 $AC$ 的长", "求矩形 $ABCD$ 的面积", "求 $\u25b3ABC$ 的面积"],
-      givens: ["在矩形 $ABCD$ 中", "$AB=" + a + "$\uff0c$BC=" + b + "$"],
+      givens: ["在矩形 $ABCD$ 中", "$AB=" + a + "$", "$BC=" + b + "$"],
       solution: [
         "因为 $ABCD$ 是矩形，所以 $\u2220B=90^{\u00b0}$，$AC=\\sqrt{" + a + "^{2}+" + b + "^{2}}=" + hyp + "$",
         "矩形面积 $=AB\\times BC=" + a + "\\times " + b + "=" + area + "$",
@@ -55,12 +55,14 @@ export function construct(slot, seed) {
     const small = e * f / 8;
     return {
       params: { mode: 1, e: e, f: f, side: side, area: area, small: small, half: e / 2, half2: f / 2 },
-      stem: "在菱形 $ABCD$ 中，对角线 $AC=" + e + "$\uff0c$BD=" + f + "$，两条对角线交于点 $O$。\n（1）求菱形 $ABCD$ 的边长；\n（2）求菱形 $ABCD$ 的面积；\n（3）求 $\u25b3AOB$ 的面积。",
+      stem: "在菱形 $ABCD$ 中，对角线 $AC=" + e + "$\uff0c$对角线 $BD=" + f + "$，两条对角线交于点 $O$。\n（1）求菱形 $ABCD$ 的边长；\n（2）求菱形 $ABCD$ 的面积；\n（3）求 $\u25b3AOB$ 的面积。",
       answer: n3("\u8fb9\u957f " + side, "\u9762\u79ef " + area, "\u9762\u79ef " + small),
       goal: "用菱形的对角线互相垂直平分求边长与面积",
       goals: ["求菱形的边长", "求菱形的面积", "求 $\u25b3AOB$ 的面积"],
       givens: [
-        "在菱形 $ABCD$ 中，对角线 $AC=" + e + "$\uff0c$BD=" + f + "$",
+        "在菱形 $ABCD$ 中",
+        "对角线 $AC=" + e + "$",
+        "对角线 $BD=" + f + "$",
         "两条对角线交于点 $O$"
       ],
       solution: [
@@ -85,17 +87,20 @@ export function construct(slot, seed) {
   if (mode === 2) {
     const a = ri(r, 3, 12), h = ri(r, 2, 8);
     const area = a * h;
-    const b = pick(r, [2, 3, 4, 5, 6, 8].filter(function (v) { return area % v === 0; }));
+    const cands = [2, 3, 4, 5, 6, 8].filter(function (v) { return area % v === 0; });
+    const b = pick(r, cands);
     const h2 = area / b;
     return {
       params: { mode: 2, a: a, h: h, b: b, h2: h2, area: area, per: 2 * (a + b) },
-      stem: "在平行四边形 $ABCD$ 中，边 $AB=" + a + "$\uff0c$AB$ 边上的高为 " + h + "$\uff0c$BC=" + b + "$。\n（1）求平行四边形 $ABCD$ 的面积；\n（2）求 $BC$ 边上的高；\n（3）求平行四边形 $ABCD$ 的周长。",
+      stem: "在平行四边形 $ABCD$ 中，边 $AB=" + a + "$\uff0c$边 $BC=" + b + "$\uff0c$AB$ 边上的高为 " + h + "$。\n（1）求平行四边形 $ABCD$ 的面积；\n（2）求 $BC$ 边上的高；\n（3）求平行四边形 $ABCD$ 的周长。",
       answer: n3("\u9762\u79ef " + area, "\u9ad8 " + h2, "\u5468\u957f " + (2 * (a + b))),
       goal: "用平行四边形的面积公式求高与周长",
       goals: ["求平行四边形的面积", "求 $BC$ 边上的高", "求平行四边形的周长"],
       givens: [
-        "在平行四边形 $ABCD$ 中，$AB=" + a + "$\uff0c$BC=" + b + "$",
-        "$AB$ 边上的高为 " + h + "$"
+        "在平行四边形 $ABCD$ 中",
+        "边 $AB=" + a + "$",
+        "边 $BC=" + b + "$",
+        "$AB$ 边上的高为 " + h
       ],
       solution: [
         "面积 $=AB\\times h=" + a + "\\times " + h + "=" + area + "$",
@@ -116,14 +121,13 @@ export function construct(slot, seed) {
   }
 
   const a = ri(r, 4, 12), al = ri(r, 4, 15) * 10;
-  const other = 180 - al;
   return {
-    params: { mode: 3, a: a, alpha: al, other: other, per: 4 * a },
+    params: { mode: 3, a: a, alpha: al, other: 180 - al, per: 4 * a },
     stem: "在四边形 $ABCD$ 中，$AB=BC=CD=DA=" + a + "$\uff0c$\u2220A=" + al + "^{\u00b0}$。\n（1）判断四边形 $ABCD$ 的形状；\n（2）求四边形 $ABCD$ 的周长；\n（3）求 $\u2220C$ 的度数。",
-    answer: n3("\u83f1\u5f62", "\u5468\u957f " + (4 * a), "\u2220C=" + al + "^{\u00b0}"),
+    answer: n3("\u56db\u8fb9\u5f62 $ABCD$ \u662f\u83f1\u5f62", "\u5468\u957f " + (4 * a), "\u2220C \u7684\u5ea6\u6570\u4e3a " + al),
     goal: "由四边相等判断菱形，并用菱形的性质求周长与角",
     goals: ["判断四边形 $ABCD$ 的形状", "求四边形 $ABCD$ 的周长", "求 $\u2220C$ 的度数"],
-    givens: ["在四边形 $ABCD$ 中，$AB=BC=CD=DA=" + a + "$", "$\u2220A=" + al + "^{\u00b0}$"],
+    givens: ["在四边形 $ABCD$ 中", "$AB=BC=CD=DA=" + a + "$", "$\u2220A=" + al + "^{\u00b0}$"],
     solution: [
       "四边都相等的四边形是菱形，所以四边形 $ABCD$ 是菱形",
       "周长 $=4\\times " + a + "=" + (4 * a) + "$",
@@ -136,7 +140,7 @@ export function construct(slot, seed) {
     ],
     checks: [
       { expr: "4*a", at: { a: a }, expect: 4 * a },
-      { expr: "180-alpha", at: { alpha: al }, expect: other }
+      { expr: "180-alpha", at: { alpha: al }, expect: 180 - al }
     ]
   };
 }

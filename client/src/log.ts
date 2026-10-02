@@ -56,7 +56,13 @@ const localId = (): string => `local-${String((counter += 1))}`
 export function appendSignal(log: readonly LogEntryView[], signal: RunSignal): readonly LogEntryView[] {
   const at = new Date().toISOString()
   if (signal.kind === 'started') {
+    // 老师直接起的一轮才把目标当"老师说的话"显示；子任务不是老师说的
+    if (signal.parent !== undefined) return log
     return [...log, { id: localId(), at, kind: 'user', text: signal.goal, runId: signal.runId }]
+  }
+  if (signal.kind === 'busy') {
+    // "正要做什么"不进时间线（那会刷屏）：它是**状态**，由界面显示成"正在…"
+    return log
   }
   if (signal.kind === 'step') {
     return [

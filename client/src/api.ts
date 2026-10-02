@@ -223,10 +223,12 @@ export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: R
       kind: RunEventView['kind']
       text: string
       workspace?: string
+      agent?: string
     }
     onRun({
       kind: 'step',
       ...(payload.runId === undefined ? {} : { runId: payload.runId }),
+      ...(payload.agent === undefined ? {} : { agent: payload.agent }),
       step: payload.step,
       stepKind: payload.kind,
       text: payload.text,
@@ -234,8 +236,13 @@ export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: R
     })
   }
   const started = (message: MessageEvent<string>): void => {
-    const payload = JSON.parse(message.data) as { runId: string; goal: string; workspace: string }
+    const payload = JSON.parse(message.data) as { runId: string; goal: string; workspace: string; label?: string; parent?: string }
     onRun({ kind: 'started', ...payload })
+  }
+  // "正要做什么"：工具一开跑就推，界面据此显示"正在…（已 n 秒）"
+  const busy = (message: MessageEvent<string>): void => {
+    const payload = JSON.parse(message.data) as { runId: string; agent: string; what: string; workspace?: string }
+    onRun({ kind: 'busy', ...payload, workspace: payload.workspace ?? '' })
   }
   const done = (message: MessageEvent<string>): void => {
     const payload = JSON.parse(message.data) as {
@@ -244,6 +251,8 @@ export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: R
       steps: number
       stored: readonly string[]
       workspace?: string
+      label?: string
+      parent?: string
     }
     onRun({ kind: 'done', ...payload, workspace: payload.workspace ?? '' })
   }
@@ -254,6 +263,7 @@ export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: R
     ['kb:changed', simple('kb:changed')],
     ['workspace:changed', simple('workspace:changed')],
     ['settings:changed', simple('settings:changed')],
+    ['run:busy', busy],
     ['run:step', step],
     ['run:started', started],
     ['run:done', done],

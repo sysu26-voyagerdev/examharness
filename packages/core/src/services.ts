@@ -173,6 +173,11 @@ export interface LlmApi {
 }
 
 export interface WorkbenchRequest {
+  /**
+   * 这一轮是**谁派出来的**：没有 = 老师直接起的（界面上的"一轮"）；
+   * 有 = 某个 agent 派的子任务（子任务可以并行跑，父 agent 能查进度、能收结果）。
+   */
+  parent?: string
   goal: string
   /**
    * 现状简报：框架准备好的"现在是什么情况"（蓝图题位、各题位还缺几道、有哪些资料）。
@@ -221,6 +226,10 @@ export interface WorkbenchRunState {
   goal: string
   steps: number
   workspace: string
+  /** 界面上显示的短名字（子任务用它说"我在干什么"） */
+  label?: string
+  /** 谁派的（没有 = 老师直接起的） */
+  parent?: string
 }
 
 export interface WorkbenchApi {

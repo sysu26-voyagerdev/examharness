@@ -224,3 +224,33 @@ describe('agent 工作台', () => {
     expect(ctx.llm.configured).toBe(false)
   })
 })
+
+describe('子 agent（并行、可查、可收）', () => {
+  /** 只会说"收工"的假模型：用来起一轮就走完，方便测并行的规矩 */
+  const quick = (): LlmReply => ({ content: '收工。', toolCalls: [] })
+
+  it('顶层只允许一轮；但这一轮可以派子任务并行跑，并能收结果', async () => {
+    const ctx = await boot({ chat: quick })
+    const parent = ctx.workbench.start({ goal: '主线', blueprint })
+    // 顶层再来一轮：明确拒绝（界面会说"已经有 agent 在跑"）
+    expect(() => ctx.workbench.start({ goal: '又一主线', blueprint })).toThrow(/已经有 agent 在跑/u)
+
+    const child = ctx.workbench.start({ goal: '去读真题', blueprint, parent: parent.runId, label: '读真题' })
+    expect(ctx.workbench.active().map((run) => run.id)).toContain(child.runId)
+
+    const finished = await child.done
+    expect(finished.stopped).toBe('done')
+    await parent.done
+    expect(ctx.workbench.active()).toHaveLength(0)
+  })
+
+  it('同一个 agent 的子任务有并发上限（不是步数上限，是"同时几个"）', async () => {
+    const ctx = await boot({ chat: quick })
+    const parent = ctx.workbench.start({ goal: '主线', blueprint })
+    for (let index = 0; index < 4; index += 1) {
+      ctx.workbench.start({ goal: `子任务 ${String(index)}`, blueprint, parent: parent.runId })
+    }
+    expect(() => ctx.workbench.start({ goal: '第五个', blueprint, parent: parent.runId })).toThrow(/最多同时派/u)
+    await parent.done
+  })
+})

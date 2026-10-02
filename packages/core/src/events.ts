@@ -23,7 +23,14 @@ declare module '@deepseek-ai/cordis' {
     /** 老师签了字（emit，仅广播；R4 的留痕） */
     'item:confirmed'(payload: { item: Item; by: string }): void
     /** 一轮 agent 循环开始（emit，仅广播；界面据此把"正在跑"显示出来） */
-    'run:started'(payload: { runId: string; goal: string; workspace: string; label?: string }): void
+    'run:started'(payload: {
+      runId: string
+      goal: string
+      workspace: string
+      label?: string
+      /** 这一轮是哪个 agent 派出来的（没有 = 老师直接起的） */
+      parent?: string
+    }): void
     /** 工作台的一步（emit，仅广播；界面实时显示 agent 在干什么） */
     'run:step'(payload: {
       runId: string
@@ -32,12 +39,21 @@ declare module '@deepseek-ai/cordis' {
       text: string
       /** 属于哪个工作区：界面靠它把"这个会话的活"和"这一批资料的活"分开 */
       workspace: string
+      /** 哪一个 agent 做的（子任务与主任务共用一条时间线时靠它分组） */
+      agent?: string
     }): void
+    /**
+     * **正要做什么**（工具调用开始前就推）：
+     * 一次模型调用 + 一次工具跑动可能要几十秒，只在结束时推消息，界面看着像卡住了。
+     */
+    'run:busy'(payload: { runId: string; agent: string; what: string; workspace: string }): void
     /** 一轮结束（emit，仅广播；界面据此收尾并刷新数据） */
     'run:done'(payload: {
       runId: string
       stopped: 'done' | 'no-llm' | 'stopped' | 'error'
       steps: number
+      label?: string
+      parent?: string
       stored: readonly string[]
       workspace: string
     }): void
