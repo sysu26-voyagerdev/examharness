@@ -13,6 +13,11 @@ import Paper from '@mui/material/Paper'
 import Switch from '@mui/material/Switch'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
+import Accordion from '@mui/material/Accordion'
+import AccordionDetails from '@mui/material/AccordionDetails'
+import AccordionSummary from '@mui/material/AccordionSummary'
+import ExpandMoreOutlinedIcon from '@mui/icons-material/ExpandMoreOutlined'
+import { gateLabel } from '../components.js'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import type { AppSettingsView } from '../types.js'
@@ -36,6 +41,17 @@ function diffOps(base: unknown, next: unknown, path: readonly string[] = []): ap
       ? []
       : diffOps((base as Record<string, unknown>)[key], (next as Record<string, unknown>)[key], [...path, key]),
   )
+}
+
+/** 设置页里给"检查"起的中文名（比闸门名好懂） */
+const GATE_TEXT: Readonly<Record<string, string>> = {
+  'verify-scope': '不超纲',
+  'verify-symbolic': '算式核对',
+  'verify-dedup': '不与旧题重复、不是抄原题',
+  'verify-figure': '图形自洽',
+  'verify-roundtrip': '题面忠实（回译对得上）',
+  'verify-parts': '分量够（解答题要分问）',
+  'verify-options': '选项可判（选择题四个选项）',
 }
 
 export function SettingsPage(): React.JSX.Element {
@@ -111,7 +127,9 @@ export function SettingsPage(): React.JSX.Element {
     <Container maxWidth="sm" sx={{ py: 4 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 2 }}>
         <Typography variant="h5">设置</Typography>
-        <Typography variant="caption">{note === '' ? '改完立刻生效' : note}</Typography>
+        <Typography variant="caption" color="text.secondary">
+          {note === '' ? '改完点保存，立刻生效' : note}
+        </Typography>
         <Box sx={{ flex: 1 }} />
         <Button variant="contained" size="small" disabled={busy !== ''} onClick={save}>
           保存
@@ -136,8 +154,14 @@ export function SettingsPage(): React.JSX.Element {
               placeholder="deepseek-chat"
               onChange={(event) => edit({ model: { ...draft.model, model: event.target.value } })}
             />
-            <Button size="small" disabled={busy !== '' || fetching} onClick={fetchModels}>
-              获取可用模型
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={busy !== '' || fetching}
+              onClick={fetchModels}
+              sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+            >
+              {fetching ? '正在取…' : '获取可用模型'}
             </Button>
           </Stack>
           {models.length > 0 && (
@@ -159,9 +183,6 @@ export function SettingsPage(): React.JSX.Element {
           <Box>
             <Typography variant="body2" sx={{ mb: 1 }}>
               API 密钥
-              <Typography component="span" variant="caption" sx={{ ml: 1, fontFamily: 'monospace' }}>
-                {key.ref}
-              </Typography>
             </Typography>
             {key.source === 'env' ? (
               <Typography variant="caption">由启动时的环境变量提供，页面上改不了：改环境变量再重启。</Typography>
@@ -199,7 +220,8 @@ export function SettingsPage(): React.JSX.Element {
               </Stack>
             )}
             <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
-              密钥只写不读：存本机 data/credentials.json（仅本人可读），页面与接口都不会回传它。
+              密钥只写不读：存在本机的 data/credentials.json（只有本人可读），
+              页面和接口都不会把它读回来。变量名 {key.ref} 只在启动时用得到。
               {runtime.modelConfigured ? `　当前可用：${runtime.modelName}` : '　当前还没有可用的模型。'}
             </Typography>
           </Box>
@@ -264,6 +286,7 @@ export function SettingsPage(): React.JSX.Element {
         <Stack direction="row" spacing={2}>
           <TextField
             label="数字重合度"
+            helperText="题面里的数与原题有多重合"
             type="number"
             value={draft.gates.corpusNumbersMin}
             slotProps={{ htmlInput: { step: 0.05, min: 0, max: 1 } }}
@@ -271,6 +294,7 @@ export function SettingsPage(): React.JSX.Element {
           />
           <TextField
             label="措辞相似度"
+            helperText="句子写得有多像"
             type="number"
             value={draft.gates.corpusWordingMax}
             slotProps={{ htmlInput: { step: 0.05, min: 0, max: 1 } }}
@@ -278,14 +302,16 @@ export function SettingsPage(): React.JSX.Element {
           />
           <TextField
             label="与自家题库"
+            helperText="超过就当撞题"
             type="number"
             value={draft.gates.bankMaxSimilarity}
             slotProps={{ htmlInput: { step: 0.05, min: 0, max: 1 } }}
             onChange={(event) => edit({ gates: { ...draft.gates, bankMaxSimilarity: Number(event.target.value) } })}
           />
         </Stack>
-        <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
-          数字和措辞**同时**超过标准，才算跟资料里那道题太像——只看措辞会把"同一知识点、换了数字"的题全误伤。
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1.5 }}>
+          与资料里的题比对时，**数字**与**措辞**同时超过标准才算"太像"——
+          只看措辞会把"同一知识点、换了数字"的题全误伤。与自家题库那条是撞题线：超过就当重复。
         </Typography>
         </CardContent>
       </Card>
@@ -313,25 +339,55 @@ export function SettingsPage(): React.JSX.Element {
         </CardContent>
       </Card>
 
+      {/* 现状：**说人话**。内部名字（题型 id、闸门 id）留给日志，
+          这里只回答两个问题：现在能出什么题、每道题要过哪几关。 */}
       <Card>
-        <CardHeader title="现在的状况" />
+        <CardHeader title="现在的状况" subheader="出题前先看一眼，心里有数" />
         <CardContent sx={{ pt: 0 }}>
-        <Stack spacing={0.75}>
-          <Typography variant="body2">
-            资料里的题：{runtime.corpusTotal} 条　可以对外用：{runtime.corpusDistributable} 条
-          </Typography>
-          <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
-            能造的题型：{runtime.constructors.join('、')}
-          </Typography>
-          <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
-            出题时的检查顺序：{runtime.gates.join(' → ')}
-          </Typography>
-          {runtime.corpusTotal === 0 && (
-            <Typography variant="caption">
-              现在资料是空的：出题不会拿它做参考，判重也只会跟自家题库比。
-            </Typography>
-          )}
-        </Stack>
+          <Stack spacing={1.5}>
+            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', alignItems: 'center' }}>
+              <Chip size="small" variant="outlined" label={`能出 ${String(runtime.constructors.length)} 种题型`} />
+              <Chip
+                size="small"
+                variant="outlined"
+                label={runtime.corpusTotal === 0 ? '还没导入资料' : `资料里的题 ${String(runtime.corpusTotal)} 条`}
+              />
+              {runtime.corpusTotal > 0 && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  color={runtime.corpusDistributable > 0 ? 'default' : 'warning'}
+                  label={`可对外用 ${String(runtime.corpusDistributable)} 条`}
+                />
+              )}
+            </Stack>
+            <Box>
+              <Typography variant="caption" color="text.secondary">
+                每道题都要过这几关
+              </Typography>
+              <Typography variant="body2">{runtime.gates.map((gate) => GATE_TEXT[gate] ?? gateLabel(gate)).join(' → ')}</Typography>
+            </Box>
+            <Accordion disableGutters elevation={0} sx={{ '&:before': { display: 'none' } }}>
+              <AccordionSummary expandIcon={<ExpandMoreOutlinedIcon />} sx={{ px: 0, minHeight: 32 }}>
+                <Typography variant="caption" color="text.secondary">
+                  看细节（题型与技术名字）
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails sx={{ px: 0 }}>
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', display: 'block', wordBreak: 'break-all' }}>
+                  {runtime.constructors.join('、')}
+                </Typography>
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', display: 'block', mt: 1, wordBreak: 'break-all' }}>
+                  {runtime.gates.join(' → ')}
+                </Typography>
+              </AccordionDetails>
+            </Accordion>
+            {runtime.corpusTotal === 0 && (
+              <Typography variant="caption" color="text.secondary">
+                资料是空的时候：出题不会拿它做参考，判重也只跟自家题库比。
+              </Typography>
+            )}
+          </Stack>
         </CardContent>
       </Card>
     </Container>

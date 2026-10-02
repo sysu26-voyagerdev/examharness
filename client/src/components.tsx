@@ -108,7 +108,8 @@ function collapseRepeats(entries: readonly LogEntryView[]): readonly LogEntryVie
     const last = wrote.at(-1)
     if (wrote.length === 1 && first !== undefined) condensed.push(first)
     else if (last !== undefined) {
-      condensed.push({ ...last, text: `写了 ${String(wrote.length)} 个题型：${wrote.map((entry) => entry.text.split("（")[0]).join("、")}` })
+      const names = wrote.map((entry) => entry.text.split('（')[0]?.replace(/\s*通过验收并生效.*$/u, '').trim() ?? '')
+      condensed.push({ ...last, text: `写了 ${String(wrote.length)} 个题型：${names.join('、')}` })
     }
     wrote = []
   }
@@ -261,7 +262,9 @@ const GATE_LABEL: Readonly<Record<string, string>> = {
 }
 
 export function gateLabel(gate: string): string {
-  return GATE_LABEL[gate] ?? gate
+  // 闸门有两个名字：插件名（verify-options）与证据键（options）。两个都要认。
+  const key = gate.replace(/^verify-/, '')
+  return GATE_LABEL[key] ?? GATE_LABEL[gate] ?? gate
 }
 
 /** 难度按人话显示：0.855 不是给人看的，0.86 或"较易"才是 */
