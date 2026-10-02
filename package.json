@@ -21,7 +21,10 @@
     "test": "vitest run",
     "check": "pnpm lint && pnpm typecheck && pnpm test",
     "clean": "tsc -b --clean",
-    "dev:client": "pnpm --filter @examharness/client run dev"
+    "dev:client": "pnpm --filter @examharness/client run dev",
+    "serve": "bash scripts/serve.sh start",
+    "serve:stop": "bash scripts/serve.sh stop",
+    "serve:status": "bash scripts/serve.sh status"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.4",

@@ -220,11 +220,12 @@ export class CorpusService extends Service implements CorpusApi {
 
   /** 原创度报告：与语料库（真实题库/教材）最像的那一条 */
   maxSimilarity(text: string): { wording: number; numbers: number; id?: string; source?: string } {
-    let best = 0
+    let best = -1
     let hit: CorpusRecord | undefined
     for (const item of this.items) {
-      // 先按"数字重合度"找最近邻：数学上像才是真的像
-      const score = numbers(text).size === 0 ? similarity(text, item.stem) : numberSimilarity(text, item.stem)
+      // 选最近邻用组合分：数字重合为主（数学上像才是真的像），措辞为辅。
+      // 只用数字会把"措辞几乎一样但数值不同"的邻居漏掉，报告出来就是骗人的 0.00。
+      const score = 0.7 * numberSimilarity(text, item.stem) + 0.3 * similarity(text, item.stem)
       if (score > best) {
         best = score
         hit = item
