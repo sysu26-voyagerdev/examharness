@@ -161,6 +161,20 @@ function contractProblems(built) {
   if (!Array.isArray(built.givens) || built.givens.some((given) => typeof given !== 'string')) {
     problems.push('givens 必须是字符串数组（题面显式给出的条件，一条一个；没有条件就给空数组）')
   }
+  // **题面得是一道题**：只有情境、没有问题，学生不知道要做什么
+  // （真实事故：8 道 9 分解答题全是"一块长方形试验田，长为 6√7 米，宽为 3√7 米。"）。
+  // 与 core 的 stemCompleteness 同规则。
+  {
+    const goals = Array.isArray(built.goals) ? built.goals.filter((goal) => typeof goal === 'string' && goal.trim() !== '') : []
+    const ask = /求|证明|求证|判断|说明|计算|比较|是否|试(?:求|判断|说明|计算|证明|画出?|比较|探索|用)|画出|探索|猜想|化简|解方程|解不等式|分解因式|因式分解|（\s*）|\(\s*\)|_{3,}|？|\?/
+    const marks = (built.stem.match(/[（(]\s*\d+\s*[)）]|[①-⑳]/g) ?? []).length
+    if (!ask.test(built.stem)) {
+      problems.push('题面只有情境/条件，没有问题：要写出"求…""证明…""…是（　）"这样的要求')
+    } else if (goals.length >= 2 && marks < goals.length) {
+      problems.push(`声明了 ${goals.length} 问，题面里只有 ${marks} 处分问标记：把每一问写进题面（（1）…（2）…）`)
+    }
+  }
+
   // 题面里的数学要写成**行内 LaTeX**（$x^{2}$），不要留 x^2、x_1 这种写法：
   // 卷面上那是给学生看的公式，不渲染出来就是一堆记号（真实踩过：卷面印着 "x^2 - 7x + 12 = 0"）。
   for (const [name, value] of [

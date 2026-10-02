@@ -55,6 +55,7 @@
     "@examharness/plugin-verify-figure": "workspace:*",
     "@examharness/plugin-verify-options": "workspace:*",
     "@examharness/plugin-verify-parts": "workspace:*",
+    "@examharness/plugin-verify-question": "workspace:*",
     "@examharness/plugin-verify-roundtrip": "workspace:*",
     "@examharness/plugin-verify-scope": "workspace:*",
     "@examharness/plugin-verify-symbolic": "workspace:*",

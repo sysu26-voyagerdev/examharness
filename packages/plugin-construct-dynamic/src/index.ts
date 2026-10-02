@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { fnv1a, optionDisplayText } from '@examharness/core'
+import { fnv1a } from '@examharness/core'
 import type {
   BlueprintRow,
   CheckPoint,
@@ -154,7 +154,9 @@ function assembleItem(kind: string, slot: BlueprintRow, seed: number, out: Modul
       ...(() => {
         if (out.options !== undefined) return { options: out.options.map((option): Option => ({ key: option.key, text: option.text })) }
         if (out.distractors === undefined) return {}
-        const texts = [out.answer, ...out.distractors.map(String)].slice(0, 4).map((text) => optionDisplayText(text))
+        // 正确项**保持与 witness.answer 一字不差**（闸门要拿它核"选项里有没有正确答案"）；
+        // 四个选项看着不齐的问题，交给展示层统一处理（core 的 optionDisplayText）
+        const texts = [out.answer, ...out.distractors.map(String)].slice(0, 4)
         return { options: shuffleOptions(texts, seed) }
       })(),
       answerText: out.answer,

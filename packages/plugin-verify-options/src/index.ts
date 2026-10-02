@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Verdict } from '@examharness/core'
-import { normalize } from '@examharness/core'
+import { normalize, optionDisplayText } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -75,8 +75,11 @@ export function apply(ctx: Context, config: OptionsConfig): void {
     if (new Set(texts).size !== texts.length) {
       return { pass: false, gate: name, reason: '有两个选项文字一样：那样就没有唯一答案了', fixable: true }
     }
+    // 两边都按"卷面上的写法"比：`BC=11` 与 `11` 是同一个选项的两种写法
     const answer = normalize(item.witness.answer)
-    const correct = options.filter((option) => normalize(option.text) === answer)
+    const same = (text: string): boolean =>
+      normalize(text) === answer || normalize(optionDisplayText(text)) === answer || normalize(optionDisplayText(answer)) === normalize(optionDisplayText(text))
+    const correct = options.filter((option) => same(option.text))
     if (correct.length === 0) {
       return {
         pass: false,

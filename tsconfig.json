@@ -38,6 +38,9 @@
       "path": "./packages/plugin-verify-figure"
     },
     {
+      "path": "./packages/plugin-verify-question"
+    },
+    {
       "path": "./packages/plugin-verify-parts"
     },
     {

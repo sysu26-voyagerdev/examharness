@@ -137,6 +137,9 @@
   config:
     strict: true
 
+- id: verify-question
+  name: '@examharness/plugin-verify-question'
+
 - id: verify-parts
   name: '@examharness/plugin-verify-parts'
   config:

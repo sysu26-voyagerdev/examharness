@@ -125,6 +125,39 @@ export function sameAnswer(constructed: string, parsed: string, tolerance = 1e-6
   return answerLetters(constructed).every((token) => letters.has(token))
 }
 
+/** 题面里出现这些，说明它在"要求做点什么"，而不是只摆了一段情境 */
+const ASK = /求|证明|求证|判断|说明|计算|比较|是否|试(?:求|判断|说明|计算|证明|画出?|比较|探索|用)|画出|探索|猜想|化简|解方程|解不等式|分解因式|因式分解|（\s*）|\(\s*\)|_{3,}|？|\?/
+/** 分问标记：（1）(1)① 之类 */
+const PART_MARK = /[（(]\s*\d+\s*[)）]|[①-⑳]/g
+
+/**
+ * 题面是不是**一道题**（而不只是一段情境）。
+ *
+ * 真实事故：卷子上 8 道 9 分解答题全是"一块长方形试验田，长为 6√7 米，宽为 3√7 米。"——
+ * 有情境、没有问；填空题写着"一个袋子里有 7 个红球…"就没了。原因是**分量闸门数的是题型声明的 goals，
+ * 不是题面里真的有没有问**：声明了三问，题面一句问都没有，照样入库。
+ *
+ * 判据（都能一眼看懂）：
+ *   1. 题面里要有"要求"（求/证明/判断/化简/…/填空横线/问号）；
+ *   2. 声明了几问，题面里就要有几分问标记（（1）（2）…）；
+ *   3. 填空题要有作答空位（______ 或（  ））。
+ */
+export function stemCompleteness(stem: string, goals: readonly string[], type: string): string | undefined {
+  const text = stem ?? ''
+  if (text.trim() === '') return '题面是空的'
+  if (!ASK.test(text)) {
+    return '题面只有情境/条件，**没有问题**：学生不知道要做什么（要写出"求…""证明…""…是（  ）"这样的要求）'
+  }
+  const marks = [...text.matchAll(PART_MARK)].length
+  if (goals.length >= 2 && marks < goals.length) {
+    return `题型声明了 ${String(goals.length)} 问，题面里只有 ${String(marks)} 处分问标记：把每一问写进题面（（1）…（2）…）`
+  }
+  if (type === '填空' && !/_{3,}|（\s*）|\(\s*\)/.test(text)) {
+    return '填空题要给出作答空位（______ 或（  ）），不然学生不知道往哪儿写'
+  }
+  return undefined
+}
+
 /**
  * 一段文字里的数学片段（`$...$` / `$$...$$` 的内容）。
  * 闸门用它做两件事：**编译都过**、**公式里的数字都来自构造**——

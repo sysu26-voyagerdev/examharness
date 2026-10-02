@@ -77,6 +77,9 @@ importers:
       '@examharness/plugin-verify-parts':
         specifier: workspace:*
         version: link:packages/plugin-verify-parts
+      '@examharness/plugin-verify-question':
+        specifier: workspace:*
+        version: link:packages/plugin-verify-question
       '@examharness/plugin-verify-roundtrip':
         specifier: workspace:*
         version: link:packages/plugin-verify-roundtrip
@@ -397,6 +400,18 @@ importers:
         version: 3.18.0
 
   packages/plugin-verify-parts:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.4
+        version: 4.0.4(@deepseek-ai/cordis-plugin-include@1.0.9)(@deepseek-ai/cordis-plugin-loader@1.0.5)
+      '@examharness/core':
+        specifier: workspace:*
+        version: link:../core
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+
+  packages/plugin-verify-question:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.4

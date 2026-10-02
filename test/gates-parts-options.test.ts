@@ -12,6 +12,7 @@ import * as dedupPlugin from '@examharness/plugin-verify-dedup'
 import * as figureGate from '@examharness/plugin-verify-figure'
 import * as optionsGate from '@examharness/plugin-verify-options'
 import * as partsGate from '@examharness/plugin-verify-parts'
+import * as questionGate from '@examharness/plugin-verify-question'
 import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -54,6 +55,7 @@ async function boot(): Promise<Context> {
     await ctx.plugin(scopePlugin, { forbid: [] }),
     await ctx.plugin(symbolicPlugin, { tolerance: 1e-9 }),
     await ctx.plugin(dedupPlugin, { maxSimilarity: 0.85 }),
+    await ctx.plugin(questionGate),
     await ctx.plugin(partsGate, { twoPartFrom: 8, threePartFrom: 12 }),
     await ctx.plugin(optionsGate, { optionCount: 4 }),
     await ctx.plugin(figurePlugin, { width: 480, height: 300, minPointGapPx: 14 }),
@@ -105,17 +107,28 @@ describe('分量闸门', () => {
     expect(ctx.bank.all()).toHaveLength(0)
   })
 
-  it('同一道题分成两问 → 通过（分量对得上了）', async () => {
+  it('同一道题分成两问、且两问都写进题面 → 通过（分量对得上了）', async () => {
     const ctx = await boot()
-    const item = withGoals((await itemFor('解答', 9)), ['求对称轴', '求顶点坐标'])
+    const base = await itemFor('解答', 9)
+    const item: Item = {
+      ...withGoals(base, ['求对称轴', '求顶点坐标']),
+      prose: {
+        ...base.prose,
+        stem: '已知抛物线 $y=x^{2}+4x$。（1）求它的对称轴；（2）求它的顶点坐标。',
+      },
+    }
     const result = await ctx.bank.submit(item)
 
     expect(result.ok ? 'ok' : JSON.stringify(result.verdict)).toBe('ok')
   })
 
-  it('3 分的填空题一句话题完是常态 → 不拦', async () => {
+  it('3 分的填空题：留了作答空位就不拦（填空本来就一句话题完）', async () => {
     const ctx = await boot()
-    const item = withGoals((await itemFor('填空', 3)), ['求对称轴'])
+    const base = await itemFor('填空', 3)
+    const item: Item = {
+      ...withGoals(base, ['求对称轴']),
+      prose: { ...base.prose, stem: '已知抛物线 $y=x^{2}+4x$，它的对称轴是 ______。' },
+    }
     const result = await ctx.bank.submit(item)
 
     expect(result.ok ? 'ok' : JSON.stringify(result.verdict)).toBe('ok')
@@ -190,5 +203,63 @@ describe('选择题闸门', () => {
     const gates = ctx.bank.gates?.() ?? []
     const signed = gates.every((gate) => legacy.evidence[gate] !== undefined)
     expect(signed).toBe(false)
+  })
+})
+
+describe('题面闸门（题面得是一道题）', () => {
+  it('只有情境、没有问 → 拦下（真实事故：8 道 9 分解答题全是"一块试验田…"）', async () => {
+    const ctx = await boot()
+    const base = await itemFor('解答', 9)
+    const item: Item = {
+      ...base,
+      instance: {
+        ...base.instance,
+        goal: '求面积 求周长',
+        goals: ['求面积', '求周长'],
+      },
+      prose: { ...base.prose, stem: '一块长方形试验田，长为 6√7 米，宽为 3√7 米。' },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok).toBe(false)
+    expect(result.ok ? '' : result.verdict.gate).toBe('verify-question')
+    expect(result.ok ? '' : result.verdict.reason).toContain('没有问题')
+  })
+
+  it('声明两问但题面只有一问 → 拦下；把两问都写进题面才放行', async () => {
+    const ctx = await boot()
+    const base = await itemFor('解答', 9)
+    const partial: Item = {
+      ...base,
+      instance: { ...base.instance, goal: '求面积 求周长', goals: ['求面积', '求周长'] },
+      prose: { ...base.prose, stem: '一块长方形试验田，长为 6√7 米，宽为 3√7 米。求它的面积。' },
+    }
+    const rejected = await ctx.bank.submit(partial)
+    expect(rejected.ok).toBe(false)
+    expect(rejected.ok ? '' : rejected.verdict.reason).toContain('分问标记')
+
+    const full: Item = {
+      ...partial,
+      prose: {
+        ...partial.prose,
+        stem: '一块长方形试验田，长为 6√7 米，宽为 3√7 米。（1）求它的面积；（2）求它的周长。',
+      },
+    }
+    const accepted = await ctx.bank.submit(full)
+    expect(accepted.ok ? 'ok' : JSON.stringify(accepted.verdict)).toBe('ok')
+  })
+
+  it('填空题没有作答空位 → 拦下', async () => {
+    const ctx = await boot()
+    const base = await itemFor('填空', 3)
+    const item: Item = {
+      ...base,
+      instance: { ...base.instance, goal: '化简', goals: ['化简'] },
+      prose: { ...base.prose, stem: '化简：$\\sqrt{44}$。' },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok).toBe(false)
+    expect(result.ok ? '' : result.verdict.reason).toContain('作答空位')
   })
 })

@@ -57,7 +57,7 @@ function solve(s) {
   const c = a * x + b
   return {
     params: { a, b, c, x },
-    stem: '解不等式：' + a + 'x + ' + b + ' > ' + c + '。',
+    stem: '解不等式：$' + a + 'x+' + b + '>' + c + '$。',
     stemTex: a + 'x+' + b + '>' + c,
     answer: 'x > ' + x,
     answerTex: 'x > ' + x,
@@ -85,7 +85,7 @@ function integerSolution(s) {
   const c = a * x + b
   return {
     params: { a, b, c, x },
-    stem: '已知关于 x 的不等式 ' + a + 'x + ' + b + ' > ' + c + '。（1）解这个不等式；（2）求它的最小整数解。',
+    stem: '已知关于 x 的不等式 $' + a + 'x+' + b + '>' + c + '$。（1）解这个不等式；（2）求它的最小整数解。',
     stemTex: a + 'x+' + b + '>' + c,
     answer: '（1）x > ' + x + '；（2）最小整数解是 ' + (x + 1),
     answerTex: 'x>' + x + ',\\ x_{\\min}=' + (x + 1),
@@ -112,7 +112,7 @@ function fromSolutionSet(s) {
   const c = a * x
   return {
     params: { a, c, x },
-    stem: '已知关于 x 的不等式 ' + a + 'x - c > 0 的解集是 x > ' + x + '，求 c 的值与这个解集的最小整数。',
+    stem: '已知关于 x 的不等式 $' + a + 'x-' + c + '>0$ 的解集是 $x>' + x + '$。（1）求 $c$ 的值；（2）求这个解集里的最小整数。',
     stemTex: a + 'x-c>0',
     answer: 'c = ' + c + '，最小整数是 ' + x,
     answerTex: 'c=' + c + ',\\ x=' + x,
@@ -147,9 +147,10 @@ export function construct(slot, seed) {
     { givens: ['解集是 x > ' + x], goals: ['求参数'] },
   ]
   const shape = shapes[branch]
+  const asks = shape.goals.map((goal, index) => '（' + (index + 1) + '）' + goal).join('；')
   return {
     params: { a, x },
-    stem: '随便一道题 ' + seed,
+    stem: '解不等式 $' + a + 'x>' + a * x + '$。' + asks + '。',
     answer: 'x = ' + x,
     givens: shape.givens,
     goals: shape.goals,
@@ -283,9 +284,10 @@ export function construct(slot, seed) {
     { givens: ['一个数的两倍是 ' + 2 * x], goals: ['求这个数'] },
   ]
   const shape = shapes[s % 3]
+  const asks = shape.goals.map((goal, index) => '（' + (index + 1) + '）' + goal).join('；')
   return {
     params: { x, y: 2 * x },
-    stem: '${tag}：求 ' + x + ' 的两倍',
+    stem: '${tag}：已知一个数是 ' + x + '。' + asks + '。',
     answer: '${tag}=' + (2 * x),
     givens: shape.givens,
     goals: shape.goals,
@@ -311,8 +313,8 @@ export function construct(slot, seed) {
   const y0 = k * x0 + b
   const shapes = [
     { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_{0}, y_{0})$，求 $y_{0}$。', givens: ['$k = ' + k + '$', '$b = ' + b + '$', '$x_{0} = ' + x0 + '$'], goals: ['求 $y_{0}$'] },
-    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_{0}, y_{0})$，判断它是否经过点 $(0, ' + (y0 + 1) + ')$。', givens: ['$k = ' + k + '$', '$x_{0} = ' + x0 + '$', '$b = ' + b + '$'], goals: ['判断是否经过给定点', '说明理由'] },
-    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_{0}, y_{0})$ 和原点，求 $y_{0}$。', givens: ['图象经过原点', '$x_{0} = ' + x0 + '$', '$k = ' + k + '$'], goals: ['求 $y_{0}$', '求这个一次函数的解析式'] },
+    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_{0}, y_{0})$。（1）判断它是否经过点 $(0, ' + (y0 + 1) + ')$；（2）说明理由。', givens: ['$k = ' + k + '$', '$x_{0} = ' + x0 + '$', '$b = ' + b + '$'], goals: ['判断是否经过给定点', '说明理由'] },
+    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_{0}, y_{0})$ 和原点。（1）求 $y_{0}$；（2）求这个一次函数的解析式。', givens: ['图象经过原点', '$x_{0} = ' + x0 + '$', '$k = ' + k + '$'], goals: ['求 $y_{0}$', '求这个一次函数的解析式'] },
   ]
   const shape = shapes[s % 3]
   return {

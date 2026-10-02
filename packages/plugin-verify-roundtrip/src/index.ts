@@ -215,7 +215,9 @@ function checkTexLayer(item: Item): Verdict | undefined {
   // 答案与解析里会出现**推导出来的量**（比如两点间距离 = |x₂ − x₁|），那些本来就不在参数里，
   // 所以只对题面做这条检查——多查一步会把正确的推导当成错的。
   const allowed = new Set(numbers(JSON.stringify(item.instance.params)))
-  for (const value of numbers(withoutStructure(item.prose.stem))) {
+  // 注意：**在原文上取数**（normalize 会把逗号、空格删掉，把"10，11"粘成"1011"），
+  // 只先剥掉分问标号与幂次。
+  for (const value of new Set(withoutStructure(item.prose.stem).match(/\d+(?:\.\d+)?/g) ?? [])) {
     // 结构性数字不是题目数据：查它们只会误伤——
     // 0/1（「= 0」「系数 1」）、角度常量（「∠A = 90°」「内角和 180°」「360°」）
     if (value === '0' || value === '1' || value === '90' || value === '180' || value === '360') continue
