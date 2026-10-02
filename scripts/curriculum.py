@@ -794,12 +794,31 @@ def strip_to_cjk(text: str) -> str:
     return re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", text)
 
 
-def cmd_verify(args: argparse.Namespace) -> int:
-    """抽样回原文核对。
+def spans_page_break(fragment: str, page_text: dict[int, str], page_no: int) -> bool:
+    """判断 fragment 是不是"上一页末尾 + 下一页开头"接出来的句子。"""
+    for left_page in (page_no, page_no - 1):
+        left = page_text.get(left_page, "")
+        right = page_text.get(left_page + 1, "")
+        if not left or not right:
+            continue
+        for cut in range(4, len(fragment) - 3):
+            if fragment[:cut] in left and fragment[cut:] in right:
+                return True
+    return False
 
-    两步，缺一不可：
-      1. 记录的指纹（最长连续汉字串）必须能在整篇文本里找到——证明不是凭空造的；
-      2. "例 N"这个标题必须落在记录标的页码上（允许落在邻页，跨页排版很常见）——证明页码可用。
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    """抽样回原文核对（自检）。
+
+    两条证据，缺一不可：
+      1. **片段证据**：取记录题面里最长的连续汉字串当指纹，切成 8 字窗口去原文里找，
+         命中比例 ≥ 0.6 就算"这不是凭空造的"。
+         为什么用窗口而不是整串：跨页接句（例 86 就是）会把第 171 页的"这两个理"和
+         第 172 页的"财团队分别负责经营"接成一句，整串在原文里当然搜不到。
+      2. **页码证据**：窗口必须能在记录标的页（或前后各一页）上找到。
+
+    注意：核对基准是 OCR 文本本身——扫描件没有文字层，这就是唯一的"原文"。
+    对 OCR 质量有疑问时，另用 `--scale 4.0 --psm 4` 单独重跑那几页做交叉验证。
     """
     jsonl_path = Path(args.jsonl).expanduser()
     text_path = Path(args.text).expanduser()
@@ -819,38 +838,40 @@ def cmd_verify(args: argparse.Namespace) -> int:
     sample = rng.sample(examples, min(args.sample, len(examples)))
     results = []
     for record in sample:
-        # 用"最长连续汉字串"当指纹：连续 8 字以上相同，基本不可能撞车
         runs = re.findall(r"[\u4e00-\u9fff]{8,}", record["stem"])
         fragment = max(runs, key=len) if runs else strip_to_cjk(record["stem"])[:12]
-        probe = strip_to_cjk(fragment)[:20]
-        in_text = probe != "" and probe in original
+        # 8 字窗口、步长 4：既有冗余又不会把一个跨页句判死
+        windows = [fragment[i:i + 8] for i in range(0, max(1, len(fragment) - 7), 4)] or [fragment[:8]]
+        found_windows = [window for window in windows if window and window in original]
+        coverage = len(found_windows) / len(windows)
         page_no = record["page"]
-        # 标题本身就是页码的证据：正文里"例 42"必须出现在第 42 条标的页上
+        candidates = [page_no - 1, page_no, page_no + 1]
         heading = record["example_no"].replace(" ", "")
-        heading_pages = [candidate for candidate in (page_no - 1, page_no, page_no + 1)
-                         if heading in page_text.get(candidate, "")]
-        # 序号被修复过的记录（"例 S1"实为"例 51"）标题肯定搜不到，所以页码以**片段**为准
-        fragment_pages = [candidate for candidate in (page_no - 1, page_no, page_no + 1)
-                          if probe and probe in page_text.get(candidate, "")]
-        on_page = page_no in fragment_pages
-        heading_on_page = page_no in heading_pages
-        if in_text and on_page:
+        heading_pages = [p for p in candidates if heading in page_text.get(p, "")]
+        fragment_pages = [p for p in candidates
+                          if any(window in page_text.get(p, "") for window in found_windows)]
+        if coverage >= 0.6 and page_no in fragment_pages:
             verdict = "ok"
-        elif in_text and fragment_pages:
-            verdict = "neighbor_page"
+        elif spans_page_break(fragment, page_text, page_no):
+            # 题面本身是跨页接出来的（"……这两个理" + "财团队……"），整串在原文里天然搜不到，
+            # 但两半都在原文里——这是真数据，不是幻觉
+            verdict = "page_break"
+        elif coverage >= 0.6 and fragment_pages:
+            verdict = "neighbor_page"      # 片段在邻页：跨页段落归属起始页的必然结果
         else:
             verdict = "mismatch"
         results.append({
             "example_no": record["example_no"],
             "page": page_no,
             "fragment": fragment[:40],
-            "found_in_text": in_text,
-            "fragment_on_page": on_page,
+            "coverage": round(coverage, 2),
+            "found_in_text": coverage >= 0.6,
             "fragment_pages": fragment_pages,
-            "heading_on_page": heading_on_page,
+            "heading_on_page": page_no in heading_pages,
             "verdict": verdict,
         })
-    ok = sum(1 for item in results if item["verdict"] == "ok")
+    # page_break 也算通过：跨页接句是排版事实，片段两半都在原文里
+    ok = sum(1 for item in results if item["verdict"] in ("ok", "page_break"))
     print(json.dumps({
         "ok": True,
         "step": "verify",

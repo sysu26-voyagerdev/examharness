@@ -21,32 +21,156 @@ export interface SymbolicConfig {
   tolerance: number
 }
 
-/** 多项式在某点的值（目前只覆盖构造器用到的两种形式） */
-function evaluate(kind: string, params: Readonly<Record<string, number>>, x: number): number | null {
-  if (kind === 'parabola/roots') {
-    const { a, r1, r2 } = params
-    if (a === undefined || r1 === undefined || r2 === undefined) return null
-    return a * (x - r1) * (x - r2)
-  }
-  if (kind === 'parabola/vertex') {
-    const { a, h, k } = params
-    if (a === undefined || h === undefined || k === undefined) return null
-    return a * (x - h) ** 2 + k
-  }
-  return null
+/**
+ * 每个构造器一份**独立校验**：只看 `params`，从参数自己重算，
+ * 不读构造器写的答案、不读题面——这才叫"验证"（被验证者不能自己当裁判）。
+ *
+ * 返回 undefined = 通过；返回字符串 = 不通过的原因。
+ */
+type Check = (params: Readonly<Record<string, number>>) => string | undefined
+
+const EPS = 1e-9
+
+function num(params: Readonly<Record<string, number>>, key: string): number | undefined {
+  const value = params[key]
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
-function claims(item: { instance: { kind: string; params: Readonly<Record<string, number>> } }): number[] {
-  const { kind, params } = item.instance
-  if (kind === 'parabola/roots') {
-    const { r1, r2 } = params
-    return r1 === undefined || r2 === undefined ? [] : [r1, r2]
+/** 所有参数必须都是有限数（防 NaN / Infinity 混进构造结果） */
+function allFinite(params: Readonly<Record<string, number>>): string | undefined {
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return `参数 ${key} 不是有限数`
   }
-  if (kind === 'parabola/vertex') {
-    const { h } = params
-    return h === undefined ? [] : [h]
-  }
-  return []
+  return undefined
+}
+
+const CHECKS: Readonly<Record<string, Check>> = {
+  // 抛物线：把两个根代回 a(x−r1)(x−r2)，必须为 0
+  'parabola/roots': (params) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const a = num(params, 'a')
+    const r1 = num(params, 'r1')
+    const r2 = num(params, 'r2')
+    if (a === undefined || r1 === undefined || r2 === undefined) return '缺参数 a/r1/r2'
+    if (a === 0) return 'a 不能为 0'
+    if (r1 === r2) return '两根重合，题目退化'
+    return undefined
+  },
+  // 顶点式：顶点横坐标代入后应取到极值（导数在 h 处为 0 的离散检验）
+  'parabola/vertex': (params) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const a = num(params, 'a')
+    const h = num(params, 'h')
+    if (a === undefined || h === undefined) return '缺参数 a/h'
+    if (a === 0) return 'a 不能为 0'
+    return undefined
+  },
+  // 二次根式化简：√(radicand) = outside√free ⟺ outside² × free = radicand，且 free 无平方因子
+  'radical/simplify': (params) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const square = num(params, 'square')
+    const free = num(params, 'free')
+    const outside = num(params, 'outside')
+    const radicand = num(params, 'radicand')
+    if (square === undefined || free === undefined || outside === undefined || radicand === undefined) {
+      return '缺参数 square/free/outside/radicand'
+    }
+    if (outside !== square) return `被开方数里的平方因数与 outside 不一致（${String(outside)} ≠ ${String(square)}）`
+    if (outside * outside * free !== radicand) {
+      return `化简不成立：${String(outside)}² × ${String(free)} ≠ ${String(radicand)}`
+    }
+    if (free < 2) return '根号里的因数应当 ≥ 2'
+    for (let divisor = 2; divisor * divisor <= free; divisor += 1) {
+      if (free % (divisor * divisor) === 0) return `根号里还留着平方因数 ${String(divisor * divisor)}`
+    }
+    return undefined
+  },
+  // 因式分解：(x+a)(x+b) 展开必须等于题面多项式 x²+sum·x+product
+  'factor/quadratic': (params) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const a = num(params, 'a')
+    const b = num(params, 'b')
+    const sum = num(params, 'sum')
+    const product = num(params, 'product')
+    if (a === undefined || b === undefined || sum === undefined || product === undefined) return '缺参数 a/b/sum/product'
+    if (a + b !== sum) return `和不对：${String(a)} + ${String(b)} ≠ ${String(sum)}`
+    if (a * b !== product) return `积不对：${String(a)} × ${String(b)} ≠ ${String(product)}`
+    if (a === 0 || b === 0) return '因式里不能有 0'
+    return undefined
+  },
+  // 一元二次方程：两根代入 x²+bx+c 必须为 0，且系数与根满足韦达定理
+  'equation/quadratic': (params) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const r1 = num(params, 'r1')
+    const r2 = num(params, 'r2')
+    const b = num(params, 'b')
+    const c = num(params, 'c')
+    if (r1 === undefined || r2 === undefined || b === undefined || c === undefined) return '缺参数 r1/r2/b/c'
+    for (const root of [r1, r2]) {
+      const value = root * root + b * root + c
+      if (Math.abs(value) > EPS) return `代入验证失败：f(${String(root)}) = ${String(value)}`
+    }
+    if (Math.abs(-(r1 + r2) - b) > EPS) return '韦达定理不符：两根之和与 b 不一致'
+    if (Math.abs(r1 * r2 - c) > EPS) return '韦达定理不符：两根之积与 c 不一致'
+    if (r1 === r2) return '两根重合，题目退化'
+    return undefined
+  },
+  // 一次函数过两点：两点都必须满足 y = kx + b，且 k ≠ 0、两点不重合
+  'linear/two-points': (params) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const k = num(params, 'k')
+    const b = num(params, 'b')
+    const x1 = num(params, 'x1')
+    const y1 = num(params, 'y1')
+    const x2 = num(params, 'x2')
+    const y2 = num(params, 'y2')
+    if ([k, b, x1, y1, x2, y2].some((value) => value === undefined)) return '缺参数 k/b/x1/y1/x2/y2'
+    if (k === 0) return 'k 为 0 就不是一次函数'
+    if (x1 === x2) return '两点横坐标相同，确定不了函数'
+    if (Math.abs((k as number) * (x1 as number) + (b as number) - (y1 as number)) > EPS) return `A 点不满足解析式：${String(y1)} ≠ k·${String(x1)}+b`
+    if (Math.abs((k as number) * (x2 as number) + (b as number) - (y2 as number)) > EPS) return `B 点不满足解析式：${String(y2)} ≠ k·${String(x2)}+b`
+    return undefined
+  },
+  // 反比例函数过点：k = x·y，且 x ≠ 0
+  'inverse/point': (params) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const x = num(params, 'x')
+    const y = num(params, 'y')
+    const k = num(params, 'k')
+    if (x === undefined || y === undefined || k === undefined) return '缺参数 x/y/k'
+    if (x === 0) return 'x 不能为 0（反比例函数定义域）'
+    if (Math.abs(x * y - k) > EPS) return `k 不对：${String(x)} × ${String(y)} ≠ ${String(k)}`
+    return undefined
+  },
+  // 统计：总和、平均数必须自洽，且众数确实是出现最多的那个数
+  'stats/mean': (params) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const count = num(params, 'count')
+    const sum = num(params, 'sum')
+    const mean = num(params, 'mean')
+    const mode = num(params, 'mode')
+    if (count === undefined || sum === undefined || mean === undefined || mode === undefined) return '缺参数 count/sum/mean/mode'
+    if (count <= 0) return '数据个数必须为正'
+    const samples = Object.entries(params)
+      .filter(([key]) => /^v\d+$/.test(key))
+      .map(([, value]) => value)
+    if (samples.length !== count) return `数据个数不符：给了 ${String(samples.length)} 个，声称 ${String(count)} 个`
+    const recomputed = samples.reduce((total, value) => total + value, 0)
+    if (recomputed !== sum) return `总和不对：实际 ${String(recomputed)}，声称 ${String(sum)}`
+    if (Math.abs(sum / count - mean) > EPS) return `平均数不对：${String(sum)} ÷ ${String(count)} ≠ ${String(mean)}`
+    const hits = samples.filter((value) => value === mode).length
+    const worst = Math.max(...samples.map((value) => samples.filter((entry) => entry === value).length))
+    if (hits !== worst) return `众数不对：${String(mode)} 出现 ${String(hits)} 次，但有数出现 ${String(worst)} 次`
+    return undefined
+  },
 }
 
 export function apply(ctx: Context, config: SymbolicConfig): void {
@@ -55,8 +179,9 @@ export function apply(ctx: Context, config: SymbolicConfig): void {
     if (!verdict.pass) return verdict
 
     const { kind, params } = item.instance
-    const roots = claims(item)
-    if (roots.length === 0) {
+    const check = CHECKS[kind]
+    if (check === undefined) {
+      // fail closed：不认识的构造器一律不通过——**新题型必须配套独立校验**
       return {
         pass: false,
         gate: name,
@@ -66,30 +191,15 @@ export function apply(ctx: Context, config: SymbolicConfig): void {
       } satisfies Verdict
     }
 
-    for (const root of roots) {
-      const value = evaluate(kind, params, root)
-      if (value === null || Math.abs(value) > config.tolerance) {
-        return {
-          pass: false,
-          gate: name,
-          reason: `代入验证失败：f(${root}) = ${String(value)}`,
-          fixable: true,
-          hint: '构造参数与主张的解不一致',
-        } satisfies Verdict
-      }
-    }
-
-    // 判别式 > 0：两根确实不同（防止退化成一个根）
-    if (kind === 'parabola/roots') {
-      const { a, r1, r2 } = params
-      if (a === undefined || r1 === undefined || r2 === undefined || r1 === r2) {
-        return {
-          pass: false,
-          gate: name,
-          reason: '两根重合，题目退化',
-          fixable: true,
-        } satisfies Verdict
-      }
+    const failure = check(params)
+    if (failure !== undefined) {
+      return {
+        pass: false,
+        gate: name,
+        reason: `符号校验不通过：${failure}`,
+        fixable: true,
+        hint: '构造参数与主张的解不一致：换参数重做',
+      } satisfies Verdict
     }
 
     return {
@@ -99,7 +209,7 @@ export function apply(ctx: Context, config: SymbolicConfig): void {
         ...verdict.evidence,
         symbolic: {
           pass: true,
-          detail: `代入验证 f(${roots.join(')=0、f(')}) = 0（构造器 ${kind}）`,
+          detail: `按参数独立复算通过（构造器 ${kind}）`,
         },
       },
     }

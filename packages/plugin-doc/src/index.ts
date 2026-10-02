@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { DocApi, DocBuild, DocExtract, WorkspaceApi } from '@examharness/core'
+import type { DocApi, DocBuild, DocExtract, MaterialHit, MaterialSearch, WorkspaceApi } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -30,6 +30,8 @@ export const Config = z.object({
   script: z.string().default('scripts/extract.py'),
   /** 整份整理脚本（OCR + 抽示例题/内容要求） */
   curriculumScript: z.string().default('scripts/curriculum.py'),
+  /** 模糊检索脚本 */
+  materialScript: z.string().default('scripts/material_search.py'),
   /** 脚本一次最多抽多少字（全文，会写到 out/extract/ 里）：一本教材也就几十万字 */
   maxChars: z.number().default(400_000),
   /**
@@ -47,6 +49,7 @@ export const Config = z.object({
 export interface DocConfig {
   script: string
   curriculumScript: string
+  materialScript: string
   maxChars: number
   previewChars: number
   timeoutMs: number
@@ -142,6 +145,28 @@ export class DocService extends Service implements DocApi {
         outputs.length === 0
           ? ['脚本说成功了，但 out/curriculum/ 里没有看到产出——用 ws_ls 核对一下']
           : [],
+    }
+  }
+
+  /** 模糊检索：跑仓库自带的 material_search.py（docx 也能搜：它会自己抽文本并缓存） */
+  search(workspace: string, query: string, options: { limit?: number; dir?: string } = {}): MaterialSearch {
+    const root = this.ctx.workspace.dirOf(workspace)
+    if (root === undefined) return { ok: false, scanned: 0, hits: [], error: '没有这个工作区' }
+    const script = resolve(this.base, this.config.materialScript)
+    if (!existsSync(script)) return { ok: false, scanned: 0, hits: [], error: `找不到检索脚本：${this.config.materialScript}` }
+    const target = options.dir === undefined || options.dir === '' ? 'in' : options.dir
+    const result = spawnSync(
+      this.python(),
+      [script, '--root', target, '--query', query, '--limit', String(options.limit ?? 8), '--cache', 'out/cache/search'],
+      { cwd: root, encoding: 'utf8', timeout: this.config.timeoutMs, maxBuffer: 8 * 1024 * 1024 },
+    )
+    const line = (result.stdout ?? '').trim().split('\n').at(-1) ?? ''
+    try {
+      const parsed = JSON.parse(line) as { ok?: boolean; scanned?: number; hits?: MaterialHit[]; error?: string }
+      if (parsed.ok !== true) return { ok: false, scanned: 0, hits: [], error: parsed.error ?? '检索没跑成' }
+      return { ok: true, scanned: parsed.scanned ?? 0, hits: parsed.hits ?? [] }
+    } catch {
+      return { ok: false, scanned: 0, hits: [], error: (result.stderr ?? '').trim().slice(0, 300) || '检索没有输出' }
     }
   }
 

@@ -95,6 +95,8 @@ function checkTexLayer(item: Item): Verdict | undefined {
   if (tex.stem !== undefined) {
     const allowed = new Set(numbers(JSON.stringify(item.instance.params)))
     for (const value of numbers(tex.stem)) {
+      // 0 与 1 是结构性数字（「= 0」「系数 1」），不是题目数据：查它们只会误伤
+      if (value === '0' || value === '1') continue
       if (!allowed.has(value)) {
         return {
           pass: false,

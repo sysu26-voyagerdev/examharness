@@ -59,7 +59,9 @@ export type Constructor = (slot: BlueprintRow, seed: number) => Item
 
 /** 构造器注册表 */
 export interface ConstructApi {
-  register(kind: string, factory: Constructor): void
+  register(kind: string, factory: Constructor, covers?: readonly string[]): void
+  /** 每个构造器覆盖哪些知识点 */
+  coverage?(): Readonly<Record<string, readonly string[]>>
   kinds(): readonly string[]
   generate(slot: BlueprintRow, seed: number): Item
 }
@@ -348,6 +350,57 @@ export interface WorkspaceApi {
   dirOf(name: string): string | undefined
 }
 
+// ── 构造器提案（agent 出活，人签字）──────────────────────────
+//
+// 构造器产出**数学真值**，闸门是**裁判**——这两处不能让 agent 直接改（R1/R2）。
+// 所以它的产出是"提案"：规格 + 草稿实现 + 自测，落在 data/proposals/ 下**不生效**，
+// 由老师在界面上看规格、跑自测、批准或驳回；真正合入代码由人做。
+
+export type ProposalStatus = 'pending' | 'approved' | 'rejected'
+
+export interface ProposalSelftest {
+  ranAt: string
+  ok: boolean
+  output: string
+}
+
+export interface ConstructorProposal {
+  id: string
+  /** 构造器名字，例如 'linear/two-points' */
+  kind: string
+  title: string
+  /** 这个构造器能覆盖哪些知识点（与蓝图里的 knowledge 对应） */
+  covers: readonly string[]
+  /** 规格：参数空间、真值怎么算、难度、干扰项设计（Markdown） */
+  spec: string
+  /** 草稿实现（python；合入时由人翻成 TS 并写闸门验证规则） */
+  draft: string
+  status: ProposalStatus
+  createdAt: string
+  proposedBy: 'agent' | 'teacher'
+  selftest?: ProposalSelftest
+  /** 人的批注（批准/驳回时写） */
+  note?: string
+}
+
+export interface ProposalApi {
+  list(): readonly ConstructorProposal[]
+  get(id: string): ConstructorProposal | undefined
+  /** agent 提提案（只写 data/proposals/，不碰任何生效代码） */
+  propose(input: {
+    kind: string
+    title: string
+    covers: readonly string[]
+    spec: string
+    draft: string
+    selftest?: string
+  }): ConstructorProposal
+  /** 跑提案自带的自测（真跑，返回真实输出） */
+  runSelftest(id: string): ProposalSelftest
+  /** 人做决定 */
+  decide(id: string, status: ProposalStatus, note?: string): ConstructorProposal | undefined
+}
+
 // ── 文档与 OCR（内置工具：常见的格式一次读成文字）────────────
 // 模型不必为 PDF/Word/Excel/图片每次现写脚本；读不了的（版式太怪、扫描太糊）如实说。
 
@@ -364,6 +417,23 @@ export interface DocExtract {
   pages?: number
   truncated?: boolean
   needsOcr?: boolean
+  error?: string
+}
+
+/** 模糊检索的一条命中（真题/课标里的片段） */
+export interface MaterialHit {
+  path: string
+  block: number
+  score: number
+  /** 这一块前面最近的题号/大题标题（agent 靠它知道是哪道题） */
+  head?: string
+  snippet: string
+}
+
+export interface MaterialSearch {
+  ok: boolean
+  scanned: number
+  hits: readonly MaterialHit[]
   error?: string
 }
 
@@ -391,6 +461,11 @@ export interface DocApi {
    * 这是给整理 agent 的"标准做法"入口——不用它自己摸索怎么分页、怎么定页码。
    */
   build(workspace: string, paths: readonly string[]): DocBuild
+  /**
+   * 在资料里**模糊检索**（按大意找，容错错字与 OCR 噪声）：
+   * 真题里写着"求二次函数的最小值"，agent 要能用"二次函数 最值"找到它。
+   */
+  search(workspace: string, query: string, options?: { limit?: number; dir?: string }): MaterialSearch
 }
 
 export interface KbApi {
@@ -677,5 +752,6 @@ declare module '@deepseek-ai/cordis' {
     kb: KbApi
     workspace: WorkspaceApi
     doc: DocApi
+    proposals: ProposalApi
   }
 }

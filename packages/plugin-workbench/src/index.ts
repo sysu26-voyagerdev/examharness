@@ -320,6 +320,18 @@ const DOC_TOOLS: readonly LlmToolSpec[] = [
     },
   },
   {
+    name: 'material_search',
+    description:
+      '在资料（真题 / 课标 / 教材）里**按大意模糊检索**，容错错字与 OCR 噪声：' +
+      '比如用「二次函数 最值」「动点 相似」去找相关题目与段落，每条命中带文件、题号、片段与分数。' +
+      '想参考真实题怎么写就先用它，不要拿 ws_grep 去撞原文。',
+    parameters: {
+      type: 'object',
+      properties: { query: { type: 'string' }, limit: { type: 'number' }, dir: { type: 'string' } },
+      required: ['query'],
+    },
+  },
+  {
     name: 'doc_build',
     description:
       '把工作区里的资料**整份**读成结构化数据（扫描件会整份 OCR）：产出 out/curriculum/ 下的' +
@@ -984,6 +996,26 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           text: `assemble_paper：没组起来（${error instanceof Error ? error.message : String(error)}）`,
           payload: { error: error instanceof Error ? error.message : String(error) },
         }
+      }
+    }
+
+    if (tool === 'material_search') {
+      const doc = this.ctx.get('doc')
+      if (doc === undefined || !doc.available()) return { kind: 'tool', text: 'material_search：没有接文档工具', payload: { error: '未接入文档工具' } }
+      const query = String(args.query ?? '')
+      const found = doc.search(workspaceName, query, {
+        limit: numberOr(args.limit, 8) ?? 8,
+        ...(typeof args.dir === 'string' ? { dir: args.dir } : {}),
+      })
+      if (!found.ok) return { kind: 'tool', text: `material_search：没搜成（${found.error ?? '未知'}）`, payload: { error: found.error } }
+      return {
+        kind: 'tool',
+        text:
+          `material_search：「${query}」在 ${String(found.scanned)} 份资料里命中 ${String(found.hits.length)} 条\n` +
+          found.hits
+            .map((hit) => `  · ${hit.score.toFixed(2)}｜${hit.path.split('/').at(-1) ?? hit.path}${hit.head === undefined || hit.head === '' ? '' : `｜${hit.head}`}\n     ${hit.snippet.slice(0, 120)}`)
+            .join('\n'),
+        payload: { query, hits: found.hits },
       }
     }
 

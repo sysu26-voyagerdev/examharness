@@ -35,7 +35,13 @@
     # 追加知识点清单（课标/教材目录整理件，可放多份）
     paths: []
     # 已学集合：不在其中的前置知识 = 超纲（本卷只讲到「最值」）
+    # 已学集合：不在其中的前置知识 = 超纲（这一卷讲到哪儿，就列到哪儿）
     learned:
+      - 实数运算
+      - 实数与二次根式
+      - 整式运算
+      - 整式与因式分解
+      - 一元一次不等式
       - 一次函数
       - 配方
       - 图象平移
@@ -44,6 +50,9 @@
       - 对称轴
       - 与坐标轴交点
       - 最值
+      - 一元二次方程
+      - 反比例函数
+      - 统计与概率
 
 # 语料库：真实题库/教材整理件（corpus/ 不进 Git）。缺目录也不影响启动。
 - id: corpus
@@ -87,6 +96,13 @@
   name: '@examharness/plugin-construct-parabola'
   config:
     rootRange: [-4, 5]
+
+# 代数与统计的构造器：数与式 / 方程 / 一次函数 / 反比例函数 / 统计
+# （**必须放在 construct 之后**：它往同一个注册表里挂 kind）
+- id: construct-algebra
+  name: '@examharness/plugin-construct-algebra'
+  config:
+    maxValue: 12
 
 - id: verify-roundtrip
   name: '@examharness/plugin-verify-roundtrip'
@@ -187,9 +203,17 @@
   config:
     script: scripts/extract.py
     curriculumScript: scripts/curriculum.py
+    materialScript: scripts/material_search.py
     maxChars: 400000
     # 整份 PDF 一次读完（扫描件自动 OCR，几百页也就几分钟）——别让模型自己分页跑
     timeoutMs: 1800000
+
+# 构造器提案：agent 出规格+草稿+自测，老师在界面上审（**合入由人做**，提案本身不生效）
+- id: proposals
+  name: '@examharness/plugin-proposals'
+  config:
+    dir: data/proposals
+    timeoutMs: 120000
 
 # 会话与卷子版本：多会话、版本、diff、局部重做、人工确认、冻结
 - id: session

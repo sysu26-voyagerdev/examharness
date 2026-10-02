@@ -56,13 +56,21 @@ export class ConstructService extends Service implements ConstructApi {
   static Config = Config
 
   private readonly factories = new Map<string, Constructor>()
+  /** kind → 它覆盖的知识点：**选题位靠这个匹配**，不由某个插件私藏一张表 */
+  private readonly covers = new Map<string, readonly string[]>()
 
   constructor(ctx: Context, _config: ConstructConfig) {
     super(ctx, 'construct')
   }
 
-  register(kind: string, factory: Constructor): void {
+  register(kind: string, factory: Constructor, covers: readonly string[] = []): void {
     this.factories.set(kind, factory)
+    this.covers.set(kind, covers)
+  }
+
+  /** 每个构造器覆盖哪些知识点（界面与文档都靠它说清"现在能出什么题"） */
+  coverage(): Readonly<Record<string, readonly string[]>> {
+    return Object.fromEntries([...this.covers.entries()])
   }
 
   kinds(): readonly string[] {
@@ -77,10 +85,15 @@ export class ConstructService extends Service implements ConstructApi {
     return factory(slot, seed)
   }
 
-  /** 抛物线构造器覆盖这几类题位；覆盖不到就不构造（不静默降级） */
+  /**
+   * 按题位选构造器：找第一个**声明覆盖了该题位知识点**的 kind。
+   * 覆盖不到就不构造（不静默降级）——蓝图里写系统出不了的题位，就必须如实报缺口。
+   */
   private pick(slot: BlueprintRow): string | undefined {
-    if (!slot.knowledge.some((key) => COVERED.has(key))) return undefined
-    return this.factories.has('parabola/roots') ? 'parabola/roots' : undefined
+    for (const [kind, keys] of this.covers) {
+      if (slot.knowledge.some((key) => keys.includes(key))) return kind
+    }
+    return undefined
   }
 }
 
@@ -204,6 +217,7 @@ export function createParabolaRoots(config: ConstructConfig): Constructor {
 export function apply(ctx: Context, config: ConstructConfig): void {
   ctx.plugin(ConstructService, config)
   ctx.inject(['construct'], (scope) => {
-    scope.construct.register('parabola/roots', createParabolaRoots(config))
+    // 第三个参数声明覆盖的知识点：**选题位靠它匹配**（以前这张表私藏在这，别的构造器接不进来）
+    scope.construct.register('parabola/roots', createParabolaRoots(config), [...COVERED])
   })
 }

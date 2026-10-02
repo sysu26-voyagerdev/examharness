@@ -62,6 +62,12 @@
       "path": "./packages/plugin-doc"
     },
     {
+      "path": "./packages/plugin-construct-algebra"
+    },
+    {
+      "path": "./packages/plugin-proposals"
+    },
+    {
       "path": "./packages/plugin-web"
     }
   ]
