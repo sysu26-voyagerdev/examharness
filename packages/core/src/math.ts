@@ -170,6 +170,11 @@ export function stemCompleteness(stem: string, goals: readonly string[], type: s
   if (!ASK.test(text)) {
     return '题面只有情境/条件，**没有问题**：学生不知道要做什么（要写出"求…""证明…""…是（  ）"这样的要求）'
   }
+  // `$` 定界符必须成对：不成对时公式会从中间断开，卷面上就是一堆乱码
+  // （真实踩过：`边 $AB=7$，边 $BC=5，$AB$ 边上的高为 5$`——多了一个 $）
+  if ((text.match(/\$/g) ?? []).length % 2 !== 0) {
+    return '题面里的 $ 不成对：数学公式少了（或多了一个）定界符，卷面上会断开'
+  }
   const marks = [...text.matchAll(PART_MARK)].length
   if (goals.length >= 2 && marks < goals.length) {
     return `题型声明了 ${String(goals.length)} 问，题面里只有 ${String(marks)} 处分问标记：把每一问写进题面（（1）…（2）…）`

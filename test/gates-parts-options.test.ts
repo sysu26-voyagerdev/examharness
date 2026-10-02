@@ -249,6 +249,24 @@ describe('题面闸门（题面得是一道题）', () => {
     expect(accepted.ok ? 'ok' : JSON.stringify(accepted.verdict)).toBe('ok')
   })
 
+  it('题面里的 $ 不成对 → 拦下（公式会从中间断开）', async () => {
+    const ctx = await boot()
+    const base = await itemFor('解答', 9)
+    const item: Item = {
+      ...base,
+      instance: { ...base.instance, goal: '求面积 求周长', goals: ['求面积', '求周长'] },
+      prose: {
+        ...base.prose,
+        // 少了一个 $（末尾那个丢了）：这种错在卷面上就是公式从中间断开
+        stem: '在平行四边形 $ABCD$ 中，边 $AB=7$，边 $BC=5。（1）求面积；（2）求周长。',
+      },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok).toBe(false)
+    expect(result.ok ? '' : result.verdict.reason).toContain('$ 不成对')
+  })
+
   it('填空题没有作答空位 → 拦下', async () => {
     const ctx = await boot()
     const base = await itemFor('填空', 3)

@@ -168,7 +168,9 @@ function contractProblems(built) {
     const goals = Array.isArray(built.goals) ? built.goals.filter((goal) => typeof goal === 'string' && goal.trim() !== '') : []
     const ask = /求|证明|求证|判断|说明|计算|比较|是否|试(?:求|判断|说明|计算|证明|画出?|比较|探索|用)|画出|探索|猜想|化简|解方程|解不等式|分解因式|因式分解|（\s*）|\(\s*\)|_{3,}|？|\?/
     const marks = (built.stem.match(/[（(]\s*\d+\s*[)）]|[①-⑳]/g) ?? []).length
-    if (!ask.test(built.stem)) {
+    if ((built.stem.match(/\$/g) ?? []).length % 2 !== 0) {
+      problems.push('题面里的 $ 不成对：数学公式少了（或多了一个）定界符，卷面上会断开')
+    } else if (!ask.test(built.stem)) {
       problems.push('题面只有情境/条件，没有问题：要写出"求…""证明…""…是（　）"这样的要求')
     } else if (goals.length >= 2 && marks < goals.length) {
       problems.push(`声明了 ${goals.length} 问，题面里只有 ${marks} 处分问标记：把每一问写进题面（（1）…（2）…）`)
