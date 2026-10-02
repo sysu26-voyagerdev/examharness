@@ -15,7 +15,7 @@ import z from 'schemastery'
  */
 
 export const name = 'web'
-export const inject = ['bank', 'graph', 'construct', 'paper', 'figure', 'workbench', 'session', 'llm']
+export const inject = ['bank', 'graph', 'construct', 'paper', 'figure', 'workbench', 'session', 'llm', 'settings', 'kb', 'corpus', 'websearch']
 
 export const Config = z.object({
   port: z.number().default(8787),
@@ -200,6 +200,8 @@ export function apply(ctx: Context, config: WebConfig): void {
   ctx.on('item:stored', ({ item }) => broadcast('stored', summarize(item)))
   ctx.on('item:confirmed', ({ item, by }) => broadcast('confirmed', { ...summarize(item), by }))
   ctx.on('run:step', (payload) => broadcast('run:step', payload))
+  ctx.on('kb:changed', (payload) => broadcast('kb:changed', payload))
+  ctx.on('settings:changed', (payload) => broadcast('settings:changed', payload))
   ctx.on('item:rejected', ({ item, verdict }) => broadcast('rejected', { ...summarize(item), verdict }))
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -283,7 +285,12 @@ export function apply(ctx: Context, config: WebConfig): void {
     }
 
     if (method === 'GET' && path === '/api/sessions') {
-      send(res, 200, { currentId: ctx.session.current().id, sessions: ctx.session.list() })
+      send(res, 200, {
+        currentId: ctx.session.current().id,
+        sessions: ctx.session.list(),
+        groups: ctx.session.groups(),
+        defaults: ctx.settings.get().sessionDefaults,
+      })
       return
     }
 
@@ -350,15 +357,121 @@ export function apply(ctx: Context, config: WebConfig): void {
     }
 
     if (method === 'GET' && path === '/api/settings') {
-      const corpus = ctx.get('corpus')
-      const websearch = ctx.get('websearch')
+      const stats = ctx.corpus.stats()
       send(res, 200, {
-        model: { configured: ctx.llm.configured, name: ctx.llm.model },
-        corpus: corpus === undefined ? { total: 0, distributable: 0 } : corpus.stats(),
-        websearch: { enabled: websearch?.enabled === true },
-        constructors: ctx.construct.kinds(),
-        gates: ['verify-symbolic', 'verify-scope', 'verify-dedup', 'verify-figure', 'verify-roundtrip'],
+        app: ctx.settings.get(),
+        runtime: {
+          modelConfigured: ctx.llm.configured,
+          modelName: ctx.llm.model,
+          corpusTotal: stats.total,
+          corpusDistributable: stats.distributable,
+          corpusBySource: stats.bySource,
+          websearchEnabled: ctx.websearch.enabled,
+          restartRequired: ctx.settings.restartRequired(),
+          constructors: ctx.construct.kinds(),
+          gates: ['verify-symbolic', 'verify-scope', 'verify-dedup', 'verify-figure', 'verify-roundtrip'],
+        },
       })
+      return
+    }
+
+    if (method === 'PATCH' && path === '/api/settings') {
+      const body = await readBody(req)
+      send(res, 200, ctx.settings.patch(body as never))
+      return
+    }
+
+    // ── 知识库：上传的是原料，整理交给 agent ──────────────
+    if (method === 'GET' && path === '/api/kb') {
+      send(res, 200, { batches: ctx.kb.list(), corpusTotal: ctx.corpus.size })
+      return
+    }
+
+    if (method === 'POST' && path === '/api/kb/upload') {
+      const body = (await readBody(req)) as { name?: string; files?: { name?: string; text?: string }[] }
+      const files = (body.files ?? []).flatMap((file) =>
+        typeof file.name === 'string' && typeof file.text === 'string' ? [{ name: file.name, text: file.text }] : [],
+      )
+      if (files.length === 0) {
+        send(res, 400, { error: '没有可用的文本文件（PDF/扫描件请先转文本）' })
+        return
+      }
+      send(res, 200, ctx.kb.upload(body.name ?? '', files))
+      return
+    }
+
+    if (method === 'GET' && path === '/api/kb/preview') {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      const chunk = ctx.kb.read(
+        url.searchParams.get('batchId') ?? '',
+        url.searchParams.get('file') ?? '',
+        Number(url.searchParams.get('offset') ?? '0'),
+        2000,
+      )
+      if (chunk === undefined) {
+        send(res, 404, { error: '没有这个文件' })
+        return
+      }
+      send(res, 200, chunk)
+      return
+    }
+
+    if (method === 'POST' && path === '/api/kb/ingest') {
+      const body = (await readBody(req)) as { batchId?: string }
+      const batch = ctx.kb.list().find((entry) => entry.id === String(body.batchId ?? ''))
+      if (batch === undefined) {
+        send(res, 404, { error: '没有这个知识库' })
+        return
+      }
+      ctx.kb.mark(batch.id, 'ingesting', 'agent 正在整理')
+      const files = batch.files.map((file) => file.name).join('、')
+      const run = await ctx.workbench.run({
+        goal: [
+          `把知识库「${batch.name}」整理进语料库（批次 ${batch.id}）。`,
+          `文件：${files}`,
+          '步骤：',
+          '1) kb_list 确认文件清单；',
+          '2) 逐个文件 kb_read 分片读（用返回的 next 作为下一次 offset，读到没有 next 为止）；',
+          '3) 只抽取**真实存在于原文**的题目，逐条 kb_write：',
+          '   {stem, answer?, knowledge: [知识点], type?, difficulty?}；',
+          '   knowledge 用已学知识点表里的说法；没有把握的字段宁缺勿造。',
+          '4) 全部读完后 kb_mark 标 indexed，并说明抽了多少条、跳过了什么。',
+        ].join('\n'),
+        blueprint: loadBlueprint(base),
+      })
+      // 只有 agent 自己跑完（done）才算整理完成；步数用尽/没有模型都如实标成未完成
+      const done = run.stopped === 'done'
+      const updated = ctx.kb.mark(
+        batch.id,
+        done ? 'indexed' : 'failed',
+        done
+          ? `agent 整理完成：${String(run.steps)} 步`
+          : run.stopped === 'no-llm'
+            ? '模型未配置，无法整理'
+            : `agent 停在「${run.stopped}」：${String(run.steps)} 步`,
+      )
+      send(res, 200, { run, batch: updated })
+      return
+    }
+
+    // ── 会话分组 ────────────────────────────────────────
+    if (method === 'POST' && path === '/api/groups') {
+      const body = (await readBody(req)) as { name?: string }
+      send(res, 200, ctx.session.createGroup(body.name ?? ''))
+      return
+    }
+
+    if (method === 'PATCH' && path === '/api/groups') {
+      const body = (await readBody(req)) as { id?: string; name?: string }
+      const group = ctx.session.renameGroup(String(body.id ?? ''), body.name ?? '')
+      send(res, group === undefined ? 404 : 200, group ?? { error: '没有这个分组' })
+      return
+    }
+
+    if (method === 'POST' && path === '/api/session/group') {
+      const body = (await readBody(req)) as { sessionId?: string; groupId?: string }
+      const meta = ctx.session.moveToGroup(String(body.sessionId ?? ''), body.groupId ?? '')
+      send(res, meta === undefined ? 404 : 200, meta ?? { error: '没有这个会话' })
       return
     }
 

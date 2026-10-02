@@ -141,7 +141,8 @@ function record(source: string, raw: Record<string, unknown>, fallbackId: string
   const answer = typeof raw.answer === 'string' && raw.answer !== '' ? raw.answer : undefined
   return {
     id: typeof raw.id === 'string' && raw.id !== '' ? raw.id : fallbackId,
-    source,
+    // 记录可以自己声明来源（agent 抽出来的写 `kb:<批次>`）；没声明就用文件路径
+    source: typeof raw.source === 'string' && raw.source !== '' ? raw.source : source,
     stem,
     ...(answer === undefined ? {} : { answer }),
     knowledge,
@@ -172,12 +173,28 @@ export class CorpusService extends Service implements CorpusApi {
 
   private readonly items: CorpusRecord[] = []
   private readonly config: CorpusConfig
+  private readonly root: string
 
   constructor(ctx: Context, config: CorpusConfig) {
     super(ctx, 'corpus')
     this.config = config
-    const base = ctx.baseUrl === undefined ? process.cwd() : fileURLToPath(ctx.baseUrl)
-    for (const dir of config.dirs) {
+    this.root = ctx.baseUrl === undefined ? process.cwd() : fileURLToPath(ctx.baseUrl)
+    this.reload()
+    // 设置页改了语料目录 → 立刻重扫（目录是热设置，不假装要重启）
+    this.ctx.on('settings:changed', () => {
+      this.reload()
+    })
+  }
+
+  /** 重新扫描：上传新知识库后调用，让它立刻可检索 */
+  reload(): number {
+    this.items.length = 0
+    const settings = this.ctx.get('settings')
+    const dirs = settings === undefined || settings.get().corpusDirs.length === 0
+      ? this.config.dirs
+      : settings.get().corpusDirs
+    const base = this.root
+    for (const dir of dirs) {
       for (const file of walk(resolve(base, dir))) {
         // 来源标识：库内文件用相对路径，库外（测试的临时目录）用文件名
         const rel = relative(base, file)
@@ -203,11 +220,12 @@ export class CorpusService extends Service implements CorpusApi {
                       .map((line, index) => record(source, { stem: line.trim() }, `${source}#${String(index + 1)}`))
                   : []
         for (const item of parsed) {
-          if (item.stem.length < config.minLength) continue
+          if (item.stem.length < this.config.minLength) continue
           this.items.push(item)
         }
       }
     }
+    return this.items.length
   }
 
   get size(): number {

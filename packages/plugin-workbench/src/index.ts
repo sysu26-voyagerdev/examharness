@@ -134,6 +134,51 @@ const WEB_SEARCH_TOOL: LlmToolSpec = {
   },
 }
 
+const KB_TOOLS: readonly LlmToolSpec[] = [
+  {
+    name: 'kb_list',
+    description: '列出知识库批次与整理状态（raw = 还没整理）。',
+    parameters: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'kb_read',
+    description: '分片读知识库里的一个文件：给 offset/limit 翻页，别一次读整份。',
+    parameters: {
+      type: 'object',
+      properties: {
+        batchId: { type: 'string' },
+        file: { type: 'string' },
+        offset: { type: 'number' },
+        limit: { type: 'number' },
+      },
+      required: ['batchId', 'file'],
+    },
+  },
+  {
+    name: 'kb_write',
+    description:
+      '把抽出来的题目记录写入语料库（写完全局索引会自动重扫）。每条：' +
+      '{stem, answer?, knowledge: [], type?, difficulty?}。只写真实存在于原文的题目，不要自己造。',
+    parameters: {
+      type: 'object',
+      properties: {
+        batchId: { type: 'string' },
+        records: { type: 'array', items: { type: 'object' } },
+      },
+      required: ['batchId', 'records'],
+    },
+  },
+  {
+    name: 'kb_mark',
+    description: '标记知识库整理状态：indexed（整理完）或 failed，并写一句说明。',
+    parameters: {
+      type: 'object',
+      properties: { batchId: { type: 'string' }, status: { type: 'string' }, note: { type: 'string' } },
+      required: ['batchId', 'status'],
+    },
+  },
+]
+
 export class WorkbenchService extends Service implements WorkbenchApi {
   static Config = Config
 
@@ -154,6 +199,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     const tools: LlmToolSpec[] = [...TOOLS]
     if (this.ctx.get('corpus') !== undefined) tools.push(...CORPUS_TOOLS)
     if (this.ctx.get('websearch')?.enabled === true) tools.push(WEB_SEARCH_TOOL)
+    if (this.ctx.get('kb') !== undefined) tools.push(...KB_TOOLS)
     return tools
   }
 
@@ -405,6 +451,87 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           text: `web_search：${error instanceof Error ? error.message : String(error)}`,
           payload: { error: '联网搜索失败' },
         }
+      }
+    }
+
+    if (tool === 'kb_list') {
+      const kb = this.ctx.get('kb')
+      if (kb === undefined) return { kind: 'tool', text: 'kb_list：没有知识库服务', payload: { error: '未接入知识库' } }
+      const batches = kb.list()
+      return {
+        kind: 'tool',
+        text: `kb_list：${String(batches.length)} 批（待整理 ${String(batches.filter((b) => b.status === 'raw').length)}）`,
+        payload: {
+          batches: batches.map((batch) => ({
+            id: batch.id,
+            name: batch.name,
+            status: batch.status,
+            files: batch.files.map((file) => file.name),
+            records: batch.records,
+          })),
+        },
+      }
+    }
+
+    if (tool === 'kb_read') {
+      const kb = this.ctx.get('kb')
+      if (kb === undefined) return { kind: 'tool', text: 'kb_read：没有知识库服务', payload: { error: '未接入知识库' } }
+      const chunk = kb.read(
+        String(args.batchId ?? ''),
+        String(args.file ?? ''),
+        typeof args.offset === 'number' ? args.offset : 0,
+        typeof args.limit === 'number' ? args.limit : 4000,
+      )
+      if (chunk === undefined) return { kind: 'tool', text: 'kb_read：没有这个文件', payload: { error: '未知文件' } }
+      return {
+        kind: 'tool',
+        text: `kb_read：读到 ${String(chunk.text.length)} 字（共 ${String(chunk.total)}${chunk.next === undefined ? '，已到结尾' : `，下一个 offset=${String(chunk.next)}`}）`,
+        payload: chunk,
+      }
+    }
+
+    if (tool === 'kb_write') {
+      const kb = this.ctx.get('kb')
+      if (kb === undefined) return { kind: 'tool', text: 'kb_write：没有知识库服务', payload: { error: '未接入知识库' } }
+      const raw = Array.isArray(args.records) ? args.records : []
+      const records = raw.flatMap((entry, index) => {
+        const item = entry as Record<string, unknown>
+        const stem = typeof item.stem === 'string' ? item.stem.trim() : ''
+        if (stem === '') return []
+        return [
+          {
+            id: `${String(args.batchId ?? 'kb')}-${String(index + 1)}-${String(stem.length)}`,
+            source: `kb:${String(args.batchId ?? '')}`,
+            stem,
+            ...(typeof item.answer === 'string' ? { answer: item.answer } : {}),
+            knowledge: Array.isArray(item.knowledge) ? item.knowledge.map(String) : [],
+            ...(typeof item.type === 'string' ? { type: item.type } : {}),
+            ...(typeof item.difficulty === 'number' ? { difficulty: item.difficulty } : {}),
+            distributable: false,
+          },
+        ]
+      })
+      const written = kb.write(String(args.batchId ?? ''), records)
+      return {
+        kind: 'tool',
+        text: `kb_write：写入 ${String(written)} 条（已自动重扫语料索引）`,
+        payload: { written },
+      }
+    }
+
+    if (tool === 'kb_mark') {
+      const kb = this.ctx.get('kb')
+      if (kb === undefined) return { kind: 'tool', text: 'kb_mark：没有知识库服务', payload: { error: '未接入知识库' } }
+      const status = String(args.status ?? 'indexed')
+      const batch = kb.mark(
+        String(args.batchId ?? ''),
+        status === 'failed' ? 'failed' : 'indexed',
+        typeof args.note === 'string' ? args.note : undefined,
+      )
+      return {
+        kind: 'tool',
+        text: `kb_mark：${batch?.id ?? ''} → ${batch?.status ?? status}`,
+        payload: { batch },
       }
     }
 

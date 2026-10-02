@@ -35,6 +35,9 @@ importers:
       '@examharness/plugin-graph':
         specifier: workspace:*
         version: link:packages/plugin-graph
+      '@examharness/plugin-kb':
+        specifier: workspace:*
+        version: link:packages/plugin-kb
       '@examharness/plugin-llm':
         specifier: workspace:*
         version: link:packages/plugin-llm
@@ -44,6 +47,9 @@ importers:
       '@examharness/plugin-session':
         specifier: workspace:*
         version: link:packages/plugin-session
+      '@examharness/plugin-settings':
+        specifier: workspace:*
+        version: link:packages/plugin-settings
       '@examharness/plugin-verify-dedup':
         specifier: workspace:*
         version: link:packages/plugin-verify-dedup
@@ -173,6 +179,18 @@ importers:
         specifier: ^3.18.0
         version: 3.18.0
 
+  packages/plugin-kb:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.4
+        version: 4.0.4(@deepseek-ai/cordis-plugin-include@1.0.9)(@deepseek-ai/cordis-plugin-loader@1.0.5)
+      '@examharness/core':
+        specifier: workspace:*
+        version: link:../core
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+
   packages/plugin-llm:
     dependencies:
       '@deepseek-ai/cordis':
@@ -211,6 +229,18 @@ importers:
       '@examharness/plugin-paper':
         specifier: workspace:*
         version: link:../plugin-paper
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+
+  packages/plugin-settings:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.4
+        version: 4.0.4(@deepseek-ai/cordis-plugin-include@1.0.9)(@deepseek-ai/cordis-plugin-loader@1.0.5)
+      '@examharness/core':
+        specifier: workspace:*
+        version: link:../core
       schemastery:
         specifier: ^3.18.0
         version: 3.18.0

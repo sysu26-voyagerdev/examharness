@@ -85,13 +85,28 @@ export class WebSearchService extends Service implements WebSearchApi {
     this.config = { ...config, apiKey: expandEnv(config.apiKey) }
   }
 
+  /** 设置页可热改开关与网关地址 */
+  private effective(): { enabled: boolean; endpoint: string } {
+    const settings = this.ctx.get('settings')
+    if (settings === undefined) return { enabled: this.config.enabled, endpoint: this.config.endpoint }
+    const live = settings.get().websearch
+    return { enabled: live.enabled, endpoint: live.endpoint }
+  }
+
   get enabled(): boolean {
-    return this.config.enabled && this.config.endpoint !== ''
+    const active = this.effective()
+    return active.enabled && active.endpoint !== ''
   }
 
   async search(query: string, limit?: number): Promise<readonly WebSearchResult[]> {
     if (!this.enabled) throw new Error('未启用联网搜索（cordis.yml 的 websearch.enabled / endpoint）')
-    const request = buildSearchRequest(this.config, this.config.apiKey, query, limit ?? this.config.limit)
+    const active = this.effective()
+    const request = buildSearchRequest(
+      { endpoint: active.endpoint, timeoutMs: this.config.timeoutMs },
+      this.config.apiKey,
+      query,
+      limit ?? this.config.limit,
+    )
     const response = await fetch(request.url, request.init)
     if (!response.ok) {
       throw new Error(`联网搜索失败：HTTP ${String(response.status)}`)

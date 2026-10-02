@@ -24,5 +24,9 @@ declare module '@deepseek-ai/cordis' {
     'item:confirmed'(payload: { item: Item; by: string }): void
     /** 工作台的一步（emit，仅广播；界面实时显示 agent 在干什么） */
     'run:step'(payload: { step: number; kind: 'assistant' | 'tool' | 'gate'; text: string }): void
+    /** 设置被改（emit，仅广播） */
+    'settings:changed'(payload: { restartRequired: readonly string[] }): void
+    /** 知识库状态变化（emit，仅广播；界面看得到"整理到哪一步了"） */
+    'kb:changed'(payload: { batchId: string; status: string; records?: number }): void
   }
 }

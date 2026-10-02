@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type {
   Blueprint,
+  SessionGroup,
   BlueprintRow,
   Item,
   PaperGap,
@@ -56,6 +57,7 @@ interface SessionRecord {
 interface Store {
   currentId: string
   sessions: SessionRecord[]
+  groups: SessionGroup[]
 }
 
 export class SessionService extends Service implements SessionApi {
@@ -83,6 +85,33 @@ export class SessionService extends Service implements SessionApi {
     return this.store.sessions.map((record) => record.meta)
   }
 
+  groups(): readonly SessionGroup[] {
+    return this.store.groups
+  }
+
+  createGroup(title: string): SessionGroup {
+    const group: SessionGroup = { id: `g-${String(Date.now())}`, name: title === '' ? '未命名分组' : title }
+    this.store.groups.push(group)
+    this.save()
+    return group
+  }
+
+  renameGroup(id: string, title: string): SessionGroup | undefined {
+    const group = this.store.groups.find((entry) => entry.id === id)
+    if (group === undefined) return undefined
+    group.name = title
+    this.save()
+    return group
+  }
+
+  moveToGroup(sessionId: string, groupId: string): SessionMeta | undefined {
+    const record = this.store.sessions.find((entry) => entry.meta.id === sessionId)
+    if (record === undefined) return undefined
+    record.meta = { ...record.meta, groupId }
+    this.save()
+    return record.meta
+  }
+
   current(): SessionMeta {
     const found = this.store.sessions.find((record) => record.meta.id === this.store.currentId)
     if (found !== undefined) return found.meta
@@ -90,7 +119,9 @@ export class SessionService extends Service implements SessionApi {
     return created
   }
 
-  create(patch: Partial<Pick<SessionMeta, 'title' | 'className' | 'progress' | 'blueprintPath'>> = {}): SessionMeta {
+  create(
+    patch: Partial<Pick<SessionMeta, 'title' | 'className' | 'progress' | 'blueprintPath' | 'groupId' | 'kbId'>> = {},
+  ): SessionMeta {
     const index = this.store.sessions.length + 1
     const meta: SessionMeta = {
       id: `s${String(Date.now())}-${String(index)}`,
@@ -100,6 +131,8 @@ export class SessionService extends Service implements SessionApi {
       blueprintPath: patch.blueprintPath ?? this.config.defaultBlueprint,
       createdAt: new Date().toISOString(),
       frozen: false,
+      groupId: patch.groupId ?? '',
+      kbId: patch.kbId ?? '',
     }
     this.store.sessions.push({ meta, versions: [] })
     this.store.currentId = meta.id
@@ -116,7 +149,7 @@ export class SessionService extends Service implements SessionApi {
   }
 
   update(
-    patch: Partial<Pick<SessionMeta, 'title' | 'className' | 'progress' | 'blueprintPath'>>,
+    patch: Partial<Pick<SessionMeta, 'title' | 'className' | 'progress' | 'blueprintPath' | 'groupId' | 'kbId'>>,
   ): SessionMeta {
     const record = this.record()
     if (record.meta.frozen) throw new Error('本会话已冻结：冻结后不可改动（R3）')
@@ -283,9 +316,19 @@ export class SessionService extends Service implements SessionApi {
   private load(): Store | undefined {
     if (!existsSync(this.file)) return undefined
     try {
-      const parsed = JSON.parse(readFileSync(this.file, 'utf8')) as Store
+      const parsed = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<Store>
       if (!Array.isArray(parsed.sessions) || parsed.sessions.length === 0) return undefined
-      return parsed
+      // 老存档没有 groups / groupId / kbId——**在这里补齐**。
+      // 不能让 undefined 渗到接口层：JSON.stringify 会直接丢掉 undefined 的键，
+      // 界面拿到的是"根本没有这个字段"，于是按分组过滤会静默判错（所有会话都落不进分组）。
+      return {
+        currentId: parsed.currentId ?? parsed.sessions[0]?.meta.id ?? '',
+        sessions: parsed.sessions.map((record) => ({
+          ...record,
+          meta: { ...record.meta, groupId: record.meta.groupId ?? '', kbId: record.meta.kbId ?? '' },
+        })),
+        groups: Array.isArray(parsed.groups) ? parsed.groups : [],
+      }
     } catch {
       return undefined
     }
@@ -301,8 +344,10 @@ export class SessionService extends Service implements SessionApi {
       blueprintPath: this.config.defaultBlueprint,
       createdAt: now,
       frozen: false,
+      groupId: '',
+      kbId: '',
     }
-    return { currentId: meta.id, sessions: [{ meta, versions: [] }] }
+    return { currentId: meta.id, sessions: [{ meta, versions: [] }], groups: [] }
   }
 
   private save(): void {

@@ -47,6 +47,12 @@
       "path": "./packages/plugin-websearch"
     },
     {
+      "path": "./packages/plugin-settings"
+    },
+    {
+      "path": "./packages/plugin-kb"
+    },
+    {
       "path": "./packages/plugin-session"
     },
     {

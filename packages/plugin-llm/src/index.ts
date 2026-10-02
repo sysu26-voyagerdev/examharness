@@ -110,15 +110,27 @@ export class LlmService extends Service implements LlmApi {
   }
 
   get model(): string {
-    return this.config.model
+    return this.effective().model
+  }
+
+  /** 设置页可以热改 baseUrl / model；密钥仍只从环境变量取 */
+  private effective(): { baseUrl: string; model: string } {
+    const settings = this.ctx.get('settings')
+    if (settings === undefined) return { baseUrl: this.config.baseUrl, model: this.config.model }
+    const live = settings.get().model
+    return {
+      baseUrl: live.baseUrl === '' ? this.config.baseUrl : live.baseUrl,
+      model: live.model === '' ? this.config.model : live.model,
+    }
   }
 
   async chat(messages: readonly LlmMessage[], tools?: readonly LlmToolSpec[]): Promise<LlmReply> {
     if (!this.configured) throw new Error('未配置模型密钥（EXAMHARNESS_API_KEY）')
-    const response = await fetch(`${this.config.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    const active = this.effective()
+    const response = await fetch(`${active.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
-      body: JSON.stringify(buildPayload(this.config, messages, tools)),
+      body: JSON.stringify(buildPayload({ ...this.config, model: active.model }, messages, tools)),
       signal: AbortSignal.timeout(this.config.timeoutMs),
     })
     if (!response.ok) {

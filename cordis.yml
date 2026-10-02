@@ -1,4 +1,25 @@
 # 命题组 · 组合根
+# 设置覆盖层：设置页改的就是它（data/settings.json），密钥永不落盘
+- id: settings
+  name: '@examharness/plugin-settings'
+  config:
+    path: data/settings.json
+    modelBaseUrl: ${EXAMHARNESS_BASE_URL}
+    modelName: ${EXAMHARNESS_MODEL}
+    websearchEnabled: false
+    websearchEndpoint: ''
+    corpusDirs:
+      - corpus/questions
+      - corpus/textbooks
+      - seed/corpus
+      - corpus/extracted
+    defaultClassName: 初三(2)班
+    defaultProgress: 九上·22章·第2课时
+    defaultBlueprint: seed/blueprint.json
+    corpusWordingMax: 0.55
+    corpusNumbersMin: 0.8
+    bankMaxSimilarity: 0.85
+
 #
 # 一行 = 一个插件。老师改题型、难度、禁用清单都在这里改，不用碰代码；
 # 开发时配合 HMR 可以现场热重载（docs/agent/02-架构与仓库结构.md）。
@@ -30,6 +51,7 @@
       - corpus/questions
       - corpus/textbooks
       - seed/corpus
+      - corpus/extracted
     minLength: 8
     maxSimilarity: 0.6
 
@@ -104,6 +126,16 @@
     apiKey: ${EXAMHARNESS_SEARCH_KEY}
     limit: 5
     timeoutMs: 15000
+
+# 知识库：上传暂存 + 整理状态（整理由 agent 干，见知识库页）
+# 原料落在 data/kb/uploads（**不进语料**）；agent 抽出来的题落在 corpus/extracted（被语料扫描）
+- id: kb
+  name: '@examharness/plugin-kb'
+  config:
+    dir: data/kb/uploads
+    extractDir: corpus/extracted
+    index: data/kb.json
+    maxTextBytes: 5242880
 
 # 会话与卷子版本：多会话、版本、diff、局部重做、人工确认、冻结
 - id: session

@@ -169,8 +169,71 @@ export interface WorkbenchApi {
   run(request: WorkbenchRequest): Promise<WorkbenchRun>
 }
 
+// ── 设置（运行期覆盖层）────────────────────────────────────
+// 原则：密钥永远只从环境变量取；设置页只改"可安全落盘"的东西，
+// 并且标注哪些需要重启——需要重启的，界面会直说。
+
+export interface AppSettings {
+  /** 模型：baseUrl 与 model 可改；密钥不在这里（走 ${VAR}） */
+  model: { baseUrl: string; model: string }
+  /** 联网搜索：开关与网关地址 */
+  websearch: { enabled: boolean; endpoint: string }
+  /** 语料目录（上传的知识库会追加进这里） */
+  corpusDirs: readonly string[]
+  /** 新建会话的默认值 */
+  sessionDefaults: { className: string; progress: string; blueprintPath: string }
+  /** 闸门阈值 */
+  gates: { corpusWordingMax: number; corpusNumbersMin: number; bankMaxSimilarity: number }
+}
+
+export interface SettingsApi {
+  get(): AppSettings
+  /** 局部更新并落盘，返回新值；同时广播 settings:changed */
+  patch(patch: DeepPartial<AppSettings>): AppSettings
+  /** 哪些改动需要重启才能生效（诚实标注，不假装全部热更新） */
+  restartRequired(): readonly string[]
+}
+
+export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? DeepPartial<T[K]> : T[K] }
+
+// ── 知识库（上传 + 由 agent 整理）─────────────────────────────
+// 用户上传的是"原始资料"，它是**待整理**的；整理这件事交给 agent 做
+// （parse → extract → tag → dedupe → write），而不是靠一个手写导入器。
+
+export type KbStatus = 'raw' | 'ingesting' | 'indexed' | 'failed'
+
+export interface KbBatch {
+  id: string
+  name: string
+  /** 上传时间 */
+  at: string
+  status: KbStatus
+  files: readonly { name: string; bytes: number }[]
+  /** 整理进语料的条数 */
+  records: number
+  note?: string
+}
+
+export interface KbApi {
+  list(): readonly KbBatch[]
+  /** 上传一批文本文件（PDF/扫描件请先转文本；二进制不支持） */
+  upload(name: string, files: readonly { name: string; text: string }[]): KbBatch
+  /** 读某个知识库里的文件（给 agent 用；分页切片，避免一次糊进上下文） */
+  read(batchId: string, fileName: string, offset?: number, limit?: number): { text: string; total: number; next?: number } | undefined
+  /** agent 整理时逐条写入语料 */
+  write(batchId: string, records: readonly CorpusRecord[]): number
+  mark(batchId: string, status: KbStatus, note?: string): KbBatch | undefined
+  dirOf(batchId: string): string | undefined
+}
+
 // ── 会话与版本（应用层）─────────────────────────────────────
 // paper 只负责"按蓝图凑齐一份卷子"；会话负责**它是谁、第几版、谁签过字**。
+
+/** 会话分组（按班级/学期/用途归类） */
+export interface SessionGroup {
+  id: string
+  name: string
+}
 
 export interface SessionMeta {
   id: string
@@ -183,6 +246,10 @@ export interface SessionMeta {
   createdAt: string
   /** 冻结后所有写操作一律拒绝（R3） */
   frozen: boolean
+  /** 归属分组；空串表示未分组 */
+  groupId: string
+  /** 这个会话绑定哪个知识库（整理时用；空串表示不绑定） */
+  kbId: string
 }
 
 /** 卷面题位 → 题目，以及这道题的人工签字 */
@@ -216,9 +283,19 @@ export interface SlotChange {
 
 export interface SessionApi {
   list(): readonly SessionMeta[]
+  /** 会话分组 */
+  groups(): readonly SessionGroup[]
+  createGroup(title: string): SessionGroup
+  renameGroup(id: string, title: string): SessionGroup | undefined
+  /** 把会话挪到某个分组（'' = 移出分组） */
+  moveToGroup(sessionId: string, groupId: string): SessionMeta | undefined
   current(): SessionMeta
-  create(patch?: Partial<Pick<SessionMeta, 'title' | 'className' | 'progress' | 'blueprintPath'>>): SessionMeta
+  /** 新建会话：一次把 agent 开工要读的约定都定下来（含归属分组与知识库） */
+  create(
+    patch?: Partial<Pick<SessionMeta, 'title' | 'className' | 'progress' | 'blueprintPath' | 'groupId' | 'kbId'>>,
+  ): SessionMeta
   switch(id: string): SessionMeta
+  /** 改当前会话的约定 */
   update(patch: Partial<Pick<SessionMeta, 'title' | 'className' | 'progress' | 'blueprintPath'>>): SessionMeta
   versions(): readonly PaperVersion[]
   latest(): PaperVersion | undefined
@@ -292,6 +369,8 @@ export interface CorpusCompareResult {
 export interface CorpusApi {
   readonly size: number
   records(): readonly CorpusRecord[]
+  /** 重新扫描目录（上传新知识库后调用，让它立刻可检索） */
+  reload(): number
   /** 引导：按关键词与知识点检索（命中给摘要，不给全文） */
   search(query: { text?: string; knowledge?: readonly string[]; limit?: number }): readonly CorpusHit[]
   /** 引导：读某一条的全文（读过才谈得上参考表述、比较结构） */
@@ -347,5 +426,7 @@ declare module '@deepseek-ai/cordis' {
     corpus: CorpusApi
     websearch: WebSearchApi
     session: SessionApi
+    settings: SettingsApi
+    kb: KbApi
   }
 }

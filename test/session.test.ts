@@ -56,7 +56,7 @@ function fakeLlm() {
   }
 }
 
-async function boot(options: { withRoundtrip?: boolean } = {}): Promise<Context> {
+async function boot(options: { withRoundtrip?: boolean; sessionPath?: string } = {}): Promise<Context> {
   const dir = mkdtempSync(join(tmpdir(), 'examharness-session-'))
   scratch.push(dir)
   const context = new Context()
@@ -72,7 +72,7 @@ async function boot(options: { withRoundtrip?: boolean } = {}): Promise<Context>
     await context.plugin(constructPlugin, { rootRange: [-4, 5] }),
     await context.plugin(paperPlugin, { maxAttempts: 6 }),
     await context.plugin(sessionPlugin, {
-      path: join(dir, 'sessions.json'),
+      path: options.sessionPath ?? join(dir, 'sessions.json'),
       defaultBlueprint: 'seed/blueprint.json',
       defaultClass: '初三(2)班',
       defaultProgress: '九上·22章·第2课时',
@@ -200,6 +200,54 @@ describe('会话与版本', () => {
 
     ctx.session.confirm(result.ok ? result.id : '', '李老师')
     expect(ctx.bank.get(result.ok ? result.id : '')?.lifecycle).toBe('verified')
+  })
+})
+
+describe('会话分组', () => {
+  it('老存档缺 groups/groupId 时补齐：不分组也不丢会话（undefined 不许渗到接口层）', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'examharness-legacy-'))
+    scratch.push(dir)
+    const file = join(dir, 'sessions.json')
+    // 这是分组功能之前写下的存档：没有 groups，meta 里也没有 groupId/kbId
+    writeFileSync(
+      file,
+      JSON.stringify({
+        currentId: 's-legacy',
+        sessions: [
+          {
+            meta: {
+              id: 's-legacy',
+              title: '老会话',
+              className: '初三(2)班',
+              progress: '九上·22章·第2课时',
+              blueprintPath: 'seed/blueprint.json',
+              createdAt: new Date(0).toISOString(),
+              frozen: false,
+            },
+            versions: [],
+          },
+        ],
+      }),
+      'utf8',
+    )
+
+    const ctx = await boot({ sessionPath: file })
+    const meta = ctx.session.list()[0]
+    expect(ctx.session.groups()).toEqual([])
+    expect(meta?.groupId).toBe('')
+    expect(meta?.kbId).toBe('')
+    // 复存一次后文件里必须真的带上这两个键（否则界面还是读到 undefined）
+    const onDisk = JSON.parse(readFileSync(file, 'utf8')) as { sessions: { meta: Record<string, unknown> }[] }
+    expect(onDisk.sessions[0]?.meta).toHaveProperty('groupId', '')
+
+    const group = ctx.session.createGroup('初三(2)班 九上')
+    expect(ctx.session.moveToGroup('s-legacy', group.id)?.groupId).toBe(group.id)
+    expect(ctx.session.list().filter((entry) => entry.groupId === group.id)).toHaveLength(1)
+    expect(ctx.session.renameGroup(group.id, '九上')?.name).toBe('九上')
+
+    const fresh = ctx.session.create({ title: '新会话', groupId: group.id, kbId: 'kb-1' })
+    expect(fresh.groupId).toBe(group.id)
+    expect(fresh.kbId).toBe('kb-1')
   })
 })
 

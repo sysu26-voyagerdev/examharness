@@ -26,10 +26,27 @@ export interface DedupConfig {
   corpusNumbersMin: number
 }
 
+/**
+ * 生效阈值：设置页改过的值优先（热改），没接设置服务就退回本插件 config。
+ * 阈值是**证据的一部分**（原创度凭据要写清按什么标准算的），所以只能有一个来源。
+ */
+function live(ctx: Context, config: DedupConfig): DedupConfig {
+  const settings = ctx.get('settings')
+  if (settings === undefined) return config
+  const gates = settings.get().gates
+  return {
+    maxSimilarity: gates.bankMaxSimilarity,
+    corpusWordingMax: gates.corpusWordingMax,
+    corpusNumbersMin: gates.corpusNumbersMin,
+  }
+}
+
 export function apply(ctx: Context, config: DedupConfig): void {
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict
+
+    const limits = live(ctx, config)
 
     const fingerprint = ctx.bank.fingerprint(item)
     let worst = 0
@@ -62,7 +79,7 @@ export function apply(ctx: Context, config: DedupConfig): void {
       }
     }
 
-    if (worst >= config.maxSimilarity) {
+    if (worst >= limits.maxSimilarity) {
       return {
         pass: false,
         gate: name,
@@ -79,7 +96,7 @@ export function apply(ctx: Context, config: DedupConfig): void {
       const hit = corpus.compare(item.prose.stem)
       // 两个条件同时满足才算"抄原题"：数字一样 + 措辞也像。
       // 只看措辞会把"同知识点不同数值"的题全误伤——那是误判，不是查重。
-      if (hit.wording >= config.corpusWordingMax && hit.numbers >= config.corpusNumbersMin) {
+      if (hit.wording >= limits.corpusWordingMax && hit.numbers >= limits.corpusNumbersMin) {
         return {
           pass: false,
           gate: name,
@@ -88,7 +105,7 @@ export function apply(ctx: Context, config: DedupConfig): void {
           hint: '换一组数值与情境，别在原题上换皮',
         }
       }
-      corpusNote = `与真实题库最像：数字 ${hit.numbers.toFixed(2)}、措辞 ${hit.wording.toFixed(2)}（阈值 数字≥${config.corpusNumbersMin} 且 措辞≥${config.corpusWordingMax}）`
+      corpusNote = `与真实题库最像：数字 ${hit.numbers.toFixed(2)}、措辞 ${hit.wording.toFixed(2)}（阈值 数字≥${limits.corpusNumbersMin.toFixed(2)} 且 措辞≥${limits.corpusWordingMax.toFixed(2)}）`
     }
 
     return {
