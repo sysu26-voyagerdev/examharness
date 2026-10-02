@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import EditNoteOutlinedIcon from '@mui/icons-material/EditNoteOutlined'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import SendIcon from '@mui/icons-material/Send'
 import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined'
@@ -15,9 +16,11 @@ import Stack from '@mui/material/Stack'
 import Tab from '@mui/material/Tab'
 import Tabs from '@mui/material/Tabs'
 import TextField from '@mui/material/TextField'
+import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
+import { BlueprintDialog } from '../blueprint-dialog.js'
 import { EvidenceView, FilesView, KnowledgeView, PaperView, Timeline } from '../components.js'
 import { forWorkspace } from '../log.js'
 import type { ItemView, SlotChangeView, VersionView } from '../types.js'
@@ -50,6 +53,7 @@ export function WorkPage(): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('paper')
   const [viewVersion, setViewVersion] = useState<number | null>(null)
+  const [editingBlueprint, setEditingBlueprint] = useState(false)
 
   const versions = session?.versions ?? []
   const latest = versions.at(-1)
@@ -68,6 +72,15 @@ export function WorkPage(): React.JSX.Element {
     return item === undefined ? [] : [{ binding, item }]
   })
   const frozen = session?.meta.frozen === true
+
+  // 题位进度：一眼看到卡在哪儿，而不是问 agent
+  const progress = (session?.blueprint.blueprint ?? []).map((row) => {
+    const have = (state?.items ?? []).filter((item) => item.slot === row.key || item.slot.startsWith(`${row.key}-`)).length
+    return { key: row.key, knowledge: row.knowledge.join('、'), want: row.count, have }
+  })
+  const missing = progress.filter((slot) => slot.have < slot.want)
+  const ready = progress.length > 0 && missing.length === 0
+  const assembled = versions.length > 0
   // 只显示**这个会话**的活：资料整理是另一条（在「资料」页看）
   const entries = useMemo(() => forWorkspace(log, session?.meta.id ?? ''), [log, session?.meta.id])
 
@@ -101,6 +114,37 @@ export function WorkPage(): React.JSX.Element {
           subheader="你说的、它做的、检查结论，按时间排在一起"
           action={running !== null ? <Chip color="primary" variant="outlined" label="正在做" /> : undefined}
         />
+        <Box sx={{ px: 2, pb: 1.5 }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+            {progress.length === 0 ? (
+              <Typography variant="caption" color="text.secondary">
+                蓝图里还没有题位——先点右上角「蓝图」加几个。
+              </Typography>
+            ) : (
+              progress.map((slot) => (
+                <Tooltip key={slot.key} title={`${slot.knowledge}：需要 ${String(slot.want)} 道，已有 ${String(slot.have)} 道`}>
+                  <Chip
+                    color={slot.have >= slot.want ? 'success' : 'warning'}
+                    variant={slot.have >= slot.want ? 'outlined' : 'filled'}
+                    label={`${slot.key} ${String(slot.have)}/${String(slot.want)}`}
+                  />
+                </Tooltip>
+              ))
+            )}
+            <Box sx={{ flex: 1 }} />
+            {running === null && (
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<PlayArrowIcon />}
+                disabled={busy !== '' || frozen || progress.length === 0}
+                onClick={() => void app.startRun(missing.length === 0 ? '组卷' : '补齐题位并组卷')}
+              >
+                {missing.length > 0 ? `补齐 ${String(missing.length)} 个题位` : assembled ? '重新组卷' : '组卷'}
+              </Button>
+            )}
+          </Stack>
+        </Box>
         <Divider />
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <Timeline entries={entries} running={running !== null} />
@@ -139,11 +183,8 @@ export function WorkPage(): React.JSX.Element {
           </Stack>
           {running === null && (
             <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mt: 1.5, flexWrap: 'wrap' }}>
-              <Button size="small" variant="outlined" startIcon={<PlayArrowIcon />} disabled={busy !== ''} onClick={() => void app.startRun('按蓝图出一份课后作业卷')}>
-                出一份课后作业卷
-              </Button>
               <Button size="small" variant="outlined" disabled={busy !== '' || frozen} onClick={assemble}>
-                按蓝图组卷
+                直接按蓝图组卷
               </Button>
               <Typography variant="caption" color="text.secondary">
                 {latest === undefined ? '还没有试卷' : `第 ${String(latest.version)} 版`}　题库 {String(state?.items.length ?? 0)} 道
@@ -155,11 +196,16 @@ export function WorkPage(): React.JSX.Element {
 
       {/* 这份卷子 */}
       <Card sx={{ flex: 1.15, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-        <Tabs value={tab} onChange={(_event, next: (typeof TABS)[number]['key']) => setTab(next)} variant="fullWidth">
-          {TABS.map((entry) => (
-            <Tab key={entry.key} value={entry.key} label={entry.label} />
-          ))}
-        </Tabs>
+        <Stack direction="row" sx={{ alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
+          <Tabs value={tab} onChange={(_event, next: (typeof TABS)[number]['key']) => setTab(next)} sx={{ flex: 1 }}>
+            {TABS.map((entry) => (
+              <Tab key={entry.key} value={entry.key} label={entry.label} />
+            ))}
+          </Tabs>
+          <Button size="small" startIcon={<EditNoteOutlinedIcon />} disabled={busy !== '' || frozen} onClick={() => setEditingBlueprint(true)} sx={{ mr: 1 }}>
+            蓝图
+          </Button>
+        </Stack>
         {versions.length > 1 && (
           <Stack direction="row" spacing={1} sx={{ px: 2, pt: 2, flexWrap: 'wrap' }}>
             {versions.map((version) => (
@@ -184,6 +230,13 @@ export function WorkPage(): React.JSX.Element {
               viewingOld={viewingOld}
               busy={busy !== ''}
               bankSize={state?.items.length ?? 0}
+              onSyncHeader={(totalScore) =>
+                void app.guard('blueprint', async () => {
+                  const current = await api.getBlueprint()
+                  await api.patchBlueprint({ paper: { ...current.blueprint.paper, totalScore } }, current.revision)
+                  await app.reload()
+                })
+              }
               onRegenerate={(slotKey) =>
                 void app.guard(`regen:${slotKey}`, async () => {
                   const result = await api.regenerate(slotKey)
@@ -206,6 +259,8 @@ export function WorkPage(): React.JSX.Element {
           {tab === 'files' && <FilesView name={session?.meta.id ?? ''} tick={entries.length} />}
         </Box>
       </Card>
+
+      {editingBlueprint && <BlueprintDialog onClose={() => setEditingBlueprint(false)} />}
     </Box>
   )
 }

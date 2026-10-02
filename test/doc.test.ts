@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
-import { checkTex, renderMathInText, texToMathml } from '@examharness/core'
+import { checkTex, renderMathInText, texToHtml, texToMathml } from '@examharness/core'
 import * as docPlugin from '@examharness/plugin-doc'
 import * as workspacePlugin from '@examharness/plugin-workspace'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -156,9 +156,10 @@ describe('数学（LaTeX）', () => {
     if (!broken.ok) expect(broken.error.length).toBeGreaterThan(0)
   })
 
-  it('正文里的 $...$ 变成 MathML，其余照原样转义（不许把 HTML 带进去）', () => {
+  it('正文里的 $...$ 渲染出来，其余照原样转义（不许把 HTML 带进去）', () => {
+    // 界面用 KaTeX 的 HTML 输出（配官方 CSS）；MathML 那条路在浏览器里排崩过
     const html = renderMathInText('已知抛物线 $y = x^{2} - 4x + 3$ 与 x 轴交于两点 <script>alert(1)</script>')
-    expect(html).toContain('<math')
+    expect(html).toContain('class="katex"')
     expect(html).toContain('&lt;script&gt;')
     expect(html).not.toContain('<script>')
 
@@ -166,7 +167,10 @@ describe('数学（LaTeX）', () => {
     const bad = renderMathInText('这里坏掉了：$\\frac{1}{$')
     expect(bad).toContain('tex-broken')
 
+    // 导出走 MathML（Word 认），这条不能跟着界面一起变
     expect(texToMathml('x_{1} = 3')).toContain('<math')
+    expect(renderMathInText('$x_{1} = 3$', 'mathml')).toContain('<math')
+    expect(texToHtml('x_{1} = 3')).toContain('class="katex"')
   })
 })
 

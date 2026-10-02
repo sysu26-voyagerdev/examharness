@@ -465,6 +465,9 @@ export class WorkbenchService extends Service implements WorkbenchApi {
 
     const messages: LlmMessage[] = [
       { role: 'system', content: systemPrompt(request.blueprint, this.config.extraRules, workspace !== undefined) },
+      ...(request.brief === undefined || request.brief === ''
+        ? []
+        : [{ role: 'user' as const, content: `【现状简报】（框架给的，不用再自己查一遍）\n${request.brief}` }]),
       { role: 'user', content: request.goal },
     ]
     // 没文件的空工作区不值得占一行；有资料时才说一句（并且说人话，不报内部 id）
@@ -1021,7 +1024,12 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     '说话要短：一句话说清你做了什么、发现了什么。**不要写报告**——不写 Markdown 标题、不加粗、',
     '不列表格、不复述工具原始输出，也不要重复题目全文（卷子页上就有）。',
     '拿不准老师要什么时，问**一个**具体问题就停（别自己替他决定）。',
+    '**别反复清点**：现状已经在上面那份简报里（题位、缺口、资料）。只有简报里没有的事实，才去用工具查。',
     '**别再翻上一轮的产物**：工作区里的 out/、tmp/ 是以前的草稿，除非这次任务需要，不要一上来就重读。',
+    '**默认动作**：把蓝图里缺的题位补齐，然后 assemble_paper 组卷。除非简报显示题位已齐、卷子已组好，',
+    '   否则不要问"你要哪一种"——直接干。真需要老师定的（比如蓝图里根本没有他要的题位），再问一句。',
+    '**写脚本是本事，不是偷懒**：资料版式怪、要批处理、要核对数值，就 ws_write 写个 python 脚本再 ws_run 跑；',
+    '   跑完**自己检查**（抽查几处、对一下总数、和原文核对），别把没验过的结果交上来。',
     '同一个问题（比如卷头分数与题位合计对不上）**只说一次**；说过就别再反复问。',
     '',
     `本次卷子：${blueprint.paper.title}（${blueprint.paper.className}，${blueprint.paper.totalScore} 分，${blueprint.paper.minutes} 分钟）`,

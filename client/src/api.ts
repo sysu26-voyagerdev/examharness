@@ -1,4 +1,6 @@
 import type {
+  BlueprintRowView,
+  BlueprintView,
   CredentialInfoView,
   KbBatchView,
   KbListView,
@@ -137,6 +139,24 @@ export const ingestKb = (
 
 export const createSession = (patch: Partial<SessionMetaView> = {}): Promise<SessionMetaView> =>
   send('POST', '/api/sessions', patch).then((r) => json<SessionMetaView>(r))
+
+/** 蓝图（卷头 + 题位表）：题位是老师下发的，能读能改 */
+export const getBlueprint = (): Promise<{ blueprint: BlueprintView; path: string; revision: string }> =>
+  fetch('/api/session/blueprint').then((r) => json<{ blueprint: BlueprintView; path: string; revision: string }>(r))
+
+export interface BlueprintPatchView {
+  paper?: Partial<BlueprintView['paper']>
+  blueprint?: readonly BlueprintRowView[]
+  constraints?: Partial<BlueprintView['constraints']>
+}
+
+export const patchBlueprint = (
+  patch: BlueprintPatchView,
+  expectedRevision?: string,
+): Promise<{ blueprint: BlueprintView; path: string; revision: string }> =>
+  send('PATCH', '/api/session/blueprint', expectedRevision === undefined ? patch : { ...patch, expectedRevision }).then((r) =>
+    json<{ blueprint: BlueprintView; path: string; revision: string }>(r),
+  )
 
 export const switchSession = (id: string): Promise<SessionMetaView> =>
   send('POST', '/api/session/switch', { id }).then((r) => json<SessionMetaView>(r))

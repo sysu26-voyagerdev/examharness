@@ -4,7 +4,7 @@ import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { renderMathInText, texToHtml, texToMathml } from '@examharness/core'
-import type { Blueprint, BlueprintRow, Item, SessionMeta, SettingsOp } from '@examharness/core'
+import type { Blueprint, BlueprintPatch, BlueprintRow, Item, SessionMeta, SettingsOp } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -209,6 +209,46 @@ function send(res: ServerResponse, status: number, body: unknown): void {
 }
 
 /**
+ * 现状简报：**框架比模型更清楚现在的状况**，所以直接告诉它，别让它每轮用五到八次工具去查。
+ * 只放事实（题位、缺口、资料、题库规模），不放建议——怎么干是它的活。
+ */
+function slotProgressOf(ctx: Context, blueprint: Blueprint): { key: string; knowledge: string; want: number; have: number }[] {
+  const all = ctx.bank.all()
+  return blueprint.blueprint.map((row) => {
+    const have = all.filter((item) => item.slot.key === row.key || item.slot.key.startsWith(`${row.key}-`)).length
+    return { key: row.key, knowledge: row.knowledge.join('、'), want: row.count, have }
+  })
+}
+
+function briefOf(ctx: Context, blueprint: Blueprint): string {
+  const progress = slotProgressOf(ctx, blueprint)
+  const missing = progress.filter((slot) => slot.have < slot.want)
+  const latest = ctx.session.latest()
+  const batches = ctx.kb.list()
+  const lines = [
+    `卷子：${blueprint.paper.title}（${blueprint.paper.className}，卷头 ${String(blueprint.paper.totalScore)} 分 / ${String(blueprint.paper.minutes)} 分钟）`,
+    `题位（需要 / 已有）：`,
+    ...progress.map((slot) => `  · ${slot.key} ${slot.knowledge}：需 ${String(slot.want)}，已有 ${String(slot.have)}${slot.have >= slot.want ? '（齐）' : '（缺）'}`),
+    missing.length === 0 ? '题位状态：已齐' : `题位状态：还缺 ${missing.map((slot) => `${slot.key}（缺 ${String(slot.want - slot.have)}）`).join('、')}`,
+    `卷子版本：${latest === undefined ? '还没组过卷' : `最新第 ${String(latest.version)} 版、${String(latest.bindings.length)} 道题、${String(latest.totalScore)} 分`}`,
+    `题库：${String(ctx.bank.all().length)} 道`,
+    `本卷禁用：${blueprint.constraints.forbidKnowledge.join('、') || '无'}`,
+    batches.length === 0
+      ? '资料：还没有导入任何资料（没有可参考的真实题，查重只对自家题库）'
+      : `资料：${batches.map((batch) => `${batch.name}（${batch.status === 'indexed' ? `${String(batch.records)} 条` : '未整理'}，${String(batch.files.length)} 份文件）`).join('；')}`,
+  ]
+  return lines.join('\n')
+}
+
+/** 没给目标时的默认目标：把缺的题位补齐，然后组卷——这才是老师想要的默认结果 */
+function defaultGoal(brief: string): string {
+  const missing = /题位状态：还缺 ([^\n]+)/.exec(brief)?.[1]
+  return missing === undefined
+    ? '题位已经齐了：直接 assemble_paper 组卷，然后用一句话报告版本与题位。'
+    : `把还缺的题位补齐（${missing}），然后 assemble_paper 组卷。`
+}
+
+/**
  * 把某个知识库批次的**原件副本**铺进工作区的 in/。
  * 原件本身不动手（它们是老师的资料）；工作区里的是副本，agent 随便折腾。
  * 返回铺了几个文件；没接知识库/工作区、或批次不存在时返回 undefined（诚实地说"没铺"）。
@@ -350,13 +390,15 @@ export function apply(ctx: Context, config: WebConfig): void {
     }
 
     if (method === 'POST' && path === '/api/run') {
-      const body = (await readBody(req)) as { goal?: string }
+      const body = (await readBody(req)) as { goal?: string; brief?: boolean }
       // 主 agent 也在工作区里干活：会话若绑了知识库，就把那批原件铺进 in/（副本，原件不动）
       const meta = ctx.session.current()
       const seeded = seedFromKb(ctx, meta.id, meta.kbId)
       try {
+        const brief = briefOf(ctx, blueprint)
         const started = ctx.workbench.start({
-          goal: body.goal ?? `按蓝图出一份《${blueprint.paper.title}》`,
+          goal: body.goal ?? defaultGoal(brief),
+          brief,
           blueprint,
           workspace: meta.id,
         })
@@ -440,6 +482,25 @@ export function apply(ctx: Context, config: WebConfig): void {
     if (method === 'POST' && path === '/api/sessions') {
       const body = (await readBody(req)) as Partial<SessionMeta>
       send(res, 200, ctx.session.create(body))
+      return
+    }
+
+    // ── 蓝图：题位是老师下发的，必须能看能改 ──────────────
+    if (method === 'GET' && path === '/api/session/blueprint') {
+      const source = ctx.session.blueprintSource()
+      send(res, 200, { blueprint: ctx.session.blueprint(), path: source.path, revision: source.revision })
+      return
+    }
+
+    if (method === 'PATCH' && path === '/api/session/blueprint') {
+      const body = (await readBody(req)) as BlueprintPatch & { expectedRevision?: string }
+      try {
+        const next = ctx.session.updateBlueprint(body, body.expectedRevision)
+        const source = ctx.session.blueprintSource()
+        send(res, 200, { blueprint: next, path: source.path, revision: source.revision })
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
       return
     }
 

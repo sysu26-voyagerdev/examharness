@@ -86,6 +86,16 @@ export class KbService extends Service implements KbApi {
     mkdirSync(this.dir, { recursive: true })
     mkdirSync(this.extractDir, { recursive: true })
     this.batches = this.load()
+    // 上次进程没了，那一轮整理就永远不会回来：**启动即归零**，别让它卡在"整理中"
+    // （卡住的后果不只是显示错了，前端还会因此不让重新整理）
+    let recovered = 0
+    for (const batch of this.batches) {
+      if (batch.status !== 'ingesting') continue
+      batch.status = 'failed'
+      batch.note = '上次整理没跑完（服务重启过）：可以重新整理'
+      recovered += 1
+    }
+    if (recovered > 0) this.save()
   }
 
   list(): readonly KbBatch[] {

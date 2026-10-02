@@ -28,15 +28,18 @@ export const inject = ['workspace']
 export const Config = z.object({
   /** 提取脚本（仓库自带，模型不写它） */
   script: z.string().default('scripts/extract.py'),
-  /** 脚本一次最多抽多少字（全文，会写到 out/extract/ 里） */
-  maxChars: z.number().default(20_000),
+  /** 脚本一次最多抽多少字（全文，会写到 out/extract/ 里）：一本教材也就几十万字 */
+  maxChars: z.number().default(400_000),
   /**
    * 给**模型**看的开头有多少字。整篇原文进上下文会直接爆掉
    * （一本教材十几万字）——全文落盘，模型需要哪段用 ws_grep / ws_read 去取。
    */
   previewChars: z.number().default(1200),
-  /** 单次调用超时（OCR 慢） */
-  timeoutMs: z.number().default(240_000),
+  /**
+   * 单次调用超时：**整份 OCR 要几分钟**（189 页扫描件约 1 分钟，并行后更快），
+   * 超时定小了会逼模型自己写脚本分页跑——那才是真正慢的原因（每页一次模型往返）。
+   */
+  timeoutMs: z.number().default(1_800_000),
 })
 
 export interface DocConfig {

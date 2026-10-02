@@ -130,7 +130,8 @@ describe('题面里的 LaTeX', () => {
     expect(joined).toContain('\\left')
     expect(joined).not.toMatch(/(?<!\\)(dfrac|left|right|quad|cdot)/)
 
-    // 正文里嵌的数学也要能编译
-    expect(renderMathInText('求 $x_{1} = 3$ 与 $y = x^{2}$')).toContain('<math')
+    // 正文里嵌的数学也要能渲染（界面用 KaTeX HTML；导出那版用 MathML）
+    expect(renderMathInText('求 $x_{1} = 3$ 与 $y = x^{2}$')).toContain('class="katex"')
+    expect(renderMathInText('求 $x_{1} = 3$', 'mathml')).toContain('<math')
   })
 })

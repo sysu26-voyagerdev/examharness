@@ -2,8 +2,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
+import { fnv1a } from '@examharness/core'
 import type {
   Blueprint,
+  BlueprintPatch,
   SessionGroup,
   BlueprintRow,
   Item,
@@ -320,6 +322,53 @@ export class SessionService extends Service implements SessionApi {
     return JSON.parse(readFileSync(resolve(this.base, meta.blueprintPath), 'utf8')) as Blueprint
   }
 
+  blueprint(): Blueprint {
+    return this.blueprintOf(this.current())
+  }
+
+  /** 当前蓝图的来源（路径 + 修订号）：界面靠它判断"是不是被别人改过了" */
+  blueprintSource(): { path: string; revision: string } {
+    const meta = this.current()
+    const file = resolve(this.base, meta.blueprintPath)
+    return { path: meta.blueprintPath, revision: revisionOf(file) }
+  }
+
+  /**
+   * 改蓝图。蓝图**是共享的**（一份文件可能被多个会话、多个老师用），
+   * 所以直接改那个文件，并用修订号防止互相覆盖：
+   * 拿到的是旧修订号就拒绝写入，让界面重新读一遍再改。
+   */
+  updateBlueprint(patch: BlueprintPatch, expectedRevision?: string): Blueprint {
+    const current = this.record()
+    if (current === undefined) throw new Error('没有当前会话')
+    if (current.meta.frozen) throw new Error('本会话已冻结：冻结后不可改动（R3）')
+
+    const file = resolve(this.base, current.meta.blueprintPath)
+    const actual = revisionOf(file)
+    if (expectedRevision !== undefined && expectedRevision !== actual) {
+      throw new Error(`这份蓝图刚被别处改过（你手上是 ${expectedRevision}，现在是 ${actual}）：重新打开再改`)
+    }
+
+    const before = JSON.parse(readFileSync(file, 'utf8')) as Blueprint
+    // 逐行规整：空编号补上、道数与分值至少是 1（别把 0 分的题位写进蓝图）
+    const rows = (patch.blueprint ?? before.blueprint).map((row) => ({
+      key: row.key === '' ? nextKey(before.blueprint) : row.key,
+      knowledge: row.knowledge,
+      cognitive: row.cognitive,
+      type: row.type,
+      count: Math.max(1, Math.round(row.count)),
+      difficulty: row.difficulty,
+      score: Math.max(1, Math.round(row.score)),
+    }))
+    const after: Blueprint = {
+      paper: { ...before.paper, ...patch.paper, totalScore: rows.reduce((sum, row) => sum + row.score * row.count, 0) },
+      blueprint: rows,
+      constraints: { ...before.constraints, ...patch.constraints },
+    }
+    writeFileSync(file, JSON.stringify(after, null, 2), 'utf8')
+    return after
+  }
+
   private push(
     record: SessionRecord,
     reason: string,
@@ -408,6 +457,23 @@ export class SessionService extends Service implements SessionApi {
       /* 记录坏了就当没有：不能因为流水读不出来而打不开卷子 */
     }
   }
+}
+
+/** 蓝图文件的修订号（内容哈希）：共享文件靠它发现"别人刚改过" */
+function revisionOf(file: string): string {
+  if (!existsSync(file)) return 'missing'
+  return String(fnv1a(readFileSync(file, 'utf8')))
+}
+
+/**
+ * 题位编号：从现有最大编号往后排（S3、S4……）。
+ * 卷头分数由题位合计决定——**不允许**再出现"卷头 100 分、题位 20 分"。
+ */
+function nextKey(rows: readonly { key: string }[]): string {
+  const numbers = rows
+    .map((row) => /^S(\d+)/.exec(row.key)?.[1])
+    .flatMap((value) => (value === undefined ? [] : [Number(value)]))
+  return `S${String(Math.max(0, ...numbers) + 1)}`
 }
 
 /** 供界面显示的题位行（在 web 层组装，避免界面直接看 Item） */

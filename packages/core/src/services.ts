@@ -151,6 +151,14 @@ export interface LlmApi {
 export interface WorkbenchRequest {
   goal: string
   /**
+   * 现状简报：框架准备好的"现在是什么情况"（蓝图题位、各题位还缺几道、有哪些资料）。
+   *
+   * 为什么要有它：以前 agent 每轮开工都要 ws_ls / bank_stats / kb_list / graph_query 查一遍，
+   * 五到八次工具调用才搞清状况，然后还常常反问老师——慢、贵、烦。
+   * 这些事实框架本来就知道，直接给它，让它把力气花在出题上。
+   */
+  brief?: string
+  /**
    * 界面上给这一轮起的短名字（例如「整理『数学课程标准』」）。
    * 没有它就只能把整段目标指令当"老师说的话"显示出来——那是系统生成的长文本，
    * 不该冒充老师说的话。
@@ -436,6 +444,13 @@ export interface PaperVersion {
   gaps: readonly PaperGap[]
 }
 
+/** 蓝图的可改部分：卷头与题位表（题位 key 保留原样，新增的自动编号） */
+export interface BlueprintPatch {
+  paper?: Partial<Blueprint['paper']>
+  blueprint?: readonly Blueprint['blueprint'][number][]
+  constraints?: Partial<Blueprint['constraints']>
+}
+
 /** 两个版本之间某个题位的变化 */
 export interface SlotChange {
   slot: string
@@ -469,6 +484,15 @@ export interface SessionApi {
   list(): readonly SessionMeta[]
   /** 会话分组 */
   groups(): readonly SessionGroup[]
+  /**
+   * 读当前会话的蓝图（卷头 + 题位表）。
+   * 题位是**老师的输入**，不是系统编的——所以必须能读出来、能改。
+   */
+  blueprint(): Blueprint
+  /** 蓝图从哪个文件来、什么修订号（共享文件要靠它发现冲突） */
+  blueprintSource(): { path: string; revision: string }
+  /** 改蓝图（共享文件；带修订号防互相覆盖） */
+  updateBlueprint(patch: BlueprintPatch, expectedRevision?: string): Blueprint
   /** 会话记录：追加一行 / 读全部（刷新后仍在） */
   appendLog(entry: Omit<SessionLogEntry, 'id' | 'at'>): SessionLogEntry | undefined
   log(): readonly SessionLogEntry[]

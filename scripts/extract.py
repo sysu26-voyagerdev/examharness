@@ -9,7 +9,7 @@
 
     extract.py probe   <文件>              # 这是什么？要不要 OCR？
     extract.py text    <文件> [--max N]    # 直接读文本类文件
-    extract.py pdf     <文件> [--max N] [--ocr]
+    extract.py pdf     <文件> [--max N] [--ocr] [--max-pages N] [--workers N]
     extract.py docx    <文件> [--max N]
     extract.py xlsx    <文件> [--max N]
     extract.py ocr     <文件> [--lang chi_sim+eng] [--max N]
@@ -141,35 +141,59 @@ def ocr_image(path: Path, lang: str, notes: list[str]) -> str:
     return result.stdout
 
 
-def ocr_pdf(path: Path, lang: str, notes: list[str], max_pages: int = 20) -> str:
-    """扫描件：逐页渲染成图再 OCR（pypdfium2 是 pdfplumber 的依赖，通常已经在）"""
+def ocr_pdf(path: Path, lang: str, notes: list[str], max_pages: int = 0, workers: int = 0) -> str:
+    """
+    扫描件：逐页渲染成图再 OCR。
+
+    **默认整份读完**（max_pages=0）并**并行**跑 tesseract：
+    以前默认只读 20 页，逼着模型自己写脚本分页——每页一次模型往返，那才是真慢。
+    机械活一次做完，模型只该负责判断。
+    """
     try:
         import pypdfium2 as pdfium  # type: ignore
     except ImportError:
         raise RuntimeError("没装 pypdfium2：请在仓库根跑 pnpm venv") from None
 
+    import tempfile
+    from concurrent.futures import ThreadPoolExecutor
+
     language = pick_langs(lang, notes)
     doc = pdfium.PdfDocument(str(path))
-    pieces: list[str] = []
     pages = len(doc)
-    if pages > max_pages:
-        note(notes, f"只 OCR 了前 {max_pages} 页（共 {pages} 页），后面的自己翻")
-    for index in range(min(pages, max_pages)):
-        page = doc[index]
+    limit = pages if max_pages <= 0 else min(pages, max_pages)
+    if limit < pages:
+        note(notes, f"只 OCR 了前 {limit} 页（共 {pages} 页）；要全部就加 --all")
+    if pages > 30:
+        note(notes, f"共 {pages} 页，整份 OCR 中（并行，约 {max(1, round(pages / 8))} 分钟量级）")
+
+    thread_count = workers if workers > 0 else min(8, (os.cpu_count() or 4))
+    workdir = Path(tempfile.mkdtemp(prefix="ocr-"))
+
+    def one(index: int) -> str:
+        page = doc[index]  # 渲染放主线程：pdfium 不是线程安全的
         image = page.render(scale=2.0).to_pil()
-        tmp = path.with_suffix(f".p{index + 1}.png")
+        tmp = workdir / f"p{index + 1}.png"
         image.save(tmp)
         try:
-            text = subprocess.run(
+            return subprocess.run(
                 ["tesseract", str(tmp), "-", "-l", language],
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=600,
                 env=tessdata_env(),
             ).stdout
         finally:
             tmp.unlink(missing_ok=True)
-        pieces.append(f"（第 {index + 1} 页）\n{text}")
+
+    # 渲染是串行的（pdfium 线程不安全），OCR 交给线程池——tesseract 是外部进程，能真并行
+    with ThreadPoolExecutor(max_workers=thread_count) as pool:
+        texts = list(pool.map(one, range(limit)))
+
+    for leftover in workdir.glob("*"):
+        leftover.unlink(missing_ok=True)
+    workdir.rmdir()
+
+    pieces = [f"（第 {index + 1} 页）\n{text}" for index, text in enumerate(texts)]
     return "\n\n".join(pieces)
 
 
@@ -255,6 +279,8 @@ def main(argv: list[str]) -> int:
     max_chars = DEFAULT_MAX
     lang = "chi_sim+eng"
     use_ocr = False
+    max_pages = 0
+    workers = 0
     paths: list[str] = []
     index = 0
     while index < len(rest):
@@ -267,6 +293,14 @@ def main(argv: list[str]) -> int:
             lang = rest[index] if index < len(rest) else lang
         elif token == "--ocr":
             use_ocr = True
+        elif token == "--all":
+            max_pages = 0
+        elif token == "--max-pages":
+            index += 1
+            max_pages = int(rest[index]) if index < len(rest) else max_pages
+        elif token == "--workers":
+            index += 1
+            workers = int(rest[index]) if index < len(rest) else workers
         else:
             paths.append(token)
         index += 1
@@ -297,13 +331,17 @@ def main(argv: list[str]) -> int:
             text, pages, empty = pdf_text(path, notes)
             if use_ocr and pages is not None and empty > 0:
                 notes.append("有页面没有文字层，改用 OCR 读整份")
-                text = ocr_pdf(path, lang, notes)
+                text = ocr_pdf(path, lang, notes, max_pages, workers)
         elif mode == "docx":
             text = docx_text(path, notes)
         elif mode == "xlsx":
             text = xlsx_text(path, notes)
         elif mode == "ocr":
-            text = ocr_image(path, lang, notes) if path.suffix.lower() in IMAGE_SUFFIXES else ocr_pdf(path, lang, notes)
+            text = (
+                ocr_image(path, lang, notes)
+                if path.suffix.lower() in IMAGE_SUFFIXES
+                else ocr_pdf(path, lang, notes, max_pages, workers)
+            )
         else:
             print(json.dumps({"ok": False, "error": f"不认识的模式：{mode}"}, ensure_ascii=False))
             return 2

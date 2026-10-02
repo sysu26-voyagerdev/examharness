@@ -186,8 +186,9 @@
   name: '@examharness/plugin-doc'
   config:
     script: scripts/extract.py
-    maxChars: 20000
-    timeoutMs: 240000
+    maxChars: 400000
+    # 整份 PDF 一次读完（扫描件自动 OCR，几百页也就几分钟）——别让模型自己分页跑
+    timeoutMs: 1800000
 
 # 会话与卷子版本：多会话、版本、diff、局部重做、人工确认、冻结
 - id: session

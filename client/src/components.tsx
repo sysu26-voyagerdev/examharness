@@ -208,9 +208,11 @@ export function PaperView({
   onRegenerate,
   onConfirm,
   onAssemble,
+  onSyncHeader,
 }: {
   version: VersionView | undefined
   bankSize: number
+  onSyncHeader: (totalScore: number) => void
   rows: readonly { binding: SlotBindingView; item: ItemView }[]
   changes: readonly SlotChangeView[]
   frozen: boolean
@@ -250,9 +252,22 @@ export function PaperView({
       </Stack>
 
       {version.scoreGap > 0 && (
-        <Alert severity="warning" icon={<ReportOutlinedIcon />}>
-          这份卷子只有 {String(version.totalScore)} 分，蓝图卷头写的是更多分——差额 {String(version.scoreGap)} 分。
-          要么在蓝图里补题位，要么把卷头分数改成 {String(version.totalScore)} 分。
+        <Alert
+          severity="warning"
+          icon={<ReportOutlinedIcon />}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() =>
+                void onSyncHeader(version.totalScore)
+              }
+            >
+              卷头改成 {String(version.totalScore)} 分
+            </Button>
+          }
+        >
+          这份卷子 {String(version.totalScore)} 分，蓝图卷头写的是更多分（差 {String(version.scoreGap)} 分）。
         </Alert>
       )}
 
