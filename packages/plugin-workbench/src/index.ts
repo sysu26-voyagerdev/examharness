@@ -320,6 +320,14 @@ const DOC_TOOLS: readonly LlmToolSpec[] = [
     },
   },
   {
+    name: 'doc_build',
+    description:
+      '把工作区里的资料**整份**读成结构化数据（扫描件会整份 OCR）：产出 out/curriculum/ 下的' +
+      '全书文本与 JSONL（示例题、内容要求），并报告每本抽到多少条。' +
+      '整理成套资料（课标、教材、教参、整本真题）优先用它，别自己一页页翻。',
+    parameters: { type: 'object', properties: { paths: { type: 'array', items: { type: 'string' } } }, required: ['paths'] },
+  },
+  {
     name: 'doc_ocr',
     description: '对图片或扫描版 PDF 做 OCR（识别文字，可能有错字——不确定就按不确定处理）。',
     parameters: {
@@ -976,6 +984,31 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           text: `assemble_paper：没组起来（${error instanceof Error ? error.message : String(error)}）`,
           payload: { error: error instanceof Error ? error.message : String(error) },
         }
+      }
+    }
+
+    if (tool === 'doc_build') {
+      const doc = this.ctx.get('doc')
+      if (doc === undefined || !doc.available()) return { kind: 'tool', text: 'doc_build：没有接文档工具', payload: { error: '未接入文档工具' } }
+      const paths = Array.isArray(args.paths) ? args.paths.map(String) : []
+      const built = doc.build(workspaceName, paths)
+      if (!built.ok) {
+        return {
+          kind: 'tool',
+          text: `doc_build：没跑成（${built.error ?? '未知原因'}）`,
+          payload: { error: built.error ?? '未知原因', outputs: built.outputs },
+        }
+      }
+      const summary = built.books.map((book) => `${book.source}：${String(book.pages)} 页 → 示例题 ${String(book.examples)} 条、内容要求 ${String(book.requirements)} 条`)
+      return {
+        kind: 'tool',
+        text: [
+          `doc_build：读完了 ${String(built.books.length)} 本`,
+          ...summary,
+          `产出（工作区里）：${built.outputs.join('、')}`,
+          '接下来：ws_grep 找你要的段落，或 ws_read 分片读 JSONL；抽出来要入库的用 kb_write 批量写。',
+        ].join('\n'),
+        payload: { books: built.books, outputs: built.outputs },
       }
     }
 

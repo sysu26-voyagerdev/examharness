@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { DocApi, DocExtract, WorkspaceApi } from '@examharness/core'
+import type { DocApi, DocBuild, DocExtract, WorkspaceApi } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -28,6 +28,8 @@ export const inject = ['workspace']
 export const Config = z.object({
   /** 提取脚本（仓库自带，模型不写它） */
   script: z.string().default('scripts/extract.py'),
+  /** 整份整理脚本（OCR + 抽示例题/内容要求） */
+  curriculumScript: z.string().default('scripts/curriculum.py'),
   /** 脚本一次最多抽多少字（全文，会写到 out/extract/ 里）：一本教材也就几十万字 */
   maxChars: z.number().default(400_000),
   /**
@@ -44,6 +46,7 @@ export const Config = z.object({
 
 export interface DocConfig {
   script: string
+  curriculumScript: string
   maxChars: number
   previewChars: number
   timeoutMs: number
@@ -73,6 +76,54 @@ export class DocService extends Service implements DocApi {
     this.config = config
     this.base = ctx.baseUrl === undefined ? process.cwd() : fileURLToPath(ctx.baseUrl)
     this.script = resolve(this.base, config.script)
+  }
+
+  /**
+   * 整份读成资料：跑仓库自带的 curriculum 脚本（OCR + 抽示例题/内容要求），
+   * 产物落在工作区 out/curriculum/ 下。整理 agent 只要调它，不必自己摸索分页与页码定位。
+   */
+  build(workspace: string, paths: readonly string[]): DocBuild {
+    const root = this.ctx.workspace.dirOf(workspace)
+    if (root === undefined) return { ok: false, outputs: [], books: [], notes: [], error: '没有这个工作区' }
+    if (paths.length === 0) return { ok: false, outputs: [], books: [], notes: [], error: '没给文件' }
+    const script = resolve(this.base, this.config.curriculumScript)
+    if (!existsSync(script)) {
+      return { ok: false, outputs: [], books: [], notes: [], error: `找不到脚本：${this.config.curriculumScript}` }
+    }
+    const result = spawnSync(this.python(), [script, 'build', ...paths, '--outdir', 'out/curriculum'], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: this.config.timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
+    })
+    const parsed = ((): { ok?: boolean; books?: { source: string; pages: number; examples: number; requirements: number }[] } | undefined => {
+      const line = (result.stdout ?? '').trim().split('\n').at(-1) ?? ''
+      try {
+        return JSON.parse(line) as { ok?: boolean; books?: { source: string; pages: number; examples: number; requirements: number }[] }
+      } catch {
+        return undefined
+      }
+    })()
+    const outputs = this.listOutputs(workspace)
+    if (parsed?.ok !== true) {
+      return {
+        ok: false,
+        outputs,
+        books: parsed?.books ?? [],
+        notes: [],
+        error: (result.stderr ?? '').trim().slice(0, 400) || '脚本没有跑成功',
+      }
+    }
+    return { ok: true, outputs, books: parsed.books ?? [], notes: [] }
+  }
+
+  /** out/curriculum 下产出了什么 */
+  private listOutputs(workspace: string): readonly string[] {
+    return this.ctx.workspace
+      .list(workspace)
+      .map((file) => file.path)
+      .filter((path) => path.startsWith('out/curriculum/'))
+      .slice(0, 40)
   }
 
   /** 用哪个 python：工作区服务认得的虚拟环境优先，其次系统 python3 */

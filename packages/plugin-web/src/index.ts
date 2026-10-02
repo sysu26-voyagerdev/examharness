@@ -4,7 +4,15 @@ import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { renderMathInText, texToHtml, texToMathml } from '@examharness/core'
-import type { Blueprint, BlueprintPatch, BlueprintRow, Item, SessionMeta, SettingsOp } from '@examharness/core'
+import type {
+  Blueprint,
+  BlueprintPatch,
+  BlueprintRow,
+  Item,
+  SessionMeta,
+  SettingsOp,
+  WorkbenchRun,
+} from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -230,7 +238,7 @@ function slotProgressOf(ctx: Context, blueprint: Blueprint): { key: string; know
 function seedAllKb(ctx: Context, workspaceName: string): number | undefined {
   const batches = ctx.kb.list()
   if (batches.length === 0) return undefined
-  const paths = batches.flatMap((batch) => [...ctx.kb.sourcePaths(batch.id)])
+  const paths = batches.flatMap((batch) => ctx.kb.sourcePaths(batch.id))
   if (paths.length === 0) return undefined
   return ctx.workspace.seedLinks(workspaceName, paths)
 }
@@ -788,45 +796,46 @@ export function apply(ctx: Context, config: WebConfig): void {
         send(res, 404, { error: '没有这个知识库' })
         return
       }
-      ctx.kb.mark(batch.id, 'ingesting', '正在整理')
+
       // 原件副本铺进工作区：agent 可以拿 python / pdftotext 把 PDF、表格、扫描件转成文本再说
       const seeded = seedFromKb(ctx, batch.id, batch.id)
       const files = batch.files.map((file) => file.name).join('、')
-      const started = ctx.workbench.start({
-        goal: [
-          `把知识库「${batch.name}」整理进语料库（批次 ${batch.id}）。`,
-          `文件：${files}`,
-          '',
-          `工作区：${batch.id}（ws_ls 看文件；资料在 in/，脚本写 tmp/，产物放 out/）`,
-          `这批一共 ${String(batch.files.length)} 份，**不要试图全读**：先 ws_ls 看清单，`,
-          '挑出和当前任务最相关的少数几份（老师点名的优先），一份一份来；读不完就如实说明读到哪儿了。',
-          '原件不一定是纯文本。**先用内置工具读**（它自己会挑读法，PDF 扫描件会自动 OCR）：',
-          '  · doc_probe {"path":"in/xx.pdf"}  看是什么、多少页、要不要 OCR',
-          '  · doc_extract {"path":"in/xx.pdf"} 读成文字（PDF / Word / Excel / 图片都行）',
-          '  · doc_ocr {"path":"in/xx.png"}   图片或扫描件专用',
-          '读不了的（版式太怪、扫描太糊、缺语言包）它会说清原因；那时再自己写脚本：',
-          '  先 ws_write 写 tmp/*.py，再 ws_run ["python3","tmp/x.py"]（不许内联代码）。',
-          '',
-          '**先判断这批是什么**，再决定抽什么：',
-          '  · 真题/试卷 → 抽题目（stem/answer/knowledge）；',
-          '  · 课标/教材/教参 → 抽**知识点清单、要求与示例**（示例题也当题目抽，但注明来自课标示例），',
-          '    不要硬把教材正文当题目；说清你抽的是哪一类。',
-          '  · 读不懂或整批都是扫描糊页 → 如实说，别硬凑。',
-          '',
-          '步骤：',
-          '1) ws_ls + kb_list 确认手上有什么；',
-          '2) 把原件转成文本（如果需要），产物写 out/；',
-          '3) 抽取工具会把**全文写到 out/extract/ 里**，你只会看到开头；要哪一段用 ws_grep 定位、ws_read 分片读，',
-          '   **不要整篇读进来说话**（一本教材十几万字，读进来只会把自己挤爆）。',
-          '4) 每读完一段就停下来 kb_write 落库（别攒到最后），只抽取**真实存在于原文**的题目：',
-          '   {stem, answer?, knowledge: [知识点], type?, difficulty?}；',
-          '   knowledge 用已学知识点表里的说法；没有把握的字段宁缺勿造。',
-          '5) 全部读完后 kb_mark 标 indexed，并说明抽了多少条、跳过了什么、哪些文件没处理成。',
-        ].join('\n'),
-        blueprint: sessionBlueprint(ctx),
-        workspace: batch.id,
-        label: `整理「${batch.name}」（${String(batch.files.length)} 份资料）`,
-      })
+      let started: { runId: string; workspace: string; done: Promise<WorkbenchRun> }
+      try {
+        started = ctx.workbench.start({
+          goal: [
+            `把知识库「${batch.name}」整理成可检索的语料（批次 ${batch.id}）。`,
+            `文件：${files}`,
+            '',
+            `工作区：${batch.id}（资料在 in/，脚本写 tmp/，产物放 out/）`,
+            '**先判断这批是什么**，再决定抽什么：真题/试卷 → 抽题目；课标/教材/教参 → 抽示例题与知识点要求；',
+            '读不懂或整批都是糊页 → 如实说，别硬凑。',
+            '',
+            '标准做法（成套资料尤其这样，别一页页翻）：',
+            '1) doc_build {"paths":["in/xx.pdf", ...]} —— **整份**读成结构化数据：扫描件会自动 OCR，',
+            '   产出 out/curriculum/ 下的全书文本与 JSONL（示例题、内容要求），并报告每本多少页、抽到多少条。',
+            '   这一步可能要几分钟，正常。',
+            '2) 看产出：ws_read 分片读 JSONL、ws_grep 找特定段落（文本里有「（第 N 页）」标记）。',
+            '3) 要入库的用 kb_write **一次写多条**（records 数组），别一条一条写。',
+            '4) **自检**：随机挑几条（≥3）回原文核对（ws_grep 搜题干片段），把"核对了几条、对没对上"写进结论。',
+            '5) kb_mark 标状态 + 一句话交代：读了几本、抽了多少条、哪些没处理成。',
+            '',
+            '要跑的东西先落成脚本文件再 ws_run（不许内联代码）；写脚本是本事，',
+            '但成套资料的 OCR 与切分先用 doc_build——分页与页码定位它已经处理好了。',
+          ].join('\n'),
+          brief: briefOf(ctx, sessionBlueprint(ctx)),
+          blueprint: sessionBlueprint(ctx),
+          workspace: batch.id,
+          label: `整理「${batch.name}」（${String(batch.files.length)} 份资料）`,
+        })
+      } catch (error) {
+        // 起轮被拒（比如已经有 agent 在跑）时**不能**把批次留在"整理中"：
+        // 以前是先标 ingesting 再起轮，被拒之后那一批就永远卡住了
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+        return
+      }
+      // 真正跑起来了，才标"整理中"
+      ctx.kb.mark(batch.id, 'ingesting', '正在整理')
       // 异步收尾：跑完再落状态。只有 agent 自己跑完（done）才算整理完成；
       // 步数用尽 / 没有模型 / 被叫停都如实标成未完成，并写清为什么。
       void started.done

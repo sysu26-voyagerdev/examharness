@@ -367,6 +367,16 @@ export interface DocExtract {
   error?: string
 }
 
+export interface DocBuild {
+  ok: boolean
+  /** 产出的文件（相对工作区） */
+  outputs: readonly string[]
+  /** 每本书抽到多少条（示例题 / 内容要求） */
+  books: readonly { source: string; pages: number; examples: number; requirements: number }[]
+  notes: readonly string[]
+  error?: string
+}
+
 export interface DocApi {
   /** 脚本在不在（不在就说明没装好，别假装能读） */
   available(): boolean
@@ -376,6 +386,11 @@ export interface DocApi {
   extract(workspace: string, path: string, options?: { ocr?: boolean }): DocExtract
   /** 图片或扫描版 PDF 的 OCR */
   ocr(workspace: string, path: string, lang?: string): DocExtract
+  /**
+   * **整份读成资料**：多份扫描件一次 OCR + 抽结构（示例题、内容要求），产物落工作区 out/。
+   * 这是给整理 agent 的"标准做法"入口——不用它自己摸索怎么分页、怎么定页码。
+   */
+  build(workspace: string, paths: readonly string[]): DocBuild
 }
 
 export interface KbApi {
