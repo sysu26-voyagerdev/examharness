@@ -6,14 +6,14 @@
  * Chrome 的 `--virtual-time-budget` 会一直等"网络空闲"，于是截图**永远不返回**。
  * 这里直接用 CDP：导航 → 等一会儿 → 抓图，自己控制节奏。
  *
- * 用法：node scripts/shot.mjs <url> <输出.png> [等多久毫秒] [宽] [高]
+ * 用法：node scripts/shot.mjs <url> <输出.png> [等多久毫秒] [宽] [高] [预置 JS]
  */
 import { spawn } from 'node:child_process'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const [url, out, waitMs = '5000', width = '1440', height = '1200'] = process.argv.slice(2)
+const [url, out, waitMs = '5000', width = '1440', height = '1200', initScript] = process.argv.slice(2)
 if (url === undefined || out === undefined) {
   console.error('用法：node scripts/shot.mjs <url> <输出.png> [等多久毫秒] [宽] [高]')
   process.exit(2)
@@ -79,6 +79,10 @@ const send = (method, params = {}) =>
   })
 
 await send('Page.enable')
+// 预置脚本（例如把深色偏好塞进 localStorage）：在页面脚本之前执行
+if (initScript !== undefined && initScript !== '') {
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: initScript })
+}
 await send('Emulation.setDeviceMetricsOverride', {
   width: Number(width),
   height: Number(height),

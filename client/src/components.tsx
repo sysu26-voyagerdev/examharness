@@ -541,7 +541,9 @@ function QuestionBlock({
               sx={{
                 mt: 1,
                 display: 'grid',
-                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                // 按**容器**宽度自适应（不是按屏幕）：卷面这一栏在窄屏/分栏时本来就窄，
+                // 两列硬塞会把 "(x-2)(x+6)" 折成两行（截图里就是这样）。
+                gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
                 columnGap: 3,
                 rowGap: 0.5,
               }}

@@ -10,6 +10,10 @@ import CardContent from '@mui/material/CardContent'
 import CardHeader from '@mui/material/CardHeader'
 import Chip from '@mui/material/Chip'
 import Collapse from '@mui/material/Collapse'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import Divider from '@mui/material/Divider'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
@@ -37,6 +41,7 @@ export function KnowledgePage(): React.JSX.Element {
   const [pasted, setPasted] = useState('')
   const [pastedName, setPastedName] = useState('')
   const [reading, setReading] = useState(false)
+  const [adding, setAdding] = useState(false)
   const [open, setOpen] = useState('')
   const [fileName, setFileName] = useState('')
   const [chunk, setChunk] = useState<{ text: string; total: number; next?: number } | null>(null)
@@ -71,6 +76,7 @@ export function KnowledgePage(): React.JSX.Element {
   const upload = (): void => {
     void app.guard('upload', async () => {
       const batch = await api.uploadKb(name.trim(), pending)
+      setAdding(false)
       setName('')
       setFiles([])
       setPasted('')
@@ -92,69 +98,108 @@ export function KnowledgePage(): React.JSX.Element {
 
   const batches = kb?.batches ?? []
 
+  const importDir = (): void => {
+    void app.guard('import', async () => {
+      const batch = await api.importKbDir(name.trim(), dir.trim())
+      setName('')
+      setDir('')
+      setAdding(false)
+      setOpen(batch.id)
+      await app.reload()
+    })
+  }
+
   return (
     <Box sx={{ display: 'flex', height: '100%', minHeight: 0, gap: 2.5, p: 2.5 }}>
       <Box sx={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
-        <Typography variant="h5">资料</Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
-          给 agent 参考的真资料：真题、课标、教材、教研笔记。整理之后，抽出来的题目会进入可比对的范围。
-        </Typography>
+        <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 2 }}>
+          <Typography variant="h5">资料</Typography>
+          <Typography variant="caption" color="text.secondary">
+            真题、课标、教材——出题时的参考，也是判重的依据
+          </Typography>
+          <Box sx={{ flex: 1 }} />
+          <Button variant="contained" disableElevation startIcon={<UploadFileOutlinedIcon />} disabled={busy !== ''} onClick={() => setAdding(true)}>
+            加资料
+          </Button>
+        </Stack>
 
-        <Card sx={{ mb: 2 }}>
-          <CardHeader
-            avatar={<UploadFileOutlinedIcon color="primary" />}
-            title="加一批资料"
-            subheader="小文件直接上传；教材、课标这类几十 GB 的资料，指一个本机文件夹就行（不复制）"
-          />
-          <CardContent sx={{ pt: 0 }}>
-            <Stack spacing={2}>
-              <TextField label="给这批资料起个名字" value={name} placeholder="例如 2023 中考真题" onChange={(event) => setName(event.target.value)} />
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-                <Button component="label" variant="outlined" size="small" disabled={reading} startIcon={<UploadFileOutlinedIcon />}>
-                  选择文件
-                  <input hidden type="file" multiple accept=".txt,.md,.csv,.jsonl,.pdf,.docx,.xlsx,.png,.jpg,.jpeg" onChange={(event) => void pick(event.target.files)} />
-                </Button>
-                <Typography variant="caption" color="text.secondary">
-                  {pending.length === 0 ? '还没有选文件' : pending.map((file) => file.name).join('　')}
+        {/* 三种加法是**三件不同的事**（上传小文件 / 指向大文件夹 / 贴一段文字），
+            摆在一个表单里只会让人犹豫——收进对话框，一次选一种 */}
+        <Dialog open={adding} onClose={() => setAdding(false)} fullWidth maxWidth="sm">
+          <DialogTitle>加一批资料</DialogTitle>
+          <DialogContent>
+            <Stack spacing={2.5} sx={{ mt: 1 }}>
+              <TextField
+                label="给这批资料起个名字"
+                value={name}
+                placeholder="例如 2023 中考真题"
+                onChange={(event) => setName(event.target.value)}
+              />
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  小文件直接上传
                 </Typography>
-                <Box sx={{ flex: 1 }} />
-                <Button variant="contained" size="small" disabled={busy !== '' || pending.length === 0} onClick={upload}>
-                  上传
-                </Button>
-              </Stack>
-              <Divider>或者指一个本机文件夹</Divider>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
-                <TextField
-                  fullWidth
-                  label="文件夹路径"
-                  value={dir}
-                  placeholder="/home/…/课标、教材、教参"
-                  helperText="文件原地不动，整理时链接进工作区"
-                  onChange={(event) => setDir(event.target.value)}
-                />
-                <Button
-                  variant="outlined"
-                  size="small"
-                  sx={{ mt: 0.5 }}
-                  disabled={busy !== '' || dir.trim() === ''}
-                  onClick={() =>
-                    void app.guard('import', async () => {
-                      const batch = await api.importKbDir(name.trim(), dir.trim())
-                      setName('')
-                      setDir('')
-                      setOpen(batch.id)
-                      await app.reload()
-                    })
-                  }
-                >
-                  导入
-                </Button>
-              </Stack>
-              <TextField label="或者直接粘一段文字" value={pasted} multiline minRows={2} maxRows={6} onChange={(event) => setPasted(event.target.value)} />
-              {pasted.trim() !== '' && <TextField label="这段文字叫什么" value={pastedName} onChange={(event) => setPastedName(event.target.value)} />}
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Button component="label" variant="outlined" size="small" disabled={reading} startIcon={<UploadFileOutlinedIcon />}>
+                    选择文件
+                    <input
+                      hidden
+                      type="file"
+                      multiple
+                      accept=".txt,.md,.csv,.jsonl,.pdf,.docx,.xlsx,.png,.jpg,.jpeg"
+                      onChange={(event) => void pick(event.target.files)}
+                    />
+                  </Button>
+                  <Typography variant="caption" color="text.secondary">
+                    {pending.length === 0 ? '还没有选文件' : pending.map((file) => file.name).join('　')}
+                  </Typography>
+                  <Box sx={{ flex: 1 }} />
+                  <Button variant="contained" disableElevation size="small" disabled={busy !== '' || pending.length === 0} onClick={upload}>
+                    上传
+                  </Button>
+                </Stack>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  教材、课标这类几十 GB 的：指一个本机文件夹
+                </Typography>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+                  <TextField
+                    fullWidth
+                    label="文件夹路径"
+                    value={dir}
+                    placeholder="/home/…/课标、教材、教参"
+                    helperText="文件原地不动，整理时链接进工作区"
+                    onChange={(event) => setDir(event.target.value)}
+                  />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    sx={{ mt: 0.5 }}
+                    disabled={busy !== '' || dir.trim() === ''}
+                    onClick={importDir}
+                  >
+                    导入
+                  </Button>
+                </Stack>
+              </Box>
+              <Box>
+                <Typography variant="subtitle2" gutterBottom>
+                  或者直接贴一段文字
+                </Typography>
+                <Stack spacing={1}>
+                  <TextField value={pasted} multiline minRows={2} maxRows={6} placeholder="把题目或课标片段贴进来" onChange={(event) => setPasted(event.target.value)} />
+                  {pasted.trim() !== '' && (
+                    <TextField label="这段文字叫什么" value={pastedName} onChange={(event) => setPastedName(event.target.value)} />
+                  )}
+                </Stack>
+              </Box>
             </Stack>
-          </CardContent>
-        </Card>
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setAdding(false)}>算了</Button>
+          </DialogActions>
+        </Dialog>
 
         {batches.length === 0 && (
           <Card>
@@ -166,7 +211,8 @@ export function KnowledgePage(): React.JSX.Element {
           </Card>
         )}
 
-        <Stack spacing={2}>
+        {/* 卡片不要铺满 1500px 的屏：一行文字超过 ~90 字就看不住了 */}
+        <Stack spacing={2} sx={{ maxWidth: 900 }}>
           {batches.map((batch) => (
             <BatchCard
               key={batch.id}
@@ -192,8 +238,8 @@ export function KnowledgePage(): React.JSX.Element {
         </Stack>
       </Box>
 
-      {/* 整理记录：只显示这一批 */}
-      <Card sx={{ flex: 0.8, minWidth: 320, display: 'flex', flexDirection: 'column' }}>
+      {/* 整理记录：**选了一批才出现**——不该为"可能要看"常占三分之一屏 */}
+      <Card sx={{ flex: 0.8, minWidth: 320, display: open === '' ? 'none' : 'flex', flexDirection: 'column' }}>
         <CardHeader
           title="整理记录"
           subheader={open === '' ? '选一批资料，这里显示它读到了什么' : (batches.find((batch) => batch.id === open)?.name ?? '')}
