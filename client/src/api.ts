@@ -1,8 +1,13 @@
 import type {
+  AppSettingsView,
+  KbBatchView,
+  KbListView,
   LiveEvent,
   RunEventView,
   RunView,
+  SessionGroupView,
   SessionMetaView,
+  SessionsView,
   SessionView,
   SettingsView,
   StateView,
@@ -48,8 +53,37 @@ export const getSession = (): Promise<SessionView> => fetch('/api/session').then
 export const getState = (): Promise<StateView> => fetch('/api/state').then((r) => json<StateView>(r))
 export const getSettings = (): Promise<SettingsView> => fetch('/api/settings').then((r) => json<SettingsView>(r))
 
-export const getSessions = (): Promise<{ currentId: string; sessions: readonly SessionMetaView[] }> =>
-  fetch('/api/sessions').then((r) => json<{ currentId: string; sessions: readonly SessionMetaView[] }>(r))
+export const getSessions = (): Promise<SessionsView> => fetch('/api/sessions').then((r) => json<SessionsView>(r))
+
+export const createGroup = (name: string): Promise<SessionGroupView> =>
+  send('POST', '/api/groups', { name }).then((r) => json<SessionGroupView>(r))
+
+export const renameGroup = (id: string, name: string): Promise<SessionGroupView> =>
+  send('PATCH', '/api/groups', { id, name }).then((r) => json<SessionGroupView>(r))
+
+export const moveSessionToGroup = (sessionId: string, groupId: string): Promise<SessionMetaView> =>
+  send('POST', '/api/session/group', { sessionId, groupId }).then((r) => json<SessionMetaView>(r))
+
+export const patchSettings = (patch: Partial<AppSettingsView>): Promise<AppSettingsView> =>
+  send('PATCH', '/api/settings', patch).then((r) => json<AppSettingsView>(r))
+
+export const getKb = (): Promise<KbListView> => fetch('/api/kb').then((r) => json<KbListView>(r))
+
+export const uploadKb = (name: string, files: readonly { name: string; text: string }[]): Promise<KbBatchView> =>
+  send('POST', '/api/kb/upload', { name, files }).then((r) => json<KbBatchView>(r))
+
+export const previewKb = (
+  batchId: string,
+  file: string,
+  offset = 0,
+): Promise<{ text: string; total: number; next?: number }> =>
+  fetch(`/api/kb/preview?batchId=${encodeURIComponent(batchId)}&file=${encodeURIComponent(file)}&offset=${String(offset)}`).then(
+    (r) => json<{ text: string; total: number; next?: number }>(r),
+  )
+
+/** 让 agent 整理这个知识库（不是手写导入器，而是 agent 拿工具干） */
+export const ingestKb = (batchId: string): Promise<{ run: RunView; batch: KbBatchView }> =>
+  send('POST', '/api/kb/ingest', { batchId }).then((r) => json<{ run: RunView; batch: KbBatchView }>(r))
 
 export const createSession = (patch: Partial<SessionMetaView> = {}): Promise<SessionMetaView> =>
   send('POST', '/api/sessions', patch).then((r) => json<SessionMetaView>(r))
@@ -101,6 +135,8 @@ export function subscribe(
     ['stored', simple('stored')],
     ['rejected', simple('rejected')],
     ['confirmed', simple('confirmed')],
+    ['kb:changed', simple('kb:changed')],
+    ['settings:changed', simple('settings:changed')],
     ['run:step', step],
   ]
   for (const [name, handler] of handlers) source.addEventListener(name, handler)

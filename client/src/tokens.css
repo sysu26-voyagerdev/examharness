@@ -133,7 +133,6 @@ button {
 }
 
 .top .meta {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: var(--sp-5);
@@ -857,4 +856,243 @@ td.n {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
+}
+
+/* ── 单列页面（会话 / 知识库 / 设置共用一套版式）────────────── */
+.top .right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+.navtabs {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.navtabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--r-ctl);
+  padding: 5px 9px;
+  background: none;
+  color: var(--label-3);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.navtabs button:hover {
+  background: var(--bg-hover);
+  color: var(--label-1);
+}
+
+.navtabs button.on {
+  background: var(--bg-hover);
+  color: var(--label-1);
+  font-weight: 500;
+}
+
+.navtabs svg {
+  width: 15px;
+  height: 15px;
+}
+
+.page {
+  height: calc(100vh - 48px);
+  overflow: auto;
+}
+
+.page .wrap {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: var(--sp-6) var(--sp-6) 96px;
+}
+
+.pagehd {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+
+.pagehd h1 {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.pagehd .r {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+/* 页面里的块：比 .panel 多一圈边界和圆角（它不贴在栏边上） */
+.card2 {
+  border: 1px solid var(--line-1);
+  border-radius: var(--r-code);
+  margin-bottom: var(--sp-4);
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 0 var(--sp-5);
+}
+
+.acts {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  justify-content: flex-end;
+  margin-top: var(--sp-3);
+}
+
+.acts .hint {
+  margin-right: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 分组 / 列表行 */
+.group {
+  margin-bottom: var(--sp-6);
+}
+
+.grouphd {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5) var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--label-2);
+}
+
+.grouphd b {
+  font-weight: 500;
+  color: var(--label-1);
+}
+
+.grouphd svg {
+  width: 15px;
+  height: 15px;
+  color: var(--label-4);
+}
+
+.lrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 8px var(--sp-5);
+  border-top: 1px solid var(--line-1);
+  background: var(--bg);
+}
+
+.lrow:hover {
+  background: var(--bg-hover);
+}
+
+.lrow.on {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.lmain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lrow .lt {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--label-1);
+}
+
+.lrow .ls {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-cap);
+  color: var(--label-4);
+}
+
+.lacts {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* 小控件 */
+.field select,
+.sel,
+.flat {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
+  padding: 4px 7px;
+  background: var(--bg);
+  color: var(--label-2);
+  font: var(--fs-cap) / var(--lh-sm) var(--font);
+  outline: 0;
+}
+
+.field select:focus,
+.sel:focus,
+.flat:focus {
+  border-color: var(--label-4);
+  color: var(--label-1);
+}
+
+.field select {
+  padding: 5px 8px;
+  font-size: var(--fs-sm);
+}
+
+.flat {
+  flex: 1;
+  font-size: var(--fs-sm);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--label-2);
+  cursor: pointer;
+}
+
+.check input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  accent-color: var(--label-1);
+}
+
+/* 分片预览：kb 原文只取这一段，几 MB 的资料不进浏览器 */
+.pre {
+  margin: 0 0 var(--sp-3);
+  max-height: 320px;
+  overflow: auto;
+  padding: var(--sp-4);
+  border-radius: var(--r-ctl);
+  background: var(--bg);
+  font: var(--fs-cap) / 1.75 var(--mono);
+  color: var(--label-2);
+  white-space: pre-wrap;
+  word-break: break-word;
 }

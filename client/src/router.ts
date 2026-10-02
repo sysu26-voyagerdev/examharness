@@ -1,0 +1,35 @@
+import { useCallback, useEffect, useState } from 'react'
+
+/**
+ * 极简 hash 路由（不引路由库，ADR-0015）。
+ *
+ * 页面就是 URL：`#/work`、`#/sessions`、`#/knowledge`、`#/knowledge/<批次>`、`#/settings`。
+ * 刷新、回退、把地址发给同事，都落在同一页——这比"状态藏在内存里"更适合被演示。
+ */
+
+export interface Route {
+  page: string
+  arg: string
+}
+
+export function parseHash(hash: string): Route {
+  const raw = hash.replace(/^#\/?/, '')
+  const [page = '', ...rest] = raw.split('/')
+  return { page: page === '' ? 'work' : page, arg: rest.join('/') }
+}
+
+export function useRoute(): { route: Route; go: (path: string) => void } {
+  const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash))
+
+  useEffect(() => {
+    const onChange = (): void => setRoute(parseHash(window.location.hash))
+    window.addEventListener('hashchange', onChange)
+    return () => window.removeEventListener('hashchange', onChange)
+  }, [])
+
+  const go = useCallback((path: string) => {
+    window.location.hash = path.startsWith('#') ? path : `#/${path}`
+  }, [])
+
+  return { route, go }
+}

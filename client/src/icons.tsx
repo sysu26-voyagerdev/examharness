@@ -81,6 +81,11 @@ const PATHS: Readonly<Record<string, JSX.Element>> = {
     </>
   ),
   send: <path d="M8 12.5V3.8M4.6 7.2L8 3.8l3.4 3.4" />,
+  folder: (
+    <>
+      <path d="M2.4 4.4a1 1 0 0 1 1-1h2.2l1.2 1.6h5.8a1 1 0 0 1 1 1v5.6a1 1 0 0 1-1 1H3.4a1 1 0 0 1-1-1z" />
+    </>
+  ),
   sun: (
     <>
       <circle cx="8" cy="8" r="3" />

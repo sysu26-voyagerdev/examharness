@@ -6,7 +6,6 @@ import type {
   LiveEvent,
   RunEventView,
   SessionMetaView,
-  SettingsView,
   SlotBindingView,
   SlotChangeView,
   VersionView,
@@ -589,54 +588,6 @@ export function SessionDialog({
           </button>
           <button className="pri" onClick={() => onSave({ title, className, progress, blueprintPath })}>
             保存
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-export function SettingsDialog({
-  settings,
-  frozen,
-  onClose,
-  onFreeze,
-}: {
-  settings: SettingsView
-  frozen: boolean
-  onClose: () => void
-  onFreeze: () => void
-}): React.JSX.Element {
-  return (
-    <div className="dialog-back" onClick={onClose}>
-      <div className="dialog" onClick={(event) => event.stopPropagation()}>
-        <h2>能力与状态</h2>
-        <dl className="kv">
-          <dt>模型</dt>
-          <dd>
-            {settings.model.configured ? `已配置（${settings.model.name}）` : '未配置——工作台会明确拒绝运行'}
-          </dd>
-          <dt>语料库</dt>
-          <dd>
-            共 {settings.corpus.total} 条，其中可对外 {settings.corpus.distributable} 条
-          </dd>
-          <dt>联网搜索</dt>
-          <dd>{settings.websearch.enabled ? '已启用（agent 可见 web_search 工具）' : '未启用（agent 看不到该工具）'}</dd>
-          <dt>构造器</dt>
-          <dd className="mono">{settings.constructors.join('、')}</dd>
-          <dt>闸门链</dt>
-          <dd className="mono">{settings.gates.join(' → ')}</dd>
-        </dl>
-        <div className="hint" style={{ marginTop: 'var(--sp-4)' }}>
-          这些都在 <span className="mono">cordis.yml</span> 里配：改完重启即可。
-          密钥只从环境变量取（<span className="mono">{'${EXAMHARNESS_API_KEY}'}</span> 等），不写进仓库。
-        </div>
-        <div style={{ display: 'flex', gap: 'var(--sp-3)', justifyContent: 'flex-end', marginTop: 'var(--sp-5)' }}>
-          <button className="ghost" onClick={onClose}>
-            关闭
-          </button>
-          <button className="pri" disabled={frozen} onClick={onFreeze} title="冻结后所有写操作一律拒绝（R3）">
-            {frozen ? '已冻结' : '定稿冻结'}
           </button>
         </div>
       </div>

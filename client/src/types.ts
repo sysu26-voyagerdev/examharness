@@ -79,6 +79,20 @@ export interface SessionMetaView {
   blueprintPath: string
   createdAt: string
   frozen: boolean
+  groupId: string
+  kbId: string
+}
+
+export interface SessionGroupView {
+  id: string
+  name: string
+}
+
+export interface SessionsView {
+  currentId: string
+  sessions: readonly SessionMetaView[]
+  groups: readonly SessionGroupView[]
+  defaults: { className: string; progress: string; blueprintPath: string }
 }
 
 export interface SessionView {
@@ -100,12 +114,47 @@ export interface StateView {
   knowledge: KnowledgeView
 }
 
+/** 可编辑的运行期设置（落盘到 data/settings.json） */
+export interface AppSettingsView {
+  model: { baseUrl: string; model: string }
+  websearch: { enabled: boolean; endpoint: string }
+  corpusDirs: readonly string[]
+  sessionDefaults: { className: string; progress: string; blueprintPath: string }
+  gates: { corpusWordingMax: number; corpusNumbersMin: number; bankMaxSimilarity: number }
+}
+
+/** 设置页 = 可改的设置 + 只读的运行期观测值 */
 export interface SettingsView {
-  model: { configured: boolean; name: string }
-  corpus: { total: number; distributable: number; bySource?: Readonly<Record<string, number>>; byKnowledge?: Readonly<Record<string, number>> }
-  websearch: { enabled: boolean }
-  constructors: readonly string[]
-  gates: readonly string[]
+  app: AppSettingsView
+  runtime: {
+    modelConfigured: boolean
+    modelName: string
+    corpusTotal: number
+    corpusDistributable: number
+    corpusBySource: Readonly<Record<string, number>>
+    websearchEnabled: boolean
+    /** 哪些改动要重启才生效（诚实标注；目前都是热设置 = 空） */
+    restartRequired: readonly string[]
+    constructors: readonly string[]
+    gates: readonly string[]
+  }
+}
+
+export type KbStatus = 'raw' | 'ingesting' | 'indexed' | 'failed'
+
+export interface KbBatchView {
+  id: string
+  name: string
+  at: string
+  status: KbStatus
+  files: readonly { name: string; bytes: number }[]
+  records: number
+  note?: string
+}
+
+export interface KbListView {
+  batches: readonly KbBatchView[]
+  corpusTotal: number
 }
 
 export interface RunEventView {
@@ -123,7 +172,10 @@ export interface RunView {
 }
 
 export interface LiveEvent {
-  kind: 'stored' | 'rejected' | 'confirmed' | 'run:step'
+  kind: 'stored' | 'rejected' | 'confirmed' | 'run:step' | 'kb:changed' | 'settings:changed'
+  batchId?: string
+  status?: string
+  records?: number
   at: string
   id?: string
   slot?: string
