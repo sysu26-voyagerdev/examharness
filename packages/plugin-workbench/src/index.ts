@@ -228,6 +228,14 @@ const WORKSPACE_TOOLS: readonly LlmToolSpec[] = [
   },
 ]
 
+const PAPER_TOOL: LlmToolSpec = {
+  name: 'assemble_paper',
+  description:
+    '把已入库的题按蓝图排成一份卷子（产生新版本）。**题位齐了就用它收尾**——不然老师看不到卷子。' +
+    '有题位没凑齐时它会如实告诉你缺哪个，不会拿不合格的题凑数。',
+  parameters: { type: 'object', properties: {}, required: [] },
+}
+
 const DOC_TOOLS: readonly LlmToolSpec[] = [
   {
     name: 'doc_probe',
@@ -328,6 +336,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     if (this.ctx.get('workspace') !== undefined) tools.push(...WORKSPACE_TOOLS)
     // 内置读文档/OCR：常见格式不必现写脚本（读不了的还是可以用 ws_run 自己来）
     if (this.ctx.get('doc')?.available() === true) tools.push(...DOC_TOOLS)
+    // 组卷是收尾动作：题位齐了就该排成卷子，否则老师根本看不到成品
+    if (this.ctx.get('session') !== undefined) tools.push(PAPER_TOOL)
     return tools
   }
 
@@ -457,8 +467,9 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       { role: 'system', content: systemPrompt(request.blueprint, this.config.extraRules, workspace !== undefined) },
       { role: 'user', content: request.goal },
     ]
-    if (workspace !== undefined) {
-      say(0, 'tool', `工作区已就绪：${workspace.name}（${String(workspace.files.length)} 个文件）`)
+    // 没文件的空工作区不值得占一行；有资料时才说一句（并且说人话，不报内部 id）
+    if (workspace !== undefined && workspace.files.length > 0) {
+      say(0, 'tool', `工作区里已经有 ${String(workspace.files.length)} 份文件`)
     }
 
     let stopped: WorkbenchRun['stopped'] = 'done'
@@ -745,17 +756,56 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     if (tool === 'kb_read') {
       const kb = this.ctx.get('kb')
       if (kb === undefined) return { kind: 'tool', text: 'kb_read：没有知识库服务', payload: { error: '未接入知识库' } }
-      const chunk = kb.read(
-        String(args.batchId ?? ''),
-        String(args.file ?? ''),
-        typeof args.offset === 'number' ? args.offset : 0,
-        typeof args.limit === 'number' ? args.limit : 4000,
-      )
+      const batchId = String(args.batchId ?? '')
+      const file = String(args.file ?? '')
+
+      // PDF / Word / 图片当文本读只会拿到几千万字节的垃圾——过去真发生过。
+      // 这里顺手把那一批**铺进工作区**，并指路去用读文档工具（模型的下一步就能干活）。
+      if (/\.(pdf|docx?|xlsx?|pptx?|png|jpe?g|webp|bmp|tiff?|zip|rar)$/i.test(file)) {
+        const linked = this.ctx.workspace.seedLinks(workspaceName, kb.sourcePaths(batchId))
+        return {
+          kind: 'tool',
+          text:
+            `kb_read：${file} 是二进制文件，不能当文本读。` +
+            (linked > 0 ? `这一批的 ${String(linked)} 份已经铺到工作区的 in/ 了：用 doc_probe 看它是什么，再用 doc_extract（扫描件会自动 OCR）读文字。` : '（没能铺进工作区，先看 ws_ls）'),
+          payload: { error: '二进制文件不能当文本读', hint: 'doc_probe → doc_extract / doc_ocr', linked },
+        }
+      }
+
+      const chunk = kb.read(batchId, file, typeof args.offset === 'number' ? args.offset : 0, typeof args.limit === 'number' ? args.limit : 4000)
       if (chunk === undefined) return { kind: 'tool', text: 'kb_read：没有这个文件', payload: { error: '未知文件' } }
       return {
         kind: 'tool',
         text: `kb_read：读到 ${String(chunk.text.length)} 字（共 ${String(chunk.total)}${chunk.next === undefined ? '，已到结尾' : `，下一个 offset=${String(chunk.next)}`}）`,
         payload: chunk,
+      }
+    }
+
+    if (tool === 'assemble_paper') {
+      const session = this.ctx.get('session')
+      if (session === undefined) return { kind: 'tool', text: 'assemble_paper：没有会话服务', payload: { error: '未接入会话' } }
+      try {
+        const version = await session.assemble('agent 收尾组卷')
+        const gaps = version.gaps.map((gap) => `${gap.slot}（缺 ${String(gap.missing)}：${gap.reason}）`)
+        return {
+          kind: 'tool',
+          text:
+            `assemble_paper：第 ${String(version.version)} 版，${String(version.bindings.length)} 道题，满分 ${String(version.totalScore)}` +
+            (gaps.length === 0 ? '，题位齐了' : `；还有缺口：${gaps.join('；')}`),
+          payload: {
+            version: version.version,
+            totalScore: version.totalScore,
+            scoreGap: version.scoreGap,
+            slots: version.bindings.map((binding) => binding.slot),
+            gaps: version.gaps,
+          },
+        }
+      } catch (error) {
+        return {
+          kind: 'tool',
+          text: `assemble_paper：没组起来（${error instanceof Error ? error.message : String(error)}）`,
+          payload: { error: error instanceof Error ? error.message : String(error) },
+        }
       }
     }
 
@@ -968,6 +1018,9 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
   return [
     '你是 AI 命题组的组长。你的产出必须是**能过闸门**的原创题。',
     '**用中文说话**：老师看的是中文界面，你的每一句说明都用中文（工具参数里的中文也一样）。',
+    '说话要短：一句话说清你做了什么、发现了什么。**不要写报告**——不写 Markdown 标题、不加粗、',
+    '不列表格、不复述工具原始输出，也不要重复题目全文（卷子页上就有）。',
+    '拿不准老师要什么时，问**一个**具体问题就停（别自己替他决定）。',
     '',
     `本次卷子：${blueprint.paper.title}（${blueprint.paper.className}，${blueprint.paper.totalScore} 分，${blueprint.paper.minutes} 分钟）`,
     '题位：',
@@ -980,6 +1033,7 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     '   闸门由框架挂载，你无法跳过，也不必重复验证。',
     '3. 被拦下时读清楚是哪道闸门、能不能靠重做修好：能就换种子重来，不能就换题位设计。',
     '4. 每题位凑齐为止；凑不齐就说明原因，不要用不合规的题凑数。',
+    '   题位齐了（bank_stats 里 have = want）**必须调一次 assemble_paper 组卷**，否则老师看不到卷子。',
     '5. 干活之前先看手上有什么（ws_ls / doc_probe / kb_list），别凭印象开工；',
     '   资料是扫描件就用内置的 doc_extract / doc_ocr，读不完就如实说读到哪儿了。',
     '6. 有检索工具就用：corpus_search / corpus_read 参考真实题与教材的表述与难度，',

@@ -183,6 +183,7 @@ export function WorkPage(): React.JSX.Element {
               frozen={frozen}
               viewingOld={viewingOld}
               busy={busy !== ''}
+              bankSize={state?.items.length ?? 0}
               onRegenerate={(slotKey) =>
                 void app.guard(`regen:${slotKey}`, async () => {
                   const result = await api.regenerate(slotKey)

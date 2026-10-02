@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ErrorIcon from '@mui/icons-material/Error'
+import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
+import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
 import PersonIcon from '@mui/icons-material/Person'
 import ReportOutlinedIcon from '@mui/icons-material/ReportOutlined'
@@ -22,6 +24,8 @@ import IconButton from '@mui/material/IconButton'
 import List from '@mui/material/List'
 import ListItem from '@mui/material/ListItem'
 import ListItemAvatar from '@mui/material/ListItemAvatar'
+import ListItemIcon from '@mui/material/ListItemIcon'
+import ListItemButton from '@mui/material/ListItemButton'
 import ListItemText from '@mui/material/ListItemText'
 import Stack from '@mui/material/Stack'
 import Tooltip from '@mui/material/Tooltip'
@@ -29,6 +33,7 @@ import Typography from '@mui/material/Typography'
 import * as api from './api.js'
 import { useApp } from './app-context.js'
 import { toolLabel } from './log.js'
+import { MarkdownText } from './markdown.js'
 import { MathText } from './math-text.js'
 import type { ItemView, KnowledgeView, LogEntryView, SlotBindingView, SlotChangeView, VersionView } from './types.js'
 
@@ -40,6 +45,21 @@ import type { ItemView, KnowledgeView, LogEntryView, SlotBindingView, SlotChange
  */
 
 /* ─────────────── 会话记录 ─────────────── */
+
+/**
+ * 把模型偶尔写出的 Markdown 记号收拾干净。
+ * 提示词已经要求它写短句，但偶尔还是会带 `**加粗**`、`## 标题`——那些星号糊在气泡里很难看。
+ * 这里只做**显示**处理：不解析 Markdown、不引库。
+ */
+function plain(text: string): string {
+  return text
+    .replace(/^#{1,6}\s*/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/^\s*[-*]\s+/gm, '· ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
 
 function collapseRepeats(entries: readonly LogEntryView[]): readonly LogEntryView[] {
   const out: LogEntryView[] = []
@@ -111,7 +131,7 @@ function Row({ entry }: { entry: LogEntryView }): React.JSX.Element {
         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, maxWidth: '85%' }}>
           <Box sx={{ bgcolor: 'primary.main', color: 'primary.contrastText', borderRadius: 2.5, px: 2, py: 1 }}>
             <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-              {entry.text}
+              {plain(entry.text)}
             </Typography>
           </Box>
           <Avatar sx={{ width: 28, height: 28, bgcolor: 'secondary.main' }}>
@@ -144,9 +164,15 @@ function Row({ entry }: { entry: LogEntryView }): React.JSX.Element {
           </Stack>
         }
         secondary={
-          <Typography variant="body2" sx={{ color: failed ? tone : 'text.primary', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {entry.text}
-          </Typography>
+          entry.kind === 'assistant' ? (
+            <Box sx={{ color: 'text.primary' }}>
+              <MarkdownText>{entry.text}</MarkdownText>
+            </Box>
+          ) : (
+            <Typography variant="body2" sx={{ color: failed ? tone : 'text.primary', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {plain(entry.text)}
+            </Typography>
+          )
         }
         slotProps={{ secondary: { component: 'div' } }}
       />
@@ -178,11 +204,13 @@ export function PaperView({
   frozen,
   viewingOld,
   busy,
+  bankSize,
   onRegenerate,
   onConfirm,
   onAssemble,
 }: {
   version: VersionView | undefined
+  bankSize: number
   rows: readonly { binding: SlotBindingView; item: ItemView }[]
   changes: readonly SlotChangeView[]
   frozen: boolean
@@ -199,7 +227,11 @@ export function PaperView({
           还没有试卷
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          {frozen ? '这份卷子已经定稿。' : '题目由构造产生，每道题都会先过一遍检查。'}
+          {frozen
+            ? '这份卷子已经定稿。'
+            : bankSize === 0
+              ? '题库还是空的：先让 agent 出题，题目会先过一遍检查再入库。'
+              : `题库里已经有 ${String(bankSize)} 道题。按蓝图组卷，把够格的题排成一份卷子。`}
         </Typography>
         <Button variant="contained" disabled={busy || frozen} onClick={onAssemble}>
           按蓝图出一份
@@ -468,21 +500,100 @@ export function EvidenceView({ rows, versions }: { rows: readonly { binding: Slo
 
 /* ─────────────── 文件（agent 的工作区） ─────────────── */
 
+/** 路径 → 树（`in/a.pdf`、`tmp/x.py` 这样按 `/` 分层） */
+interface TreeNode {
+  name: string
+  path: string
+  bytes: number
+  children: TreeNode[]
+  isFile: boolean
+}
+
+function buildTree(files: readonly { path: string; bytes: number }[]): TreeNode[] {
+  const root: TreeNode = { name: '', path: '', bytes: 0, children: [], isFile: false }
+  for (const file of files) {
+    const parts = file.path.split('/')
+    let node = root
+    parts.forEach((part, index) => {
+      const isFile = index === parts.length - 1
+      let next = node.children.find((child) => child.name === part)
+      if (next === undefined) {
+        next = { name: part, path: parts.slice(0, index + 1).join('/'), bytes: 0, children: [], isFile }
+        node.children.push(next)
+      }
+      if (isFile) next.bytes = file.bytes
+      node = next
+    })
+  }
+  const sort = (nodes: TreeNode[]): TreeNode[] =>
+    nodes
+      .map((node) => ({ ...node, children: sort(node.children) }))
+      .toSorted((a, b) => (a.isFile === b.isFile ? a.name.localeCompare(b.name) : a.isFile ? 1 : -1))
+  return sort(root.children)
+}
+
+function humanSize(bytes: number): string {
+  if (bytes === 0) return ''
+  if (bytes < 1024) return `${String(bytes)} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
+function TreeBranch({
+  nodes,
+  depth,
+  selected,
+  expanded,
+  onToggle,
+  onSelect,
+}: {
+  nodes: readonly TreeNode[]
+  depth: number
+  selected: string
+  expanded: ReadonlySet<string>
+  onToggle: (path: string) => void
+  onSelect: (path: string) => void
+}): React.JSX.Element {
+  return (
+    <List dense disablePadding>
+      {nodes.map((node) => (
+        <Box key={node.path}>
+          <ListItem disablePadding sx={{ pl: depth * 1.5 }}>
+            <ListItemButton selected={node.isFile && node.path === selected} onClick={() => (node.isFile ? onSelect(node.path) : onToggle(node.path))}>
+              <ListItemIcon sx={{ minWidth: 30 }}>
+                {node.isFile ? <InsertDriveFileOutlinedIcon fontSize="small" /> : expanded.has(node.path) ? <FolderOpenOutlinedIcon fontSize="small" /> : <FolderOutlinedIcon fontSize="small" />}
+              </ListItemIcon>
+              <ListItemText
+                primary={node.name}
+                slotProps={{ primary: { variant: 'body2', noWrap: true, sx: { fontFamily: node.isFile ? 'monospace' : 'inherit' } } }}
+              />
+              {node.isFile && <Typography variant="caption" color="text.disabled">{humanSize(node.bytes)}</Typography>}
+            </ListItemButton>
+          </ListItem>
+          {!node.isFile && (
+            <Collapse in={expanded.has(node.path)} unmountOnExit>
+              <TreeBranch nodes={node.children} depth={depth + 1} selected={selected} expanded={expanded} onToggle={onToggle} onSelect={onSelect} />
+            </Collapse>
+          )}
+        </Box>
+      ))}
+    </List>
+  )
+}
+
 export function FilesView({ name, tick }: { name: string; tick: number }): React.JSX.Element {
   const { busy, guard } = useApp()
   const [view, setView] = useState<Awaited<ReturnType<typeof api.getWorkspace>> | null>(null)
   const [file, setFile] = useState('')
   const [chunk, setChunk] = useState<{ text: string; total: number; next?: number } | null>(null)
   const [offset, setOffset] = useState(0)
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
 
   useEffect(() => {
     if (name === '') return
     void api
       .getWorkspace(name)
-      .then((next) => {
-        setView(next)
-        setFile((current) => (current !== '' && next.files.some((entry) => entry.path === current) ? current : (next.files[0]?.path ?? '')))
-      })
+      .then((next) => setView(next))
       .catch(() => setView(null))
   }, [name, tick])
 
@@ -497,6 +608,15 @@ export function FilesView({ name, tick }: { name: string; tick: number }): React
       .catch(() => setChunk(null))
   }, [name, file, tick])
 
+  const files = view?.files ?? []
+  const tree = useMemo(() => buildTree(files), [files])
+  const expanded = useMemo(() => {
+    const all = new Set<string>()
+    for (const node of tree) if (!node.isFile) all.add(node.path)
+    for (const path of collapsed) all.delete(path)
+    return all
+  }, [tree, collapsed])
+
   if (name === '') {
     return (
       <Card>
@@ -509,23 +629,17 @@ export function FilesView({ name, tick }: { name: string; tick: number }): React
     )
   }
 
-  const files = view?.files ?? []
-
   return (
     <Stack spacing={2} sx={{ p: { xs: 1.5, md: 2 } }}>
       <Card>
         <CardHeader
-          avatar={
-            <Avatar sx={{ bgcolor: 'secondary.main' }}>
-              <FolderOpenOutlinedIcon />
-            </Avatar>
-          }
-          title={`${String(files.length)} 个文件`}
-          subheader="它读的资料、写的脚本、跑出来的东西都留在这里"
+          avatar={<Avatar sx={{ bgcolor: 'secondary.main' }}><FolderOpenOutlinedIcon /></Avatar>}
+          title="工作区"
+          subheader={files.length === 0 ? '它读的资料、写的脚本、跑出来的东西都留在这里' : `${String(files.length)} 个文件`}
           action={
             view?.venv == null ? (
               <Tooltip title="处理 PDF / Word / Excel 需要它：在仓库根跑 pnpm venv">
-                <Chip color="warning" label="还没建虚拟环境" />
+                <Chip color="warning" variant="outlined" label="还没建虚拟环境" />
               </Tooltip>
             ) : undefined
           }
@@ -536,18 +650,21 @@ export function FilesView({ name, tick }: { name: string; tick: number }): React
               agent 还没有在这里放过文件。
             </Typography>
           ) : (
-            <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
-              {files.map((entry) => (
-                <Chip
-                  key={entry.path}
-                  variant={entry.path === file ? 'filled' : 'outlined'}
-                  color={entry.path === file ? 'primary' : 'default'}
-                  label={entry.path}
-                  onClick={() => setFile(entry.path)}
-                  sx={{ fontFamily: 'monospace' }}
-                />
-              ))}
-            </Stack>
+            <TreeBranch
+              nodes={tree}
+              depth={0}
+              selected={file}
+              expanded={expanded}
+              onToggle={(path) =>
+                setCollapsed((previous) => {
+                  const next = new Set(previous)
+                  if (next.has(path)) next.delete(path)
+                  else next.add(path)
+                  return next
+                })
+              }
+              onSelect={setFile}
+            />
           )}
         </CardContent>
       </Card>
