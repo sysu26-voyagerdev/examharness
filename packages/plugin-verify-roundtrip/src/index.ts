@@ -78,12 +78,61 @@ function readParsed(value: Record<string, unknown> | undefined): ParsedStem | un
   return { goals, givensCount: count, answer, numbers: stated }
 }
 
-/** 目标是否讲的是同一件事：用实例目标里的关键词做包含判定 */
+/**
+ * 两句话像不像（0–1）：按**字符二元组**的 Dice 系数。
+ *
+ * 为什么不用"字面相等"：题面是人话，同一个意思有无数种写法——
+ * 「求圆心到弦AB的距离」与「求圆心 O 到弦 AB 的距离」，「tan A = 5/12」与「5/12」，
+ * 都是一回事。**判据是内容，不是字面**：闸门该抓的是"问的变了、数值变了、条件漏了"，
+ * 不是"多了个字母 O"。真实踩过：agent 被逼着把题型改成迎合闸门的字面，越改越离谱。
+ */
+function similarText(left: string, right: string): number {
+  const a = normalize(left)
+  const b = normalize(right)
+  if (a === '' || b === '') return 0
+  if (a === b || a.includes(b) || b.includes(a)) return 1
+  const bigrams = (text: string): string[] =>
+    text.length < 2 ? [text] : Array.from({ length: text.length - 1 }, (_, index) => text.slice(index, index + 2))
+  const left_ = bigrams(a)
+  const right_ = bigrams(b)
+  const pool = [...right_]
+  let shared = 0
+  for (const gram of left_) {
+    const at = pool.indexOf(gram)
+    if (at >= 0) {
+      shared += 1
+      pool.splice(at, 1)
+    }
+  }
+  return (2 * shared) / (left_.length + right_.length)
+}
+
+/** 目标是否讲的是同一件事（阈值放宽到 0.6：允许措辞与标注差异） */
 function goalMatches(instanceGoal: string, parsedGoal: string): boolean {
   const tokens = instanceGoal.split(/[\s/]+/).filter((token) => token !== '')
   if (tokens.length === 0) return false
   const normalized = normalize(parsedGoal)
-  return tokens.some((token) => normalized.includes(normalize(token)))
+  if (tokens.some((token) => normalized.includes(normalize(token)))) return true
+  return similarText(instanceGoal, parsedGoal) >= 0.6
+}
+
+/** 目标最像的那一条有多像（用来区分"明显不一致"与"说不准"） */
+function bestGoalScore(instanceGoal: string, parsedGoals: readonly string[]): number {
+  return parsedGoals.reduce((best, goal) => Math.max(best, similarText(instanceGoal, goal)), 0)
+}
+
+/**
+ * 答案是否一致：字面一致、**数值一致**、或"构造答案是回译答案的一部分"（「12」⊂「圆心 O 到弦 AB 的距离 = 12」）。
+ * 老师看的是答案对不对，不是标注写没写。
+ */
+function answerMatches(constructed: string, parsed: string): boolean {
+  const a = normalize(constructed)
+  const b = normalize(parsed)
+  if (a === b || b.includes(a) || a.includes(b)) return true
+  const left = [...numbers(a)].toSorted().join(',')
+  const right = [...numbers(b)].toSorted().join(',')
+  if (left !== '' && left === right) return true
+  return similarText(a, b) >= 0.8
 }
 
 /** 构造侧声明的"问几问"：优先用分条的 goals，退回单条 goal */
@@ -248,19 +297,26 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
     else if (declaredGoals.length !== parsed.goals.length) {
       problems.push(`分问数不一致（题面 ${String(parsed.goals.length)} 问，构造 ${String(declaredGoals.length)} 问：${declaredGoals.join('／')}）`)
     } else {
-      // 逐问核对：每一条声明的目标都要能在回译出来的问法里找到对应的一条
+      // 逐问核对：每一条声明的目标都要能在回译出来的问法里找到对应的一条。
+      // 像但不确定（0.35–0.6）时**不判错**——那是"没验成"，交人看一眼（R4）。
       for (const goal of declaredGoals) {
-        if (!parsed.goals.some((parsedGoal) => goalMatches(goal, parsedGoal))) {
-          problems.push(`目标不一致（题面里找不到「${goal}」，回译得到的是「${parsed.goals.join('／')}」）`)
-          break
-        }
+        if (parsed.goals.some((parsedGoal) => goalMatches(goal, parsedGoal))) continue
+        const score = bestGoalScore(goal, parsed.goals)
+        if (score >= 0.35) unverifiable.push(`目标（「${goal}」与题面「${parsed.goals.join('／')}」只是措辞不同）`)
+        else problems.push(`目标不一致（题面里找不到「${goal}」，回译得到的是「${parsed.goals.join('／')}」）`)
+        break
       }
     }
-    if (item.instance.givens.length === 0 && parsed.givensCount > 0) unverifiable.push('条件条数')
-    else if (parsed.givensCount !== item.instance.givens.length) {
-      problems.push(`条件条数不一致（题面 ${String(parsed.givensCount)} 条，构造 ${String(item.instance.givens.length)} 条）`)
+    // 条件条数：模型数条件的方式与题型不同是常态（同一条件拆开数、把图算一条），
+    // 所以只卡两头：**写得比构造少**（漏条件）与**多出两条以上**（题面凭空加条件）。
+    const declaredGivens = item.instance.givens.length
+    if (declaredGivens === 0 && parsed.givensCount > 0) unverifiable.push('条件条数')
+    else if (parsed.givensCount < declaredGivens) {
+      problems.push(`条件条数不一致（题面 ${String(parsed.givensCount)} 条，构造 ${String(declaredGivens)} 条：像是漏写了条件）`)
+    } else if (parsed.givensCount > declaredGivens + 2) {
+      problems.push(`条件条数不一致（题面 ${String(parsed.givensCount)} 条，构造 ${String(declaredGivens)} 条：题面多写了条件）`)
     }
-    if (normalize(parsed.answer) !== normalize(item.witness.answer)) {
+    if (!answerMatches(item.witness.answer, parsed.answer)) {
       problems.push(`答案不一致（回译得到「${parsed.answer}」，构造答案是「${item.witness.answer}」）`)
     }
     // **题面里出现的数字必须来自构造**：允许模型写情境，但不许它自己编数据。

@@ -302,4 +302,59 @@ describe('回译闸门', () => {
     expect(gate?.text).toContain('构造参数里没有的数字')
     expect(gate?.text).not.toContain('回译失败')
   })
+  it('措辞与标注不同不算错：目标多个 O、答案带名称、条件多算一条，都该放行', async () => {
+    // 真实被拦下的例子（用户在界面上看到的）：
+    //   目标不一致（题面里找不到「求圆心到弦AB的距离」，回译得到「求圆心 O 到弦 AB 的距离」）
+    //   答案不一致（回译得到「圆心 O 到弦 AB 的距离 = 12」，构造答案是「12」）
+    //   条件条数不一致（题面 4 条，构造 3 条）
+    // 这三条说的都是同一件事——闸门该抓的是"问的变了、数值变了、条件漏了"。
+    const ctx = await boot(
+      brain({
+        serialize: false,
+        parse: () => ({
+          goals: ['求圆心 O 到弦 AB 的距离'],
+          givensCount: 4,
+          answer: '圆心 O 到弦 AB 的距离 = 12',
+          numbers: [],
+        }),
+      }),
+    )
+    const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
+    const item: Item = {
+      ...base,
+      instance: {
+        ...base.instance,
+        goal: '求圆心到弦AB的距离',
+        goals: ['求圆心到弦AB的距离'],
+        givens: ['⊙O 的半径是 13', '弦 AB 的长是 24', 'OC ⊥ AB 于点 C'],
+      },
+      witness: { ...base.witness, answer: '12' },
+      prose: { ...base.prose, serializer: { model: 'fake-writer', version: 1 } },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok ? 'ok' : JSON.stringify(result.verdict)).toBe('ok')
+  })
+
+  it('真的问错了 / 答案真的不一样 → 照样拦下（容错不是放水）', async () => {
+    const ctx = await boot(
+      brain({
+        serialize: false,
+        parse: () => ({ goals: ['求这个三角形的面积'], givensCount: 3, answer: '99', numbers: [] }),
+      }),
+    )
+    const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
+    const item: Item = {
+      ...base,
+      instance: { ...base.instance, goal: '求对称轴', goals: ['求对称轴'], givens: ['a', 'b', 'c'] },
+      witness: { ...base.witness, answer: 'x = 2' },
+      prose: { ...base.prose, serializer: { model: 'fake-writer', version: 1 } },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok).toBe(false)
+    const verdict = result.ok ? undefined : result.verdict
+    expect(verdict?.gate).toBe('verify-roundtrip')
+    expect(verdict?.reason).toContain('答案不一致')
+  })
 })
