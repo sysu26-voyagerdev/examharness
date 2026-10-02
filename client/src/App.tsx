@@ -1,20 +1,37 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import AddCommentOutlinedIcon from '@mui/icons-material/AddCommentOutlined'
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined'
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined'
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined'
+import MenuIcon from '@mui/icons-material/Menu'
+import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined'
+import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
+import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
+import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined'
 import Alert from '@mui/material/Alert'
 import AppBar from '@mui/material/AppBar'
+import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
-import Container from '@mui/material/Container'
+import Divider from '@mui/material/Divider'
+import Drawer from '@mui/material/Drawer'
 import IconButton from '@mui/material/IconButton'
 import LinearProgress from '@mui/material/LinearProgress'
+import List from '@mui/material/List'
+import ListItem from '@mui/material/ListItem'
+import ListItemAvatar from '@mui/material/ListItemAvatar'
+import ListItemButton from '@mui/material/ListItemButton'
+import ListItemIcon from '@mui/material/ListItemIcon'
+import ListItemText from '@mui/material/ListItemText'
+import ListSubheader from '@mui/material/ListSubheader'
 import Snackbar from '@mui/material/Snackbar'
-import Tab from '@mui/material/Tab'
-import Tabs from '@mui/material/Tabs'
+import Stack from '@mui/material/Stack'
+import Toolbar from '@mui/material/Toolbar'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
+import useMediaQuery from '@mui/material/useMediaQuery'
+import { useTheme } from '@mui/material/styles'
 import * as api from './api.js'
 import { AppCtx, type AppValue } from './app-context.js'
 import { appendLive, appendSignal } from './log.js'
@@ -25,29 +42,26 @@ import { WorkPage } from './pages/WorkPage.js'
 import { useRoute } from './router.js'
 import type { KbListView, LiveEvent, LogEntryView, SessionView, SessionsView, SettingsView, StateView } from './types.js'
 
-/**
- * 外壳：四个页面，一条顶栏。
- *
- * 这里只做两件事：取服务端的投影、给页面一个受控的动作入口。
- * 业务状态一律留在服务端——界面上看到的每个数字都能在接口里找到出处。
- */
+const NAV = [
+  { key: 'work', label: '工作台', icon: <ScienceOutlinedIcon /> },
+  { key: 'sessions', label: '会话', icon: <MenuBookOutlinedIcon /> },
+  { key: 'materials', label: '资料', icon: <TuneOutlinedIcon /> },
+  { key: 'settings', label: '设置', icon: <SettingsOutlinedIcon /> },
+] as const
 
-const NAV: readonly { key: string; label: string }[] = [
-  { key: 'work', label: '工作台' },
-  { key: 'sessions', label: '会话' },
-  { key: 'materials', label: '资料' },
-  { key: 'settings', label: '设置' },
-]
+const DRAWER_WIDTH = 264
 
 export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () => void }): React.JSX.Element {
   const { route, go } = useRoute()
+  const theme = useTheme()
+  const wide = useMediaQuery(theme.breakpoints.up('md'))
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   const [session, setSession] = useState<SessionView | null>(null)
   const [sessions, setSessions] = useState<SessionsView | null>(null)
   const [state, setState] = useState<StateView | null>(null)
   const [settings, setSettings] = useState<SettingsView | null>(null)
   const [kb, setKb] = useState<KbListView | null>(null)
-
   const [log, setLog] = useState<readonly LogEntryView[]>([])
   const [running, setRunning] = useState<{ runId: string; goal: string; workspace: string } | null>(null)
   const [live, setLive] = useState<readonly LiveEvent[]>([])
@@ -67,7 +81,6 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
     setState(nextState)
     setSettings(nextSettings)
     setKb(nextKb)
-    // 记录以服务端为准：刷新不丢，一轮结束时也用它把本地增量对齐
     setLog(nextSession.log)
   }, [])
 
@@ -88,7 +101,6 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
     return unsubscribe
   }, [reload])
 
-  // 一轮结束后重取投影（记录、进度、文件清单都以服务端为准）
   useEffect(() => {
     if (running === null) void reload().catch(() => undefined)
   }, [running, reload])
@@ -149,99 +161,187 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       startRun,
       interject,
       stopRun,
-      go,
+      go: (path: string) => {
+        go(path)
+        if (!wide) setDrawerOpen(false)
+      },
     }),
-    [session, sessions, state, settings, kb, log, running, live, busy, error, reload, guard, startRun, interject, stopRun, go],
+    [session, sessions, state, settings, kb, log, running, live, busy, error, reload, guard, startRun, interject, stopRun, go, wide],
   )
 
   const page = NAV.some((entry) => entry.key === route.page) ? route.page : 'work'
   const runtime = settings?.runtime
-  const needsReview =
-    session === null
-      ? 0
-      : (session.versions.at(-1)?.bindings ?? []).filter((binding) =>
-          session.slots.some((item) => item.id === binding.itemId && item.lifecycle === 'needs_review'),
-        ).length
+  const list = sessions?.sessions ?? []
+
+  const drawer = (
+    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <Toolbar sx={{ px: 2 }}>
+        <Avatar sx={{ width: 30, height: 30, bgcolor: 'primary.main', fontSize: 15 }}>题</Avatar>
+        <Typography variant="h6" sx={{ ml: 1.25, fontSize: 16 }}>
+          命题组
+        </Typography>
+      </Toolbar>
+      <Divider />
+      <List dense sx={{ px: 1, py: 1 }}>
+        {NAV.map((entry) => (
+          <ListItem key={entry.key} disablePadding>
+            <ListItemButton selected={page === entry.key} onClick={() => value.go(entry.key)}>
+              <ListItemIcon sx={{ minWidth: 38 }}>{entry.icon}</ListItemIcon>
+              <ListItemText primary={entry.label} />
+            </ListItemButton>
+          </ListItem>
+        ))}
+      </List>
+      <Divider />
+      <List
+        dense
+        sx={{ px: 1, py: 0.5, overflowY: 'auto', flex: 1 }}
+        subheader={
+          <ListSubheader component="div" sx={{ bgcolor: 'transparent', lineHeight: '32px' }}>
+            会话
+            <IconButton
+              size="small"
+              sx={{ float: 'right' }}
+              title="新建会话"
+              disabled={busy !== ''}
+              onClick={() =>
+                void guard('new', async () => {
+                  await api.createSession()
+                  await reload()
+                })
+              }
+            >
+              <AddCommentOutlinedIcon fontSize="small" />
+            </IconButton>
+          </ListSubheader>
+        }
+      >
+        {list.map((meta) => (
+          <ListItem key={meta.id} disablePadding>
+            <ListItemButton
+              selected={session?.meta.id === meta.id}
+              onClick={() =>
+                void guard('switch', async () => {
+                  if (meta.id === session?.meta.id) return
+                  await api.switchSession(meta.id)
+                  await reload()
+                  value.go('work')
+                })
+              }
+            >
+              <ListItemAvatar sx={{ minWidth: 34 }}>
+                <Avatar sx={{ width: 22, height: 22, fontSize: 11, bgcolor: meta.frozen ? 'warning.main' : 'secondary.main' }}>
+                  {meta.title.slice(0, 1)}
+                </Avatar>
+              </ListItemAvatar>
+              <ListItemText
+                primary={meta.title}
+                slotProps={{ primary: { noWrap: true, variant: 'body2' }, secondary: { noWrap: true, variant: 'caption' } }}
+                secondary={meta.frozen ? '已定稿' : meta.className}
+              />
+            </ListItemButton>
+          </ListItem>
+        ))}
+      </List>
+    </Box>
+  )
 
   return (
     <AppCtx.Provider value={value}>
-      <AppBar position="sticky">
-        <Container
-          maxWidth={false}
-          sx={{ px: { xs: 2, md: 3 }, display: 'flex', alignItems: 'center', gap: 2, minHeight: 52 }}
-        >
-          <Typography sx={{ fontWeight: 600, fontSize: 15, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+      <AppBar position="fixed" color="primary" elevation={2}>
+        <Toolbar variant="dense" sx={{ gap: 1.5, minHeight: 56 }}>
+          {!wide && (
+            <IconButton color="inherit" edge="start" onClick={() => setDrawerOpen(true)}>
+              <MenuIcon />
+            </IconButton>
+          )}
+          <Typography variant="h6" sx={{ fontSize: 17, whiteSpace: 'nowrap' }}>
             命题组
           </Typography>
-
-          <Tabs
-            value={page}
-            onChange={(_event, next: string) => go(next)}
-            sx={{ minHeight: 52, '& .MuiTabs-indicator': { bottom: 0 } }}
-          >
-            {NAV.map((entry) => (
-              <Tab key={entry.key} value={entry.key} label={entry.label} />
-            ))}
-          </Tabs>
+          <Typography variant="caption" sx={{ opacity: 0.85, display: { xs: 'none', sm: 'block' } }}>
+            ExamHarness
+          </Typography>
 
           <Box sx={{ flex: 1 }} />
 
           {session !== null && page === 'work' && (
-            <Box sx={{ display: { xs: 'none', lg: 'flex' }, alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-              <Typography variant="body2" noWrap sx={{ maxWidth: 240, color: 'text.primary' }}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', display: { xs: 'none', lg: 'flex' }, minWidth: 0 }}>
+              <Typography variant="body2" noWrap sx={{ maxWidth: 220 }}>
                 {session.meta.title}
               </Typography>
-              <Typography variant="caption" noWrap>
-                {session.meta.className}　{session.meta.progress}
-              </Typography>
-              {session.meta.frozen && <Chip size="small" label="已定稿" variant="outlined" />}
-              {needsReview > 0 && (
-                <Chip size="small" color="warning" variant="outlined" label={`${String(needsReview)} 道待确认`} />
-              )}
-            </Box>
+              <Chip size="small" variant="outlined" label={session.meta.className} sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,.5)' }} />
+              {session.meta.frozen && <Chip size="small" color="warning" label="已定稿" />}
+            </Stack>
           )}
 
           {runtime !== undefined && (
             <Tooltip title={runtime.modelConfigured ? `正在用 ${runtime.modelName}` : '还没有配置模型，去设置里填'}>
               <Chip
                 size="small"
-                variant="outlined"
-                color={runtime.modelConfigured ? 'default' : 'warning'}
+                color={runtime.modelConfigured ? 'success' : 'warning'}
                 label={runtime.modelConfigured ? '模型就绪' : '模型未配置'}
-                onClick={() => go('settings')}
-                sx={{ cursor: 'pointer' }}
+                onClick={() => value.go('settings')}
               />
             </Tooltip>
           )}
 
-          <IconButton onClick={onToggleDark} title={dark ? '切换到浅色' : '切换到深色'}>
-            {dark ? <LightModeOutlinedIcon fontSize="small" /> : <DarkModeOutlinedIcon fontSize="small" />}
-          </IconButton>
+          <Tooltip title={dark ? '浅色' : '深色'}>
+            <IconButton color="inherit" onClick={onToggleDark}>
+              {dark ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />}
+            </IconButton>
+          </Tooltip>
 
           <Button
+            color="inherit"
+            variant="outlined"
             size="small"
-            startIcon={<DownloadOutlinedIcon fontSize="small" />}
+            startIcon={<DownloadOutlinedIcon />}
             href={api.exportUrl('html')}
             disabled={session === null || session.versions.length === 0}
+            sx={{ borderColor: 'rgba(255,255,255,.5)' }}
           >
             导出
           </Button>
-        </Container>
-        {busy !== '' && <LinearProgress />}
+        </Toolbar>
+        {busy !== '' && <LinearProgress color="secondary" />}
       </AppBar>
 
-      {page === 'work' && <WorkPage />}
-      {page === 'sessions' && <SessionsPage />}
-      {page === 'materials' && <KnowledgePage />}
-      {page === 'settings' && <SettingsPage />}
+      {wide ? (
+        <Drawer variant="permanent" sx={{ width: DRAWER_WIDTH, flexShrink: 0, '& .MuiDrawer-paper': { width: DRAWER_WIDTH } }}>
+          {drawer}
+        </Drawer>
+      ) : (
+        <Drawer variant="temporary" open={drawerOpen} onClose={() => setDrawerOpen(false)} sx={{ '& .MuiDrawer-paper': { width: DRAWER_WIDTH } }}>
+          {drawer}
+        </Drawer>
+      )}
+
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          ml: { md: `${String(DRAWER_WIDTH)}px` },
+          mt: '56px',
+          height: { md: 'calc(100vh - 56px)' },
+          minHeight: 'calc(100vh - 56px)',
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+        }}
+      >
+        {page === 'work' && <WorkPage />}
+        {page === 'sessions' && <SessionsPage />}
+        {page === 'materials' && <KnowledgePage />}
+        {page === 'settings' && <SettingsPage />}
+      </Box>
 
       <Snackbar
         open={error !== ''}
-        autoHideDuration={9000}
+        autoHideDuration={10000}
         onClose={() => setError('')}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert severity="error" variant="outlined" onClose={() => setError('')} sx={{ maxWidth: 560 }}>
+        <Alert severity="error" variant="filled" onClose={() => setError('')} sx={{ maxWidth: 640 }}>
           {error}
         </Alert>
       </Snackbar>

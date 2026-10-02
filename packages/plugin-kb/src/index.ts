@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, appendFileSync, statSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { basename, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { CorpusRecord, KbApi, KbBatch, KbStatus } from '@examharness/core'
@@ -39,6 +39,31 @@ export interface KbConfig {
   index: string
   maxTextBytes: number
   maxFileBytes: number
+  maxImportFiles: number
+}
+
+/** 收哪些类型：认得出来的资料。认不出来的（二进制包、压缩包）不进来，让老师自己解。 */
+const KEEP = new Set(['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.txt', '.md', '.csv', '.jsonl', '.png', '.jpg', '.jpeg'])
+
+function walk(dir: string, out: string[] = [], depth = 0): string[] {
+  let entries: string[]
+  try {
+    entries = readdirSync(dir)
+  } catch {
+    return out
+  }
+  for (const entry of entries) {
+    if (entry.startsWith('.')) continue
+    const full = join(dir, entry)
+    try {
+      if (statSync(full).isDirectory()) {
+        if (depth < 4) walk(full, out, depth + 1)
+      } else out.push(full)
+    } catch {
+      /* 读不到就跳过 */
+    }
+  }
+  return out
 }
 
 export class KbService extends Service implements KbApi {
@@ -97,6 +122,50 @@ export class KbService extends Service implements KbApi {
     return batch
   }
 
+  /**
+   * 从本机文件夹导入资料：**文件原地不动**。
+   * 教材/课标动辄几十 GB，复制一份既慢又占地方；工作区用符号链接把它们铺进 in/，
+   * agent 照常按相对路径读。
+   */
+  importDir(title: string, dir: string): KbBatch {
+    const root = resolve(dir.replace(/^~(?=\/)/, process.env['HOME'] ?? '~'))
+    if (!existsSync(root) || !statSync(root).isDirectory()) {
+      throw new Error(`不是文件夹：${dir}`)
+    }
+    const files: { name: string; bytes: number }[] = []
+    for (const file of walk(root)) {
+      if (files.length >= this.config.maxImportFiles) break
+      if (!KEEP.has(extname(file).toLowerCase())) continue
+      try {
+        files.push({ name: relative(root, file).split('\\').join('/'), bytes: statSync(file).size })
+      } catch {
+        /* 读不到就跳过 */
+      }
+    }
+    if (files.length === 0) throw new Error(`这个文件夹里没有认得的资料（${[...KEEP].join(' ')}）`)
+    const id = `kb-${String(Date.now())}`
+    const batch: KbBatch = {
+      id,
+      name: title === '' ? basename(root) : title,
+      at: new Date().toISOString(),
+      status: 'raw',
+      files,
+      records: 0,
+      sourceDir: root,
+    }
+    this.batches.push(batch)
+    this.save()
+    this.ctx.emit('kb:changed', { batchId: batch.id, status: batch.status })
+    return batch
+  }
+
+  sourcePaths(batchId: string): readonly string[] {
+    const batch = this.batches.find((entry) => entry.id === batchId)
+    if (batch === undefined) return []
+    const root = batch.sourceDir ?? join(this.dir, batchId)
+    return batch.files.map((file) => join(root, file.name))
+  }
+
   /** 分片读：一次别糊太多进上下文（agent 会自己翻页） */
   read(
     batchId: string,
@@ -104,8 +173,11 @@ export class KbService extends Service implements KbApi {
     offset = 0,
     limit = 4000,
   ): { text: string; total: number; next?: number } | undefined {
-    const file = join(this.dir, batchId, fileName)
-    if (!file.startsWith(this.dir) || !existsSync(file)) return undefined
+    const batch = this.batches.find((entry) => entry.id === batchId)
+    const file = join(batch?.sourceDir ?? join(this.dir, batchId), fileName)
+    // 导入的批次根目录在工作区之外，边界改成"必须在那一批的根目录里"
+    const boundary = batch?.sourceDir ?? this.dir
+    if (!file.startsWith(boundary) || !existsSync(file)) return undefined
     const text = readFileSync(file, 'utf8')
     const slice = text.slice(offset, offset + limit)
     const next = offset + limit < text.length ? offset + limit : undefined
@@ -138,8 +210,9 @@ export class KbService extends Service implements KbApi {
   }
 
   dirOf(batchId: string): string | undefined {
-    const dir = join(this.dir, batchId)
-    return dir.startsWith(this.dir) && existsSync(dir) ? dir : undefined
+    const batch = this.batches.find((entry) => entry.id === batchId)
+    const dir = batch?.sourceDir ?? join(this.dir, batchId)
+    return existsSync(dir) ? dir : undefined
   }
 
   private load(): KbBatch[] {

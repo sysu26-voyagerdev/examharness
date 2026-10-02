@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
@@ -128,6 +128,39 @@ export class WorkspaceService extends Service implements WorkspaceApi {
     }
     if (copied > 0) this.changed(safe)
     return copied
+  }
+
+  /**
+   * 把外部文件**以符号链接**铺进 `in/`：教材、课标动辄几十 GB，复制一份既慢又占地方。
+   * 链接失败（跨文件系统等）就退回复制——别因为一个链接失败就让老师没法干活。
+   */
+  seedLinks(wsName: string, sources: readonly string[]): number {
+    const safe = this.safeName(wsName)
+    const target = join(this.base, safe, 'in')
+    mkdirSync(target, { recursive: true })
+    let linked = 0
+    for (const source of sources) {
+      try {
+        if (!existsSync(source)) continue
+        const link = join(target, basename(source))
+        // 已经铺过的算数：重复整理同一批时不该报"0 份"
+        if (existsSync(link)) {
+          linked += 1
+          continue
+        }
+        symlinkSync(source, link)
+        linked += 1
+      } catch {
+        try {
+          copyFileSync(source, join(target, basename(source)))
+          linked += 1
+        } catch {
+          /* 复制也不行就跳过 */
+        }
+      }
+    }
+    if (linked > 0) this.changed(safe)
+    return linked
   }
 
   list(wsName: string): readonly WorkspaceFile[] {

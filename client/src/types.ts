@@ -116,6 +116,12 @@ export interface LogEntryView {
   kind: 'user' | 'assistant' | 'tool' | 'gate' | 'verdict'
   text: string
   runId?: string
+  /** 属于哪个工作区：工作台看会话的，资料页看这一批资料的 */
+  workspace?: string
+  /** 工具名（界面翻译成人话） */
+  tool?: string
+  /** 界面上把连续重复的行合并时用的计数（服务端不存这个） */
+  repeat?: number
 }
 
 export interface SessionView {
@@ -182,6 +188,8 @@ export interface KbBatchView {
   id: string
   name: string
   at: string
+  /** 从本机文件夹导入的批次：文件原地不动 */
+  sourceDir?: string
   status: KbStatus
   files: readonly { name: string; bytes: number }[]
   records: number

@@ -28,8 +28,13 @@ export const inject = ['workspace']
 export const Config = z.object({
   /** 提取脚本（仓库自带，模型不写它） */
   script: z.string().default('scripts/extract.py'),
-  /** 一次给模型的文字上限 */
+  /** 脚本一次最多抽多少字（全文，会写到 out/extract/ 里） */
   maxChars: z.number().default(20_000),
+  /**
+   * 给**模型**看的开头有多少字。整篇原文进上下文会直接爆掉
+   * （一本教材十几万字）——全文落盘，模型需要哪段用 ws_grep / ws_read 去取。
+   */
+  previewChars: z.number().default(1200),
   /** 单次调用超时（OCR 慢） */
   timeoutMs: z.number().default(240_000),
 })
@@ -37,6 +42,7 @@ export const Config = z.object({
 export interface DocConfig {
   script: string
   maxChars: number
+  previewChars: number
   timeoutMs: number
 }
 
@@ -111,6 +117,14 @@ export class DocService extends Service implements DocApi {
     return full.startsWith(root) ? full : undefined
   }
 
+  /** 抽出来的全文写进工作区，返回相对路径：给模型的是"文件在哪 + 开头长什么样" */
+  private saveFullText(workspace: string, path: string, text: string): string | undefined {
+    if (text === '') return undefined
+    const safe = path.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_').slice(-80)
+    const written = this.ctx.workspace.write(workspace, `out/extract/${safe}.txt`, text)
+    return written?.path
+  }
+
   private invoke(workspace: string, args: readonly string[]): DocExtract {
     if (!this.available()) {
       return { ok: false, kind: 'unknown', chars: 0, text: '', notes: [], error: `找不到提取脚本：${this.config.script}` }
@@ -127,7 +141,7 @@ export class DocService extends Service implements DocApi {
     })
     const stdout = result.stdout ?? ''
     const parsed = this.parse(stdout)
-    if (parsed !== undefined) return parsed
+    if (parsed !== undefined) return this.shrink(workspace, parsed, args)
     const timedOut = result.error !== undefined && (result.error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
     return {
       ok: false,
@@ -138,6 +152,24 @@ export class DocService extends Service implements DocApi {
       error: timedOut
         ? `读取超时（${String(this.config.timeoutMs)} ms）：文件可能太大，先切小一点，或者只读其中几页`
         : (result.stderr ?? '').trim().slice(0, 300) || '读取失败，没有输出',
+    }
+  }
+
+  /** 全文落盘，只留开头给模型看（`fullPath` 告诉它去哪儿取剩下的） */
+  private shrink(workspace: string, parsed: DocExtract, args: readonly string[]): DocExtract {
+    if (!parsed.ok || parsed.text.length <= this.config.previewChars) return parsed
+    const source = args[1] ?? 'document'
+    const fullPath = this.saveFullText(workspace, source, parsed.text)
+    const head = parsed.text.slice(0, this.config.previewChars)
+    return {
+      ...parsed,
+      text: head,
+      ...(fullPath === undefined ? {} : { fullPath }),
+      notes: [
+        ...parsed.notes,
+        `全文 ${String(parsed.chars)} 字已写到 ${fullPath ?? '（写盘失败）'}：这里只给你开头 ${String(head.length)} 字，` +
+          '要哪一段用 ws_grep 找、ws_read 分片读',
+      ],
     }
   }
 

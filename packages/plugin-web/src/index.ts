@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { extname, join, resolve } from 'node:path'
+import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
 import { renderMathInText, texToMathml } from '@examharness/core'
@@ -218,10 +218,8 @@ function seedFromKb(ctx: Context, workspaceName: string, batchId: string): numbe
   const batch = ctx.kb.list().find((entry) => entry.id === batchId)
   const dir = ctx.kb.dirOf(batchId)
   if (batch === undefined || dir === undefined) return undefined
-  return ctx.workspace.seed(
-    workspaceName,
-    batch.files.map((file) => join(dir, file.name)),
-  )
+  // 用链接而不是复制：导入的教材可能几十 GB
+  return ctx.workspace.seedLinks(workspaceName, ctx.kb.sourcePaths(batchId))
 }
 
 export function apply(ctx: Context, config: WebConfig): void {
@@ -237,25 +235,45 @@ export function apply(ctx: Context, config: WebConfig): void {
     for (const client of clients) client.write(payload)
   }
 
+  // 当前在跑的那一轮属于哪个工作区：判定类事件也要归到它名下
+  let activeWorkspace = ''
   ctx.on('item:stored', ({ item }) => {
-    ctx.session.appendLog({ kind: 'verdict', text: `入库：第 ${item.slot.key} 题` })
+    ctx.session.appendLog({ kind: 'verdict', text: `入库：第 ${item.slot.key} 题`, ...(activeWorkspace === '' ? {} : { workspace: activeWorkspace }) })
     broadcast('stored', summarize(item))
   })
   ctx.on('item:confirmed', ({ item, by }) => {
-    ctx.session.appendLog({ kind: 'verdict', text: `${by} 确认了第 ${item.slot.key} 题` })
+    ctx.session.appendLog({
+      kind: 'verdict',
+      text: `${by} 确认了第 ${item.slot.key} 题`,
+      ...(activeWorkspace === '' ? {} : { workspace: activeWorkspace }),
+    })
     broadcast('confirmed', { ...summarize(item), by })
   })
-  ctx.on('run:started', ({ runId, goal, workspace }) => {
-    ctx.session.appendLog({ kind: 'user', text: goal, runId })
-    broadcast('run:started', { runId, goal, workspace })
+  ctx.on('run:started', ({ runId, goal, workspace, label }) => {
+    activeWorkspace = workspace
+    ctx.session.appendLog({
+      kind: 'user',
+      text: label ?? goal,
+      runId,
+      ...(workspace === '' ? {} : { workspace }),
+    })
+    broadcast('run:started', { runId, goal, workspace, ...(label === undefined ? {} : { label }) })
   })
   ctx.on('run:step', (payload) => {
+    // 正文里的 `工具名：` 前缀拆出来单独存：界面用人话显示工具，正文不再重复一遍
+    const match = /^([a-z][a-z0-9_]*)：([\s\S]*)$/.exec(payload.text)
+    const tool = match?.[1] === undefined ? undefined : match[1]
     ctx.session.appendLog({
       kind: payload.kind === 'user' ? 'user' : payload.kind,
-      text: payload.text,
+      text: tool === undefined ? payload.text : (match?.[2] ?? ''),
       runId: payload.runId,
+      ...(activeWorkspace === '' ? {} : { workspace: activeWorkspace }),
+      ...(tool === undefined || payload.kind !== 'tool' ? {} : { tool }),
     })
     broadcast('run:step', payload)
+  })
+  ctx.on('run:done', ({ workspace }) => {
+    if (workspace === activeWorkspace) activeWorkspace = ''
   })
   ctx.on('run:done', (payload) => broadcast('run:done', payload))
   ctx.on('workspace:changed', (payload) => broadcast('workspace:changed', payload))
@@ -592,6 +610,19 @@ export function apply(ctx: Context, config: WebConfig): void {
       return
     }
 
+    // 从本机文件夹导入：教材/课标这类大资料原地不动，整理时用链接铺进工作区
+    if (method === 'POST' && path === '/api/kb/import') {
+      const body = (await readBody(req)) as { name?: string; dir?: string }
+      try {
+        const batch = ctx.kb.importDir(body.name ?? '', String(body.dir ?? ''))
+        ctx.workspace.seedLinks(batch.id, ctx.kb.sourcePaths(batch.id))
+        send(res, 200, batch)
+      } catch (error) {
+        send(res, 400, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
     if (method === 'POST' && path === '/api/kb/upload') {
       const body = (await readBody(req)) as {
         name?: string
@@ -644,7 +675,9 @@ export function apply(ctx: Context, config: WebConfig): void {
           `把知识库「${batch.name}」整理进语料库（批次 ${batch.id}）。`,
           `文件：${files}`,
           '',
-          `工作区：${batch.id}（ws_ls 看文件；原件副本在 in/，脚本写 tmp/，产物放 out/）`,
+          `工作区：${batch.id}（ws_ls 看文件；资料在 in/，脚本写 tmp/，产物放 out/）`,
+          `这批一共 ${String(batch.files.length)} 份，**不要试图全读**：先 ws_ls 看清单，`,
+          '挑出和当前任务最相关的少数几份（老师点名的优先），一份一份来；读不完就如实说明读到哪儿了。',
           '原件不一定是纯文本。**先用内置工具读**（它自己会挑读法，PDF 扫描件会自动 OCR）：',
           '  · doc_probe {"path":"in/xx.pdf"}  看是什么、多少页、要不要 OCR',
           '  · doc_extract {"path":"in/xx.pdf"} 读成文字（PDF / Word / Excel / 图片都行）',
@@ -652,17 +685,25 @@ export function apply(ctx: Context, config: WebConfig): void {
           '读不了的（版式太怪、扫描太糊、缺语言包）它会说清原因；那时再自己写脚本：',
           '  先 ws_write 写 tmp/*.py，再 ws_run ["python3","tmp/x.py"]（不许内联代码）。',
           '',
+          '**先判断这批是什么**，再决定抽什么：',
+          '  · 真题/试卷 → 抽题目（stem/answer/knowledge）；',
+          '  · 课标/教材/教参 → 抽**知识点清单、要求与示例**（示例题也当题目抽，但注明来自课标示例），',
+          '    不要硬把教材正文当题目；说清你抽的是哪一类。',
+          '  · 读不懂或整批都是扫描糊页 → 如实说，别硬凑。',
+          '',
           '步骤：',
           '1) ws_ls + kb_list 确认手上有什么；',
           '2) 把原件转成文本（如果需要），产物写 out/；',
-          '3) 分片读文本（ws_read 或 kb_read，用返回的 next 作为下一次 offset，读到没有 next 为止）；',
-          '4) 只抽取**真实存在于原文**的题目，逐条 kb_write：',
+          '3) 抽取工具会把**全文写到 out/extract/ 里**，你只会看到开头；要哪一段用 ws_grep 定位、ws_read 分片读，',
+          '   **不要整篇读进来说话**（一本教材十几万字，读进来只会把自己挤爆）。',
+          '4) 每读完一段就停下来 kb_write 落库（别攒到最后），只抽取**真实存在于原文**的题目：',
           '   {stem, answer?, knowledge: [知识点], type?, difficulty?}；',
           '   knowledge 用已学知识点表里的说法；没有把握的字段宁缺勿造。',
           '5) 全部读完后 kb_mark 标 indexed，并说明抽了多少条、跳过了什么、哪些文件没处理成。',
         ].join('\n'),
         blueprint: loadBlueprint(base),
         workspace: batch.id,
+        label: `整理「${batch.name}」（${String(batch.files.length)} 份资料）`,
       })
       // 异步收尾：跑完再落状态。只有 agent 自己跑完（done）才算整理完成；
       // 步数用尽 / 没有模型 / 被叫停都如实标成未完成，并写清为什么。

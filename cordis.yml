@@ -149,6 +149,34 @@
     dir: data/workspaces
     venv: .venv
     allowInstall: false
+    # 装了就能用：压缩包在工作区里解开再读（apt install p7zip-full unrar-free）
+    allow:
+      - python3
+      - python
+      - node
+      - pdftotext
+      - tesseract
+      - ls
+      - cat
+      - head
+      - tail
+      - wc
+      - grep
+      - sort
+      - uniq
+      - cut
+      - iconv
+      - file
+      - cp
+      - mv
+      - mkdir
+      - find
+      - unzip
+      - tar
+      - gunzip
+      - 7z
+      - 7za
+      - unrar
     timeoutMs: 60000
     maxOutputBytes: 20000
 

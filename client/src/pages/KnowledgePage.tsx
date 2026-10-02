@@ -1,27 +1,26 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
+import PlayArrowIcon from '@mui/icons-material/PlayArrow'
+import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import Card from '@mui/material/Card'
+import CardActions from '@mui/material/CardActions'
+import CardContent from '@mui/material/CardContent'
+import CardHeader from '@mui/material/CardHeader'
 import Chip from '@mui/material/Chip'
-import CircularProgress from '@mui/material/CircularProgress'
-import Container from '@mui/material/Container'
+import Collapse from '@mui/material/Collapse'
 import Divider from '@mui/material/Divider'
-import Paper from '@mui/material/Paper'
+import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
-import { FilesView, Flex, Timeline } from '../components.js'
+import { FilesView, Timeline } from '../components.js'
 import type { KbBatchView, KbStatus } from '../types.js'
 
-/**
- * 资料：老师把手上的东西交进来，agent 读它、抽题、写进语料。
- *
- * 上传的是**原料**：先落在资料区，整理之后抽出来的题目才进入可比对的范围。
- * 整理是一轮看得见的活：左边记录它每一步在干什么，可以插话、也可以按停。
- */
-
-const STATUS: Readonly<Record<KbStatus, { text: string; color?: 'warning' | 'success' }>> = {
-  raw: { text: '待整理' },
+const STATUS: Readonly<Record<KbStatus, { text: string; color?: 'warning' | 'success' | 'info' }>> = {
+  raw: { text: '待整理', color: 'info' },
   ingesting: { text: '整理中', color: 'warning' },
   indexed: { text: '整理完成', color: 'success' },
   failed: { text: '没有整理完', color: 'warning' },
@@ -32,6 +31,7 @@ export function KnowledgePage(): React.JSX.Element {
   const { kb, settings, log, running, busy } = app
 
   const [name, setName] = useState('')
+  const [dir, setDir] = useState('')
   const [files, setFiles] = useState<readonly { name: string; text?: string; base64?: string }[]>([])
   const [pasted, setPasted] = useState('')
   const [pastedName, setPastedName] = useState('')
@@ -42,10 +42,11 @@ export function KnowledgePage(): React.JSX.Element {
   const [offset, setOffset] = useState(0)
 
   const configured = settings?.runtime.modelConfigured === true
-  const pending =
-    pasted.trim() === '' ? files : [...files, { name: pastedName === '' ? '粘贴的资料.txt' : pastedName, text: pasted }]
+  const pending = pasted.trim() === '' ? files : [...files, { name: pastedName === '' ? '粘贴的资料.txt' : pastedName, text: pasted }]
 
-  /** 文本类当文本读；PDF / Word / 图片当二进制读（当文本读会毁掉文件） */
+  // 只显示**这一批**的活：主 agent 的对话属于工作台，不该混进来
+  const entries = useMemo(() => log.filter((entry) => open !== '' && entry.workspace === open), [log, open])
+
   const pick = async (list: FileList | null): Promise<void> => {
     setReading(true)
     try {
@@ -54,8 +55,7 @@ export function KnowledgePage(): React.JSX.Element {
           [...(list ?? [])].map(async (file) => {
             const binary = /\.(pdf|docx|xlsx|xlsm|png|jpe?g|webp|bmp|tiff?)$/i.test(file.name)
             if (!binary) return { name: file.name, text: await file.text() }
-            const buffer = await file.arrayBuffer()
-            const bytes = new Uint8Array(buffer)
+            const bytes = new Uint8Array(await file.arrayBuffer())
             let raw = ''
             for (const byte of bytes) raw += String.fromCharCode(byte)
             return { name: file.name, base64: btoa(raw) }
@@ -89,178 +89,241 @@ export function KnowledgePage(): React.JSX.Element {
     })
   }
 
-  const ingest = (batch: KbBatchView): void => {
-    void app.guard('ingest', async () => {
-      await api.ingestKb(batch.id)
-      setOpen(batch.id)
-      await app.reload()
-    })
-  }
-
   const batches = kb?.batches ?? []
 
   return (
-    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1.15fr 1fr' }, height: 'calc(100vh - 52px)' }}>
-      <Box sx={{ overflowY: 'auto', borderRight: { md: '1px solid' }, borderColor: 'divider' }}>
-        <Container maxWidth="sm" sx={{ py: 3 }}>
-          <Flex row gap={2} align="baseline" sx={{ mb: 2 }}>
-            <Typography variant="h2">资料</Typography>
-            <Typography variant="caption">
-              {configured ? `${String(batches.length)} 批　语料 ${String(kb?.corpusTotal ?? 0)} 条` : '还没有配置模型，暂时不能整理'}
-            </Typography>
-          </Flex>
+    <Box sx={{ display: 'flex', height: '100%', minHeight: 0, gap: 2, p: 2 }}>
+      <Box sx={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
+        <Typography variant="h5" gutterBottom>
+          资料
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          给 agent 参考的真资料：真题、课标、教材、教研笔记。整理之后，抽出来的题目会进入可比对的范围。
+        </Typography>
 
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 3 }}>
-            <Flex gap={2}>
-              <TextField
-                label="给这批资料起个名字"
-                value={name}
-                placeholder="例如 2023 中考真题"
-                onChange={(event) => setName(event.target.value)}
-              />
-              <Button component="label" size="small" variant="outlined" disabled={reading}>
-                选择文件
-                <input hidden type="file" multiple accept=".txt,.md,.csv,.jsonl,.pdf,.docx,.xlsx,.png,.jpg,.jpeg" onChange={(event) => void pick(event.target.files)} />
-              </Button>
-              <TextField
-                label="或者直接粘一段文字"
-                value={pasted}
-                multiline
-                minRows={3}
-                maxRows={8}
-                placeholder="扫描件和 PDF 也可以传文件，整理时会自动识别上面的文字"
-                onChange={(event) => setPasted(event.target.value)}
-              />
-              {pasted.trim() !== '' && (
-                <TextField
-                  label="这段文字叫什么"
-                  value={pastedName}
-                  placeholder="粘贴的资料.txt"
-                  onChange={(event) => setPastedName(event.target.value)}
-                />
-              )}
-              <Flex row gap={1} align="center">
-                <Typography variant="caption" sx={{ flex: 1 }}>
+        <Card sx={{ mb: 2 }}>
+          <CardHeader
+            avatar={<UploadFileOutlinedIcon color="primary" />}
+            title="加一批资料"
+            subheader="小文件直接上传；教材、课标这类几十 GB 的资料，指一个本机文件夹就行（不复制）"
+          />
+          <CardContent sx={{ pt: 0 }}>
+            <Stack spacing={2}>
+              <TextField label="给这批资料起个名字" value={name} placeholder="例如 2023 中考真题" onChange={(event) => setName(event.target.value)} />
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                <Button component="label" variant="outlined" size="small" disabled={reading} startIcon={<UploadFileOutlinedIcon />}>
+                  选择文件
+                  <input hidden type="file" multiple accept=".txt,.md,.csv,.jsonl,.pdf,.docx,.xlsx,.png,.jpg,.jpeg" onChange={(event) => void pick(event.target.files)} />
+                </Button>
+                <Typography variant="caption" color="text.secondary">
                   {pending.length === 0 ? '还没有选文件' : pending.map((file) => file.name).join('　')}
                 </Typography>
+                <Box sx={{ flex: 1 }} />
                 <Button variant="contained" size="small" disabled={busy !== '' || pending.length === 0} onClick={upload}>
                   上传
                 </Button>
-              </Flex>
-            </Flex>
-          </Paper>
+              </Stack>
+              <Divider>或者指一个本机文件夹</Divider>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+                <TextField
+                  fullWidth
+                  label="文件夹路径"
+                  value={dir}
+                  placeholder="/home/…/课标、教材、教参"
+                  helperText="文件原地不动，整理时链接进工作区"
+                  onChange={(event) => setDir(event.target.value)}
+                />
+                <Button
+                  variant="outlined"
+                  size="small"
+                  sx={{ mt: 0.5 }}
+                  disabled={busy !== '' || dir.trim() === ''}
+                  onClick={() =>
+                    void app.guard('import', async () => {
+                      const batch = await api.importKbDir(name.trim(), dir.trim())
+                      setName('')
+                      setDir('')
+                      setOpen(batch.id)
+                      await app.reload()
+                    })
+                  }
+                >
+                  导入
+                </Button>
+              </Stack>
+              <TextField label="或者直接粘一段文字" value={pasted} multiline minRows={2} maxRows={6} onChange={(event) => setPasted(event.target.value)} />
+              {pasted.trim() !== '' && <TextField label="这段文字叫什么" value={pastedName} onChange={(event) => setPastedName(event.target.value)} />}
+            </Stack>
+          </CardContent>
+        </Card>
 
-          {batches.length === 0 && (
-            <Typography variant="body2" color="text.secondary">
-              还没有上传过资料。真题、教材整理件、教研笔记都可以——整理之后，出题时会拿它们做参考，也会拿来查重。
-            </Typography>
-          )}
+        {batches.length === 0 && (
+          <Card>
+            <CardContent>
+              <Typography variant="body2" color="text.secondary">
+                还没有资料。加上一批之后，出题时会拿它做参考，也会拿来判重。
+              </Typography>
+            </CardContent>
+          </Card>
+        )}
 
-          {batches.map((batch) => {
-            const status = STATUS[batch.status]
-            const isOpen = open === batch.id
-            return (
-              <Box key={batch.id} sx={{ mb: 2 }}>
-                <Flex row gap={1} align="center" wrap>
-                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                    {batch.name}
-                  </Typography>
-                  <Chip size="small" variant="outlined" color={status.color} label={status.text} />
-                  <Typography variant="caption">
-                    {batch.files.length} 个文件
-                    {batch.records > 0 ? `　抽到 ${String(batch.records)} 条` : ''}
-                  </Typography>
-                  <Box sx={{ flex: 1 }} />
-                  <Button size="small" disabled={busy !== ''} onClick={() => load(batch.id, fileName === '' ? (batch.files[0]?.name ?? '') : fileName, 0)}>
-                    看一下
-                  </Button>
-                  <Button
-                    size="small"
-                    variant="contained"
-                    disabled={busy !== '' || running !== null || batch.status === 'ingesting'}
-                    title={configured ? 'agent 读原件、抽题、写进语料' : '先去设置里配置模型'}
-                    onClick={() => ingest(batch)}
-                  >
-                    整理
-                  </Button>
-                </Flex>
-                {batch.note !== undefined && (
-                  <Typography variant="caption" sx={{ display: 'block', mt: 0.5 }}>
-                    {batch.note}
-                  </Typography>
-                )}
-
-                {isOpen && (
-                  <Paper variant="outlined" sx={{ p: 1.5, mt: 1, borderRadius: 2 }}>
-                    <Flex row gap={0.75} wrap sx={{ mb: 1 }}>
-                      {batch.files.map((file) => (
-                        <Chip
-                          key={file.name}
-                          size="small"
-                          variant={file.name === fileName ? 'filled' : 'outlined'}
-                          label={file.name}
-                          onClick={() => load(batch.id, file.name, 0)}
-                          sx={{ cursor: 'pointer' }}
-                        />
-                      ))}
-                    </Flex>
-                    {chunk === null ? (
-                      <Typography variant="caption">正在读取…</Typography>
-                    ) : (
-                      <>
-                        <Typography component="pre" variant="caption" sx={{ m: 0, maxHeight: 260, overflow: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace' }}>
-                          {chunk.text}
-                        </Typography>
-                        <Flex row gap={1} align="center" sx={{ mt: 1 }}>
-                          <Typography variant="caption">
-                            {offset}–{Math.min(offset + chunk.text.length, chunk.total)} / {chunk.total}
-                          </Typography>
-                          <Box sx={{ flex: 1 }} />
-                          <Button size="small" disabled={busy !== '' || offset === 0} onClick={() => load(batch.id, fileName, Math.max(0, offset - 2000))}>
-                            上一段
-                          </Button>
-                          <Button size="small" disabled={busy !== '' || chunk.next === undefined} onClick={() => load(batch.id, fileName, chunk.next ?? offset)}>
-                            下一段
-                          </Button>
-                        </Flex>
-                      </>
-                    )}
-                  </Paper>
-                )}
-                <Divider sx={{ mt: 1.5 }} />
-              </Box>
-            )
-          })}
-        </Container>
+        <Stack spacing={2}>
+          {batches.map((batch) => (
+            <BatchCard
+              key={batch.id}
+              batch={batch}
+              busy={busy !== ''}
+              running={running !== null}
+              configured={configured}
+              open={open === batch.id}
+              fileName={fileName}
+              chunk={chunk}
+              offset={offset}
+              onOpen={() => setOpen(batch.id)}
+              onLoad={load}
+              onIngest={() => {
+                void app.guard('ingest', async () => {
+                  await api.ingestKb(batch.id)
+                  setOpen(batch.id)
+                  await app.reload()
+                })
+              }}
+            />
+          ))}
+        </Stack>
       </Box>
 
-      {/* 整理过程：和会话记录同一条时间线 */}
-      <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <Flex row gap={1} align="center" sx={{ px: 2, py: 1.25 }}>
-          <Typography variant="caption">整理记录</Typography>
-          {running !== null && (
+      {/* 整理记录：只显示这一批 */}
+      <Card sx={{ flex: 0.8, minWidth: 320, display: 'flex', flexDirection: 'column' }}>
+        <CardHeader
+          title="整理记录"
+          subheader={open === '' ? '选一批资料，这里显示它读到了什么' : (batches.find((batch) => batch.id === open)?.name ?? '')}
+          action={running !== null ? <Chip color="warning" label="正在整理" /> : undefined}
+        />
+        <Box sx={{ flex: 1, minHeight: 0 }}>
+          {open === '' ? (
+            <Box sx={{ p: 3 }}>
+              <Typography variant="body2" color="text.secondary">
+                还没有选资料。
+              </Typography>
+            </Box>
+          ) : (
+            <Timeline entries={entries} running={running !== null} />
+          )}
+        </Box>
+        {open !== '' && (
+          <Box sx={{ borderTop: 1, borderColor: 'divider', maxHeight: 260, overflowY: 'auto' }}>
+            <FilesView name={open} tick={entries.length} />
+          </Box>
+        )}
+      </Card>
+    </Box>
+  )
+}
+
+function BatchCard({
+  batch,
+  busy,
+  running,
+  configured,
+  open,
+  fileName,
+  chunk,
+  offset,
+  onOpen,
+  onLoad,
+  onIngest,
+}: {
+  batch: KbBatchView
+  busy: boolean
+  running: boolean
+  configured: boolean
+  open: boolean
+  fileName: string
+  chunk: { text: string; total: number; next?: number } | null
+  offset: number
+  onOpen: () => void
+  onLoad: (batchId: string, file: string, at: number) => void
+  onIngest: () => void
+}): React.JSX.Element {
+  const status = STATUS[batch.status]
+  return (
+    <Card>
+      <CardHeader
+        avatar={<FolderOpenOutlinedIcon color="action" />}
+        title={batch.name}
+        subheader={`${String(batch.files.length)} 个文件${batch.records > 0 ? `　抽到 ${String(batch.records)} 条` : ''}　${new Date(batch.at).toLocaleString('zh-CN')}`}
+        action={
+          <Stack direction="row" spacing={1}>
+            <Chip color={status.color} label={status.text} />
+            {batch.sourceDir !== undefined && <Chip variant="outlined" label="本机文件夹" title={batch.sourceDir} />}
+          </Stack>
+        }
+      />
+      {batch.note !== undefined && (
+        <CardContent sx={{ pt: 0 }}>
+          <Typography variant="caption" color="text.secondary">
+            {batch.note}
+          </Typography>
+        </CardContent>
+      )}
+      <Collapse in={open} unmountOnExit>
+        <CardContent sx={{ pt: batch.note === undefined ? 0 : 1 }}>
+          <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
+            {batch.files.slice(0, 20).map((file) => (
+              <Chip
+                key={file.name}
+                variant={file.name === fileName ? 'filled' : 'outlined'}
+                color={file.name === fileName ? 'primary' : 'default'}
+                label={file.name}
+                onClick={() => onLoad(batch.id, file.name, 0)}
+              />
+            ))}
+            {batch.files.length > 20 && <Chip variant="outlined" label={`…还有 ${String(batch.files.length - 20)} 个`} />}
+          </Stack>
+          {chunk === null ? (
+            <Typography variant="caption" color="text.secondary">
+              选一个文件看内容。
+            </Typography>
+          ) : (
             <>
-              <CircularProgress size={12} thickness={5} />
-              <Typography variant="caption">正在做</Typography>
-              <Box sx={{ flex: 1 }} />
-              <Button size="small" disabled={busy !== ''} onClick={() => void app.stopRun()}>
-                按停
-              </Button>
+              <Box sx={{ maxHeight: 300, overflow: 'auto', bgcolor: 'action.hover', borderRadius: 2, p: 2 }}>
+                <Typography component="pre" variant="caption" sx={{ m: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace' }}>
+                  {chunk.text}
+                </Typography>
+              </Box>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 1 }}>
+                <Typography variant="caption" color="text.secondary">
+                  {offset}–{Math.min(offset + chunk.text.length, chunk.total)} / {chunk.total}
+                </Typography>
+                <Box sx={{ flex: 1 }} />
+                <Button size="small" disabled={busy || offset === 0} onClick={() => onLoad(batch.id, fileName, Math.max(0, offset - 4000))}>
+                  上一段
+                </Button>
+                <Button size="small" disabled={busy || chunk.next === undefined} onClick={() => onLoad(batch.id, fileName, chunk.next ?? offset)}>
+                  下一段
+                </Button>
+              </Stack>
             </>
           )}
-        </Flex>
-        <Divider />
-        <Box sx={{ flex: 1, minHeight: 0 }}>
-          <Timeline entries={log} running={running !== null} />
-        </Box>
-        <Divider />
-        <Box sx={{ p: 1.5 }}>
-          <Typography variant="caption" sx={{ display: 'block', mb: 1 }}>
-            {open === '' ? '整理开始后，这里会显示它读到了什么、抽出了什么；也可以插一句话。' : '这一批留下的文件：'}
-          </Typography>
-          <FilesView name={open} tick={log.length} />
-        </Box>
-      </Box>
-    </Box>
+        </CardContent>
+      </Collapse>
+      <CardActions>
+        <Button size="small" disabled={busy} onClick={onOpen}>
+          {open ? '收起' : '看一下'}
+        </Button>
+        <Box sx={{ flex: 1 }} />
+        <Button
+          size="small"
+          variant="contained"
+          startIcon={<PlayArrowIcon />}
+          disabled={busy || running || batch.status === 'ingesting'}
+          title={configured ? 'agent 读资料、抽题、写进语料' : '先去设置里配置模型'}
+          onClick={onIngest}
+        >
+          让 agent 整理
+        </Button>
+      </CardActions>
+    </Card>
   )
 }

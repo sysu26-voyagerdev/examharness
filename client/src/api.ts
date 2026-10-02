@@ -96,6 +96,10 @@ export const discoverModels = (
 
 export const getKb = (): Promise<KbListView> => fetch('/api/kb').then((r) => json<KbListView>(r))
 
+/** 从本机文件夹导入资料（不复制文件：教材这类资料原地不动） */
+export const importKbDir = (name: string, dir: string): Promise<KbBatchView> =>
+  send('POST', '/api/kb/import', { name, dir }).then((r) => json<KbBatchView>(r))
+
 export const uploadKb = (
   name: string,
   files: readonly { name: string; text?: string; base64?: string }[],

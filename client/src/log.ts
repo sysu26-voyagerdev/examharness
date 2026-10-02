@@ -1,4 +1,4 @@
-import type { LogEntryView, LiveEvent, RunSignal } from './types.js'
+import type { LiveEvent, LogEntryView, RunSignal } from './types.js'
 
 /**
  * 会话记录是**一条时间线**：老师说的话、agent 干的每一步、闸门的判定，按顺序排在一起。
@@ -32,13 +32,15 @@ const TOOL_LABEL: Readonly<Record<string, string>> = {
   doc_ocr: '识别文字',
 }
 
-/** 把一步的原文拆成"谁 + 做了什么"：服务端文本是 `工具名：说明` 的形状 */
-export function splitStep(text: string): { label: string; detail: string } {
-  const at = text.indexOf('：')
-  if (at === -1) return { label: '命题组', detail: text }
-  const head = text.slice(0, at)
-  const detail = text.slice(at + 1)
-  return { label: TOOL_LABEL[head] ?? head, detail }
+/** 工具名 → 人话 */
+export function toolLabel(tool: string | undefined): string {
+  if (tool === undefined || tool === '') return ''
+  return TOOL_LABEL[tool] ?? tool
+}
+
+/** 记录里属于某个工作区的行（工作台看会话的，资料页看那一批资料的） */
+export function forWorkspace(log: readonly LogEntryView[], workspace: string): readonly LogEntryView[] {
+  return log.filter((entry) => entry.workspace === undefined || entry.workspace === workspace)
 }
 
 let counter = 0

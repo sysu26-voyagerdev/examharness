@@ -150,6 +150,12 @@ export interface LlmApi {
 
 export interface WorkbenchRequest {
   goal: string
+  /**
+   * 界面上给这一轮起的短名字（例如「整理『数学课程标准』」）。
+   * 没有它就只能把整段目标指令当"老师说的话"显示出来——那是系统生成的长文本，
+   * 不该冒充老师说的话。
+   */
+  label?: string
   blueprint: Blueprint
   /**
    * 这一轮在哪个工作区干（缺省用会话 id）。
@@ -281,6 +287,11 @@ export interface KbBatch {
   name: string
   /** 上传时间 */
   at: string
+  /**
+   * 如果是**从本机文件夹导入**的，记下那个文件夹：文件原地不动（教材动辄几十 GB，
+   * 复制一份既慢又没意义）。整理时用符号链接铺进工作区，agent 照常当本地文件读。
+   */
+  sourceDir?: string
   status: KbStatus
   files: readonly { name: string; bytes: number }[]
   /** 整理进语料的条数 */
@@ -315,6 +326,8 @@ export interface WorkspaceApi {
   open(name: string): { name: string; path: string; files: readonly WorkspaceFile[] }
   /** 把外部文件复制进 `in/`（原件只读副本，别在原件上动手） */
   seed(name: string, sources: readonly string[]): number
+  /** 同上，但用符号链接（大资料不复制；链接失败自动退回复制） */
+  seedLinks(name: string, sources: readonly string[]): number
   list(name: string): readonly WorkspaceFile[]
   /** 分片读（与 kb_read 同一套翻页语义） */
   read(name: string, relPath: string, offset?: number, limit?: number): { text: string; total: number; next?: number } | undefined
@@ -332,6 +345,8 @@ export interface WorkspaceApi {
 
 export interface DocExtract {
   ok: boolean
+  /** 全文写到工作区里的哪个文件（给模型的只有开头，其余按需去取） */
+  fullPath?: string
   /** text / pdf / docx / xlsx / image / unknown */
   kind: string
   chars: number
@@ -362,6 +377,10 @@ export interface KbApi {
    * 会按原样存进工作区，整理时由内置的读文档工具解析（不要把它当文本读，那会毁掉文件）。
    */
   upload(name: string, files: readonly { name: string; text?: string; base64?: string }[]): KbBatch
+  /** 从本机文件夹导入（不复制文件）；只收认得出来的资料类型 */
+  importDir(name: string, dir: string): KbBatch
+  /** 这一批文件的实际路径（上传的是副本，导入的是原地文件） */
+  sourcePaths(batchId: string): readonly string[]
   /** 读某个知识库里的文件（给 agent 用；分页切片，避免一次糊进上下文） */
   read(batchId: string, fileName: string, offset?: number, limit?: number): { text: string; total: number; next?: number } | undefined
   /** agent 整理时逐条写入语料 */
@@ -436,6 +455,14 @@ export interface SessionLogEntry {
   kind: 'user' | 'assistant' | 'tool' | 'gate' | 'verdict'
   text: string
   runId?: string
+  /**
+   * 这一行属于**哪个工作区**（谁的活）。
+   * 工作台的记录显示当前会话的，资料页只显示这一批资料整理时的——
+   * 以前两者共用一条线，结果资料页里滚动的是主 agent 的对话（那是错的）。
+   */
+  workspace?: string
+  /** 工具名（界面自己翻译成人话，正文里不再重复工具名） */
+  tool?: string
 }
 
 export interface SessionApi {

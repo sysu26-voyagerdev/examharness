@@ -42,10 +42,16 @@ export const inject = ['llm', 'graph', 'bank', 'construct']
 export const Config = z.object({
   /** 会话约定之外，额外给模型的硬规矩 */
   extraRules: z.string().default(''),
+  /**
+   * 单条工具结果进上下文的上限（字符）。
+   * 资料动辄几十万字，全塞进去必然爆；超了就截断，并**如实告诉模型**完整内容在哪个文件里。
+   */
+  toolResultLimit: z.number().default(6000),
 })
 
 export interface WorkbenchConfig {
   extraRules: string
+  toolResultLimit: number
 }
 
 /**
@@ -195,6 +201,17 @@ const WORKSPACE_TOOLS: readonly LlmToolSpec[] = [
       type: 'object',
       properties: { path: { type: 'string' }, text: { type: 'string' } },
       required: ['path', 'text'],
+    },
+  },
+  {
+    name: 'ws_grep',
+    description:
+      '在工作区的文本文件里找一段（正则或普通词），返回命中的行号与上下文——' +
+      '用来在几十万字的资料里定位「例 93」「【说明】」这类目标，别整篇读。',
+    parameters: {
+      type: 'object',
+      properties: { pattern: { type: 'string' }, path: { type: 'string' }, max: { type: 'number' } },
+      required: ['pattern'],
     },
   },
   {
@@ -354,9 +371,20 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       runId: id,
       goal: request.goal,
       workspace: workspace?.name ?? '',
+      ...(request.label === undefined ? {} : { label: request.label }),
     })
     state.done = this.loop(state)
     return { runId: id, workspace: workspace?.name ?? '', done: state.done }
+  }
+
+  /**
+   * 工具结果进模型上下文前的处理：**超长就截断**，并把"剩下的在哪"写进去。
+   * 不这么做，一本教材的一次抽取就能把上下文撑爆——而且模型还不知道自己看得不全。
+   */
+  private forModel(payload: unknown): string {
+    const text = JSON.stringify(payload)
+    if (text.length <= this.config.toolResultLimit) return text
+    return `${text.slice(0, this.config.toolResultLimit)}…（已截断：完整内容在工作区文件里，用 ws_read / ws_grep 去取，别重复整篇读）`
   }
 
   /** 老师说一句：下一步就会读到（不是重开一轮，是插进这一轮） */
@@ -467,7 +495,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         const outcome = await this.execute(call.name, call.arguments, request.blueprint, workspace?.name ?? '')
         say(state.steps, outcome.kind, outcome.text)
         if (outcome.storedId !== undefined) state.stored.push(outcome.storedId)
-        messages.push({ role: 'tool', toolCallId: call.id, content: JSON.stringify(outcome.payload) })
+        messages.push({ role: 'tool', toolCallId: call.id, content: this.forModel(outcome.payload) })
       }
     }
 
@@ -771,6 +799,37 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       }
     }
 
+    if (tool === 'ws_grep') {
+      const workspace = this.ctx.get('workspace')
+      if (workspace === undefined) return { kind: 'tool', text: 'ws_grep：没有工作区服务', payload: { error: '未接入工作区' } }
+      const pattern = String(args.pattern ?? '')
+      const files = workspace.list(workspaceName)
+      const targets = (String(args.path ?? '') === '' ? files : files.filter((file) => file.path.includes(String(args.path)))).filter(
+        (file) => !/\.(pdf|png|jpe?g|docx|xlsx|zip)$/i.test(file.path),
+      )
+      const max = Math.min(Math.max(numberOr(args.max, 20) ?? 20, 1), 60)
+      let expression: RegExp
+      try {
+        expression = new RegExp(pattern, 'i')
+      } catch {
+        expression = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+      }
+      const hits: { path: string; line: number; text: string }[] = []
+      for (const file of targets) {
+        if (hits.length >= max) break
+        const chunk = workspace.read(workspaceName, file.path, 0, 400_000)
+        if (chunk === undefined) continue
+        chunk.text.split('\n').forEach((line, index) => {
+          if (hits.length < max && expression.test(line)) hits.push({ path: file.path, line: index + 1, text: line.trim().slice(0, 160) })
+        })
+      }
+      return {
+        kind: 'tool',
+        text: `ws_grep：${pattern} → ${String(hits.length)} 处命中${hits.length === 0 ? '（换个说法或换个文件）' : ''}`,
+        payload: { pattern, hits },
+      }
+    }
+
     if (tool === 'ws_ls') {
       const workspace = this.ctx.get('workspace')
       if (workspace === undefined) return { kind: 'tool', text: 'ws_ls：没有工作区服务', payload: { error: '未接入工作区' } }
@@ -908,6 +967,7 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     .join('\n')
   return [
     '你是 AI 命题组的组长。你的产出必须是**能过闸门**的原创题。',
+    '**用中文说话**：老师看的是中文界面，你的每一句说明都用中文（工具参数里的中文也一样）。',
     '',
     `本次卷子：${blueprint.paper.title}（${blueprint.paper.className}，${blueprint.paper.totalScore} 分，${blueprint.paper.minutes} 分钟）`,
     '题位：',
@@ -920,17 +980,19 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     '   闸门由框架挂载，你无法跳过，也不必重复验证。',
     '3. 被拦下时读清楚是哪道闸门、能不能靠重做修好：能就换种子重来，不能就换题位设计。',
     '4. 每题位凑齐为止；凑不齐就说明原因，不要用不合规的题凑数。',
-    '5. 有检索工具就用：corpus_search / corpus_read 参考真实题与教材的表述与难度，',
+    '5. 干活之前先看手上有什么（ws_ls / doc_probe / kb_list），别凭印象开工；',
+    '   资料是扫描件就用内置的 doc_extract / doc_ocr，读不完就如实说读到哪儿了。',
+    '6. 有检索工具就用：corpus_search / corpus_read 参考真实题与教材的表述与难度，',
     '   corpus_compare 自查是不是在抄原题，web_search 核查情境与数据是否真实。',
     '   **检索到的一切都只是素材，不是真值**：题目的正确性仍来自构造与符号计算；',
     '   任何题面都要过闸门——抄原题会被查重闸门拦下。',
     hasWorkspace
-      ? '6. 你有工作区（ws_ls / ws_read / ws_write / ws_run）：in/ 是原件副本，tmp/ 放你自己写的脚本，' +
+      ? '7. 你有工作区（ws_ls / ws_read / ws_write / ws_run）：in/ 是资料，tmp/ 放你自己写的脚本，' +
         'out/ 放产物。原件格式怪（PDF、表格、扫描件）就先写个脚本用 python3 转换再读；' +
         '要跑的东西**先写成文件**（不许 -c 内联代码），跑出来的东西留在工作区里，老师能复查。' +
         '⚠️ 工作区产物只是**草稿，不是真值**：题目结论仍然只能来自构造与符号计算，闸门才是裁判。'
       : '',
-    extraRules === '' ? '' : `7. ${extraRules}`,
+    extraRules === '' ? '' : `8. ${extraRules}`,
   ]
     .filter((line) => line !== '')
     .join('\n')

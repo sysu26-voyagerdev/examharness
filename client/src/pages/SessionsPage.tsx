@@ -1,9 +1,19 @@
 import { useState } from 'react'
 import AddOutlinedIcon from '@mui/icons-material/AddOutlined'
+import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
+import Stack from '@mui/material/Stack'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import Card from '@mui/material/Card'
+import CardActions from '@mui/material/CardActions'
+import CardHeader from '@mui/material/CardHeader'
 import Container from '@mui/material/Container'
+import Fab from '@mui/material/Fab'
+import List from '@mui/material/List'
+import ListItem from '@mui/material/ListItem'
+import ListItemAvatar from '@mui/material/ListItemAvatar'
+import ListItemText from '@mui/material/ListItemText'
 import Dialog from '@mui/material/Dialog'
 import DialogActions from '@mui/material/DialogActions'
 import DialogContent from '@mui/material/DialogContent'
@@ -12,7 +22,6 @@ import Divider from '@mui/material/Divider'
 import MenuItem from '@mui/material/MenuItem'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { Flex } from '../components.js'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import type { SessionMetaView } from '../types.js'
@@ -61,27 +70,15 @@ export function SessionsPage(): React.JSX.Element {
   }
 
   const row = (meta: SessionMetaView): React.JSX.Element => (
-    <Flex
-      key={meta.id}
-      row
-      gap={1.5}
-      align="center"
-      sx={{
-        px: 2,
-        py: 1.25,
-        borderRadius: 2,
-        '&:hover': { bgcolor: 'action.hover' },
-        ...(session?.meta.id === meta.id ? { bgcolor: 'action.selected' } : {}),
-      }}
-    >
+    <Stack>
       <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Flex row gap={0.75} align="center" wrap>
+        <Stack direction="row" spacing={0.75} useFlexGap sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
           <Typography variant="body2" noWrap sx={{ fontWeight: 500 }}>
             {meta.title}
           </Typography>
           {session?.meta.id === meta.id && <Chip size="small" variant="outlined" label="当前" />}
           {meta.frozen && <Chip size="small" variant="outlined" label="已定稿" />}
-        </Flex>
+        </Stack>
         <Typography variant="caption" noWrap sx={{ display: 'block' }}>
           {meta.className}　{meta.progress}
           {meta.kbId === '' ? '' : `　资料 ${kb?.batches.find((batch) => batch.id === meta.kbId)?.name ?? meta.kbId}`}
@@ -112,34 +109,20 @@ export function SessionsPage(): React.JSX.Element {
       <Button size="small" disabled={busy !== ''} onClick={() => open(meta)}>
         打开
       </Button>
-    </Flex>
+    </Stack>
   )
 
   return (
     <Container maxWidth="md" sx={{ py: 3 }}>
-      <Flex row gap={2} align="center" sx={{ mb: 2 }}>
-        <Typography variant="h2">会话</Typography>
-        <Typography variant="caption">
-          {list.length} 个　{groups.length} 个分组
-        </Typography>
-        <Box sx={{ flex: 1 }} />
-        <Button
-          variant="contained"
-          size="small"
-          startIcon={<AddOutlinedIcon fontSize="small" />}
-          disabled={busy !== ''}
-          onClick={() => {
-            setDraft({ title: '', ...defaults, groupId: '', kbId: '' })
-            setCreating(true)
-          }}
-        >
-          新建会话
-        </Button>
-      </Flex>
+      <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5">会话</Typography>
+        <Chip label={`${String(list.length)} 个`} variant="outlined" />
+        <Chip label={`${String(groups.length)} 个分组`} variant="outlined" />
+      </Stack>
 
       {groups.map((group) => (
         <Box key={group.id} sx={{ mb: 2.5 }}>
-          <Flex row gap={1} align="center" sx={{ px: 2, mb: 0.5 }}>
+          <Stack>
             <Typography variant="body2" sx={{ fontWeight: 600 }}>
               {group.name}
             </Typography>
@@ -148,7 +131,7 @@ export function SessionsPage(): React.JSX.Element {
             <Button size="small" onClick={() => setRenaming({ id: group.id, name: group.name })}>
               改名
             </Button>
-          </Flex>
+          </Stack>
           {inGroup(group.id).length === 0 ? (
             <Typography variant="caption" sx={{ px: 2 }}>
               这个分组还没有会话
@@ -161,12 +144,12 @@ export function SessionsPage(): React.JSX.Element {
       ))}
 
       <Box>
-        <Flex row gap={1} align="center" sx={{ px: 2, mb: 0.5 }}>
+        <Stack>
           <Typography variant="body2" sx={{ fontWeight: 600 }}>
             未分组
           </Typography>
           <Typography variant="caption">{inGroup('').length} 个</Typography>
-        </Flex>
+        </Stack>
         {inGroup('').length === 0 ? (
           <Typography variant="caption" sx={{ px: 2 }}>
             没有未分组的会话
@@ -176,7 +159,7 @@ export function SessionsPage(): React.JSX.Element {
         )}
       </Box>
 
-      <Flex row gap={1.5} sx={{ mt: 4, maxWidth: 420 }} align="flex-end">
+      <Stack>
         <TextField
           fullWidth
           label="新建分组"
@@ -197,12 +180,12 @@ export function SessionsPage(): React.JSX.Element {
         >
           创建
         </Button>
-      </Flex>
+      </Stack>
 
       <Dialog open={creating} onClose={() => setCreating(false)} fullWidth maxWidth="sm">
         <DialogTitle>新建会话</DialogTitle>
         <DialogContent>
-          <Flex gap={2} sx={{ mt: 0.5 }}>
+          <Stack>
             <TextField
               label="这份卷子叫什么"
               value={draft.title}
@@ -210,7 +193,7 @@ export function SessionsPage(): React.JSX.Element {
               placeholder={`新会话 ${String(list.length + 1)}`}
               onChange={(event) => setDraft({ ...draft, title: event.target.value })}
             />
-            <Flex row gap={2}>
+            <Stack>
               <TextField
                 label="班级"
                 fullWidth
@@ -223,14 +206,14 @@ export function SessionsPage(): React.JSX.Element {
                 value={draft.progress}
                 onChange={(event) => setDraft({ ...draft, progress: event.target.value })}
               />
-            </Flex>
+            </Stack>
             <TextField
               label="蓝图"
               value={draft.blueprintPath}
               helperText="双向细目表：每个题位考什么、多少分、多难"
               onChange={(event) => setDraft({ ...draft, blueprintPath: event.target.value })}
             />
-            <Flex row gap={2}>
+            <Stack>
               <TextField
                 select
                 label="分组"
@@ -260,8 +243,8 @@ export function SessionsPage(): React.JSX.Element {
                   </MenuItem>
                 ))}
               </TextField>
-            </Flex>
-          </Flex>
+            </Stack>
+          </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setCreating(false)}>取消</Button>
@@ -299,6 +282,19 @@ export function SessionsPage(): React.JSX.Element {
           </Button>
         </DialogActions>
       </Dialog>
+      <Fab
+        color="primary"
+        variant="extended"
+        disabled={busy !== ''}
+        onClick={() => {
+          setDraft({ title: '', ...defaults, groupId: '', kbId: '' })
+          setCreating(true)
+        }}
+        sx={{ position: 'fixed', right: 32, bottom: 32 }}
+      >
+        <AddOutlinedIcon sx={{ mr: 1 }} />
+        新建会话
+      </Fab>
     </Container>
   )
 }

@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
 import Box from '@mui/material/Box'
+import Stack from '@mui/material/Stack'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import Container from '@mui/material/Container'
 import Divider from '@mui/material/Divider'
 import MenuItem from '@mui/material/MenuItem'
+import Card from '@mui/material/Card'
+import CardContent from '@mui/material/CardContent'
+import CardHeader from '@mui/material/CardHeader'
 import Paper from '@mui/material/Paper'
 import Switch from '@mui/material/Switch'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
-import { Flex } from '../components.js'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import type { AppSettingsView } from '../types.js'
@@ -106,27 +109,26 @@ export function SettingsPage(): React.JSX.Element {
 
   return (
     <Container maxWidth="sm" sx={{ py: 3 }}>
-      <Flex row gap={2} align="center" sx={{ mb: 2 }}>
-        <Typography variant="h2">设置</Typography>
+      <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 2 }}>
+        <Typography variant="h5">设置</Typography>
         <Typography variant="caption">{note === '' ? '改完立刻生效' : note}</Typography>
         <Box sx={{ flex: 1 }} />
         <Button variant="contained" size="small" disabled={busy !== ''} onClick={save}>
           保存
         </Button>
-      </Flex>
+      </Stack>
 
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
-        <Typography variant="h3" sx={{ mb: 1.5 }}>
-          模型
-        </Typography>
-        <Flex gap={2}>
+      <Card sx={{ mb: 2 }}>
+        <CardHeader title="模型" subheader="地址、密钥、型号；密钥只写不读，页面上不会回显" />
+        <CardContent sx={{ pt: 0 }}>
+        <Stack spacing={2}>
           <TextField
             label="API 地址"
             value={draft.model.baseUrl}
             placeholder="https://api.deepseek.com/v1"
             onChange={(event) => edit({ model: { ...draft.model, baseUrl: event.target.value } })}
           />
-          <Flex row gap={1} align="flex-end">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-end' }}>
             <TextField
               label="模型"
               fullWidth
@@ -137,7 +139,7 @@ export function SettingsPage(): React.JSX.Element {
             <Button size="small" disabled={busy !== '' || fetching} onClick={fetchModels}>
               获取可用模型
             </Button>
-          </Flex>
+          </Stack>
           {models.length > 0 && (
             <TextField
               select
@@ -164,7 +166,7 @@ export function SettingsPage(): React.JSX.Element {
             {key.source === 'env' ? (
               <Typography variant="caption">由启动时的环境变量提供，页面上改不了：改环境变量再重启。</Typography>
             ) : (
-              <Flex row gap={1} align="center">
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <TextField
                   fullWidth
                   type="password"
@@ -194,27 +196,27 @@ export function SettingsPage(): React.JSX.Element {
                     清除
                   </Button>
                 )}
-              </Flex>
+              </Stack>
             )}
             <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
               密钥只写不读：存本机 data/credentials.json（仅本人可读），页面与接口都不会回传它。
               {runtime.modelConfigured ? `　当前可用：${runtime.modelName}` : '　当前还没有可用的模型。'}
             </Typography>
           </Box>
-        </Flex>
-      </Paper>
+        </Stack>
+        </CardContent>
+      </Card>
 
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
-        <Typography variant="h3" sx={{ mb: 1.5 }}>
-          联网搜索
-        </Typography>
-        <Flex row gap={1} align="center" sx={{ mb: 1.5 }}>
+      <Card sx={{ mb: 2 }}>
+        <CardHeader title="联网搜索" />
+        <CardContent sx={{ pt: 0 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1.5 }}>
           <Switch
             checked={draft.websearch.enabled}
             onChange={(event) => edit({ websearch: { ...draft.websearch, enabled: event.target.checked } })}
           />
           <Typography variant="body2">允许 agent 上网查资料</Typography>
-        </Flex>
+        </Stack>
         <TextField
           label="搜索网关"
           fullWidth
@@ -225,15 +227,15 @@ export function SettingsPage(): React.JSX.Element {
         <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
           联网只是帮它找情境和数据；拦不拦得住抄原题，由判重负责。
         </Typography>
-      </Paper>
+        </CardContent>
+      </Card>
 
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
-        <Typography variant="h3" sx={{ mb: 1.5 }}>
-          资料目录
-        </Typography>
-        <Flex gap={1}>
+      <Card sx={{ mb: 2 }}>
+        <CardHeader title="资料目录" />
+        <CardContent sx={{ pt: 0 }}>
+        <Stack spacing={1}>
           {dirs.map((dir, index) => (
-            <Flex key={`${dir}-${String(index)}`} row gap={1} align="center">
+            <Stack key={`${dir}-${String(index)}`} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <TextField
                 fullWidth
                 value={dir}
@@ -242,24 +244,24 @@ export function SettingsPage(): React.JSX.Element {
               <Button size="small" onClick={() => edit({ corpusDirs: dirs.filter((_, at) => at !== index) })}>
                 移除
               </Button>
-            </Flex>
+            </Stack>
           ))}
-          <Flex row gap={1} align="center">
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <Button size="small" onClick={() => edit({ corpusDirs: [...dirs, 'corpus/'] })}>
               加一条
             </Button>
             <Typography variant="caption" sx={{ flex: 1 }}>
               agent 从资料里抽出来的题会落在 corpus/extracted。
             </Typography>
-          </Flex>
-        </Flex>
-      </Paper>
+          </Stack>
+        </Stack>
+        </CardContent>
+      </Card>
 
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
-        <Typography variant="h3" sx={{ mb: 1.5 }}>
-          判重标准
-        </Typography>
-        <Flex row gap={2}>
+      <Card sx={{ mb: 2 }}>
+        <CardHeader title="判重标准" />
+        <CardContent sx={{ pt: 0 }}>
+        <Stack direction="row" spacing={2}>
           <TextField
             label="数字重合度"
             type="number"
@@ -281,17 +283,17 @@ export function SettingsPage(): React.JSX.Element {
             slotProps={{ htmlInput: { step: 0.05, min: 0, max: 1 } }}
             onChange={(event) => edit({ gates: { ...draft.gates, bankMaxSimilarity: Number(event.target.value) } })}
           />
-        </Flex>
+        </Stack>
         <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
           数字和措辞**同时**超过标准，才算跟资料里那道题太像——只看措辞会把"同一知识点、换了数字"的题全误伤。
         </Typography>
-      </Paper>
+        </CardContent>
+      </Card>
 
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
-        <Typography variant="h3" sx={{ mb: 1.5 }}>
-          新会话默认值
-        </Typography>
-        <Flex gap={2}>
+      <Card sx={{ mb: 2 }}>
+        <CardHeader title="新会话默认值" />
+        <CardContent sx={{ pt: 0 }}>
+        <Stack spacing={2}>
           <TextField
             label="班级"
             value={draft.sessionDefaults.className}
@@ -307,14 +309,14 @@ export function SettingsPage(): React.JSX.Element {
             value={draft.sessionDefaults.blueprintPath}
             onChange={(event) => edit({ sessionDefaults: { ...draft.sessionDefaults, blueprintPath: event.target.value } })}
           />
-        </Flex>
-      </Paper>
+        </Stack>
+        </CardContent>
+      </Card>
 
-      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
-        <Typography variant="h3" sx={{ mb: 1.5 }}>
-          现在的状况
-        </Typography>
-        <Flex gap={0.75}>
+      <Card>
+        <CardHeader title="现在的状况" />
+        <CardContent sx={{ pt: 0 }}>
+        <Stack spacing={0.75}>
           <Typography variant="body2">
             资料里的题：{runtime.corpusTotal} 条　可以对外用：{runtime.corpusDistributable} 条
           </Typography>
@@ -329,8 +331,9 @@ export function SettingsPage(): React.JSX.Element {
               现在资料是空的：出题不会拿它做参考，判重也只会跟自家题库比。
             </Typography>
           )}
-        </Flex>
-      </Paper>
+        </Stack>
+        </CardContent>
+      </Card>
     </Container>
   )
 }
