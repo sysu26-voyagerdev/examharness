@@ -235,23 +235,24 @@ describe('回译闸门', () => {
   it('分问标号与幂次不算题目数据（写对的中考解答题题面不该被数字检查误伤）', async () => {
     const ctx = await boot(brain({ serialize: false, parse: () => null }), false)
     const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
-    const fragment = base.prose.tex?.stem ?? ''
     const item: Item = {
       ...base,
-      prose: { ...base.prose, tex: { ...base.prose.tex, stem: `（1）${fragment}；（2）求顶点坐标；（3）求面积` } },
+      prose: {
+        ...base.prose,
+        stem: `（1）$y=x^{2}+6x+8$ 的对称轴是什么；（2）求顶点坐标；（3）求面积`,
+      },
     }
     const result = await ctx.bank.submit(item)
 
     expect(result.ok ? 'ok' : JSON.stringify(result.verdict)).toBe('ok')
   })
 
-  it('题面公式里凭空多出的数字要拦下（公式必须照着构造写）', async () => {
+  it('题面里凭空多出的数字要拦下（含行内公式里的数字）', async () => {
     const ctx = await boot(brain({ serialize: false, parse: () => null }), false)
     const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
-    const fragment = base.prose.tex?.stem ?? ''
     const item: Item = {
       ...base,
-      prose: { ...base.prose, tex: { ...base.prose.tex, stem: `${fragment} + 777` } },
+      prose: { ...base.prose, stem: '某商店购进 777 件商品，$y=x^{2}+6x+8$，求对称轴。' },
     }
     const result = await ctx.bank.submit(item)
 

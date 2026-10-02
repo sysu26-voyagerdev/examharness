@@ -343,13 +343,9 @@ function QuestionCard({
         </Stack>
 
         <Typography variant="body1">
+          {/* 数学写在题面里（$…$，服务端渲染好）：不再单独摆一块公式 */}
           <MathText html={item.stemHtml} />
         </Typography>
-        {item.tex?.stemMath !== undefined && (
-          <Box sx={{ my: 1, overflowX: 'auto' }}>
-            <MathText display html={item.tex.stemMath} />
-          </Box>
-        )}
         {item.figure !== '' && (
           <Box
             sx={{ my: 1.5, textAlign: 'center', '& svg': { maxWidth: '100%', height: 'auto' } }}
@@ -365,22 +361,12 @@ function QuestionCard({
             <Typography variant="body1">
               <MathText html={item.answerHtml} />
             </Typography>
-            {item.tex?.answerMath !== undefined && (
-              <Box sx={{ my: 1, overflowX: 'auto' }}>
-                <MathText display html={item.tex.answerMath} />
-              </Box>
-            )}
             <Box component="ol" sx={{ pl: 2.5, my: 1.5 }}>
               {item.solutionHtml.map((step, stepIndex) => (
                 <Box component="li" key={stepIndex} sx={{ mb: 1 }}>
                   <Typography variant="body2">
                     <MathText html={step} />
                   </Typography>
-                  {item.tex?.solution[stepIndex] !== undefined && (
-                    <Box sx={{ overflowX: 'auto' }}>
-                      <MathText display html={item.tex.solution[stepIndex]?.math ?? ''} />
-                    </Box>
-                  )}
                 </Box>
               ))}
             </Box>

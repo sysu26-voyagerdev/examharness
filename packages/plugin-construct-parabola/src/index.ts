@@ -138,6 +138,14 @@ export function createParabolaRoots(config: ConstructConfig): Constructor {
 
     const goal = wantsAxis ? '对称轴' : wantsVertex ? '顶点坐标' : '线段 AB 的长'
     const answer = wantsAxis ? `x = ${minus(h)}` : wantsVertex ? `(${minus(h)}, ${minus(k)})` : `AB = ${length}`
+    // 卷面上显示的答案（行内 LaTeX）；witness.answer 保持朴素写法给闸门做比对
+    // 注意：模板字符串里 LaTeX 的反斜杠要写两个（`\left`）——
+    // 写一个会被当成转义吃掉（`\r` 还会变成回车），这个坑有专门的测试盯着
+    const answerTex = wantsAxis
+      ? `x = ${minus(h)}`
+      : wantsVertex
+        ? `\\left(${minus(h)},\\,${minus(k)}\\right)`
+        : `AB = \\left|x_{2} - x_{1}\\right| = ${String(length)}`
 
     const figure: FigureSpec = {
       kind: 'function-graph',
@@ -189,28 +197,16 @@ export function createParabolaRoots(config: ConstructConfig): Constructor {
         reprSwitches: 2,
       },
       prose: {
-        stem: `已知抛物线 ${poly(b, c)} 与 x 轴交于 A、B 两点。求${goal}。`,
+        // 数学**写在题面里**（行内 LaTeX）：卷面直接由 KaTeX 渲染，
+        // 不再另给一份"公式层"让界面单独摆一块（那是重复，用户也说了没意义）。
+        stem: `已知抛物线 $${polyTex(b, c)}$ 与 $x$ 轴交于 $A$、$B$ 两点。求${goal}。`,
         ...(options === undefined ? {} : { options }),
-        answerText: answer,
-        solution: [`令 y = 0： (x − ${r1})(x − ${r2}) = 0`, `得 x₁ = ${r1}，x₂ = ${r2}`, `所以${answer}`],
-        // 数学本体用 LaTeX 给一份（构造给真值，模型只负责把它嵌进句子里）
-        tex: {
-          stem: `${polyTex(b, c)}`,
-          answer: wantsAxis
-            ? `x = ${h}`
-            : wantsVertex
-              ? `\\left(${h},\\,${k}\\right)`
-              : `\\left|x_{2} - x_{1}\\right| = ${length}`,
-          solution: [
-            `(x - ${r1})(x - ${r2}) = 0`,
-            `x_{1} = ${r1},\\quad x_{2} = ${r2}`,
-            wantsAxis
-              ? `x = \\dfrac{x_{1} + x_{2}}{2} = ${h}`
-              : wantsVertex
-                ? `\\left(\\dfrac{x_{1} + x_{2}}{2},\\,f\\left(\\dfrac{x_{1} + x_{2}}{2}\\right)\\right) = \\left(${h},\\,${k}\\right)`
-                : `AB = \\left|x_{2} - x_{1}\\right| = ${length}`,
-          ],
-        },
+        answerText: answerTex,
+        solution: [
+          `令 $y = 0$：$(x - ${r1})(x - ${r2}) = 0$`,
+          `得 $x_{1} = ${r1}$，$x_{2} = ${r2}$`,
+          `所以 $${answerTex}$`,
+        ],
         serializer: { model: 'template', version: 1 },
       },
       figure: { spec: figure, renderer: 'template' },

@@ -301,11 +301,12 @@ const CONSTRUCTOR_TOOL: LlmToolSpec = {
     '  export const kind = "dynamic/xxx"        // 题型名\n' +
     '  export const covers = ["知识点"]         // 覆盖哪些知识点（最多 6 个）\n' +
     "  export function construct(slot, seed) {\n" +
-    '    return { params: {...数字}, stem: "题面", answer: "答案",\n' +
-    '             stemTex: "题面的公式（数学模式，别带 $）", answerTex: "答案的公式",\n' +
+    '    return { params: {...数字}, stem: "题面（数学写在正文里：$y=x^{2}+6x+8$）",\n' +
+    '             answer: "答案（同样用 $…$ 写数学）",\n' +
     '             goal: "题目要求什么（几个短句，空格分开）",\n' +
+    '             goals: ["每一问一句（8 分以上的解答题至少两条）"],\n' +
     '             givens: ["题面显式给出的条件，一条一个"],\n' +
-    '             solution: ["步骤"], steps: [{text, basis}],\n' +
+    '             solution: ["解题步骤（数学也用 $…$）"], steps: [{text, basis}],\n' +
     '             checks: [{ expr: "把 at 代进去该等于什么", at: {...}, expect: 0 }] }\n' +
     "  }\n" +
     '**goal 与 givens 要写**：题面被模型重写后，回译闸门就是拿它们核对"有没有写漏、写歪"的；\n' +

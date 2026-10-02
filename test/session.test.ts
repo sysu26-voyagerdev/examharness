@@ -316,7 +316,12 @@ describe('导出', () => {
 
     expect(html).toContain('参考答案与解析')
     expect(html).toContain('<svg')
-    expect(html).toContain(items[0]?.prose.stem.slice(0, 12) ?? '')
+    // 题面里的数学（$…$）在导出时渲染成**行内 MathML**（Word 认），
+    // 所以正文与公式分开断言：正文照抄，公式变成 <math>
+    expect(html).toContain(items[0]?.prose.stem.split('$')[0] ?? '')
+    expect(html).toContain('<math')
+    // 不再单独摆一块公式：没有那个多余的 formula 容器
+    expect(html).not.toContain('class="formula"')
     expect(markdown).toContain('# 课后作业卷')
     expect(markdown).toContain('<svg')
     expect(markdown).toContain(items[0]?.prose.answerText ?? '')

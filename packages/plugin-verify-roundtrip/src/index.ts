@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { Item, Verdict } from '@examharness/core'
-import { checkTex, normalize, numbers, parseJsonObject } from '@examharness/core'
+import { checkTex, mathSegments, normalize, numbers, parseJsonObject } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -175,16 +175,24 @@ function withoutStructure(text: string): string {
 
 /**
  * LaTeX 这一层也要卡：公式写歪了（下标写错、括号漏了）不该等到老师看见，
- * 而且**公式里的数字必须与构造实例一致**——否则就是"构造是对的、写出来是另一道题"。
+ * 而且**题面里的数字必须与构造实例一致**——否则就是"构造是对的、写出来是另一道题"。
+ *
+ * 查的是**正文**（题面/答案/解法里的 `$…$`）：数学就写在正文里，
+ * 不再另设一份"公式层"（那份东西界面也不该单独摆一块——用户："这个部分意义不大"）。
  */
 function checkTexLayer(item: Item): Verdict | undefined {
   const tex = item.prose.tex
-  if (tex === undefined) return undefined
   const fragments: [string, string][] = [
-    ...(tex.stem === undefined ? [] : ([['题面公式', tex.stem]] as [string, string][])),
-    ...(tex.answer === undefined ? [] : ([['答案公式', tex.answer]] as [string, string][])),
-    ...(tex.solution ?? []).map((part, index) => [`解析第 ${String(index + 1)} 步`, part] as [string, string]),
+    ...mathSegments(item.prose.stem).map((part) => ['题面里的公式', part] as [string, string]),
+    ...mathSegments(item.prose.answerText).map((part) => ['答案里的公式', part] as [string, string]),
+    ...item.prose.solution.flatMap((step, index) =>
+      mathSegments(step).map((part) => [`解析第 ${String(index + 1)} 步的公式`, part] as [string, string]),
+    ),
+    // 老题里还带着"公式层"（tex.*）：留着的也要编译得过，不许是坏 LaTeX
+    ...(tex?.stem === undefined ? [] : ([['题面公式（旧字段）', tex.stem]] as [string, string][])),
+    ...(tex?.answer === undefined ? [] : ([['答案公式（旧字段）', tex.answer]] as [string, string][])),
   ]
+  if (fragments.length === 0) return undefined
   for (const [label, fragment] of fragments) {
     const result = checkTex(fragment)
     if (!result.ok) {
@@ -203,23 +211,22 @@ function checkTexLayer(item: Item): Verdict | undefined {
     }
   }
 
-  // **题面公式**的数字必须是构造参数里出现过的：题面说的就是那道题，数字不许飘。
+  // **题面**里的数字必须是构造参数里出现过的：题面说的就是那道题，数字不许飘
+  // （含行内公式里的数字——`$y=x^{2}+6x+8$` 里的 6、8 都得来自构造）。
   // 答案与解析里会出现**推导出来的量**（比如两点间距离 = |x₂ − x₁|），那些本来就不在参数里，
   // 所以只对题面做这条检查——多查一步会把正确的推导当成错的。
-  if (tex.stem !== undefined) {
-    const allowed = new Set(numbers(JSON.stringify(item.instance.params)))
-    for (const value of numbers(withoutStructure(tex.stem))) {
-      // 结构性数字不是题目数据：查它们只会误伤——
-      // 0/1（「= 0」「系数 1」）、角度常量（「∠A = 90°」「内角和 180°」「360°」）
-      if (value === '0' || value === '1' || value === '90' || value === '180' || value === '360') continue
-      if (!allowed.has(value)) {
-        return {
-          pass: false,
-          gate: name,
-          reason: `题面公式里出现了构造参数里没有的数字（${value}）`,
-          fixable: true,
-          hint: '题面公式必须照着构造写，数字不要手改',
-        }
+  const allowed = new Set(numbers(JSON.stringify(item.instance.params)))
+  for (const value of numbers(withoutStructure(item.prose.stem))) {
+    // 结构性数字不是题目数据：查它们只会误伤——
+    // 0/1（「= 0」「系数 1」）、角度常量（「∠A = 90°」「内角和 180°」「360°」）
+    if (value === '0' || value === '1' || value === '90' || value === '180' || value === '360') continue
+    if (!allowed.has(value)) {
+      return {
+        pass: false,
+        gate: name,
+        reason: `题面里出现了构造参数里没有的数字（${value}）`,
+        fixable: true,
+        hint: '题面（含公式）必须照着构造写：数字要么来自 params，要么让题型把它们放进 params',
       }
     }
   }

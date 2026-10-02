@@ -11,7 +11,7 @@ import * as paperPlugin from '@examharness/plugin-paper'
 import * as dedupPlugin from '@examharness/plugin-verify-dedup'
 import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
-import { checkTex, renderMathInText } from '@examharness/core'
+import { checkTex, mathSegments, renderMathInText } from '@examharness/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 /**
@@ -116,9 +116,17 @@ describe('题面里的 LaTeX', () => {
     const row = blueprint.blueprint[0]
     if (row === undefined) throw new Error('蓝图是空的')
     const built = ctx.construct.generate({ ...row, key: 'S1-tex', count: 1 }, 42)
-    const tex = built.prose.tex
-    expect(tex).toBeDefined()
-    const fragments = [tex?.stem ?? '', tex?.answer ?? '', ...(tex?.solution ?? [])]
+    // 数学写在**正文**里（行内 $…$）：这里查的就是学生看到的那几段
+    const fragments = [
+      ...mathSegments(built.prose.stem),
+      ...mathSegments(built.prose.answerText),
+      ...built.prose.solution.flatMap((step) => mathSegments(step)),
+      // 老题里可能还带着"公式层"：留着的也得编译得过
+      ...(built.prose.tex?.stem === undefined ? [] : [built.prose.tex.stem]),
+      ...(built.prose.tex?.answer === undefined ? [] : [built.prose.tex.answer]),
+      ...(built.prose.tex?.solution ?? []),
+    ]
+    expect(fragments.length).toBeGreaterThan(0)
 
     for (const fragment of fragments) {
       // 控制字符 = 反斜杠被吃掉过（`\r` 会变成回车）

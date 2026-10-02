@@ -8,15 +8,6 @@ export interface EvidenceView {
   detail?: string
 }
 
-/** 服务端渲染好的数学：stem/answer 里是正文，html 字段里是 MathML */
-export interface TexView {
-  stem?: string
-  stemMath?: string
-  answer?: string
-  answerMath?: string
-  solution: readonly { tex: string; math: string }[]
-}
-
 export interface ItemView {
   id: string
   slot: string
@@ -26,11 +17,10 @@ export interface ItemView {
   lifecycle: string
   stem: string
   answer: string
-  /** 正文（含 $...$）已经渲染成 MathML，界面直接显示，不引数学库 */
+  /** 正文里的数学（$...$）已经在服务端渲染好，界面直接显示，不引数学库 */
   stemHtml: string
   answerHtml: string
   solutionHtml: readonly string[]
-  tex?: TexView
   /** 图由服务端按 spec 渲染好；界面只显示 */
   figure: string
   constructor: string

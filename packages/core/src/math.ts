@@ -74,6 +74,20 @@ export function texToHtml(tex: string, display = true): string {
  * 把一段**混着数学的正文**渲染成 HTML：`$...$` 变 MathML，其余原样转义。
  * 模型写的题面就走这条路——它只负责在句子里放 `$...$`，数学本体来自构造。
  */
+/**
+ * 一段文字里的数学片段（`$...$` / `$$...$$` 的内容）。
+ * 闸门用它做两件事：**编译都过**、**公式里的数字都来自构造**——
+ * 数学写在正文里，所以检查的也必须是正文（不再另设一份"公式层"）。
+ */
+export function mathSegments(text: string): readonly string[] {
+  const out: string[] = []
+  for (const match of text.matchAll(MATH_PATTERN)) {
+    const body = match[1] ?? match[2]
+    if (body !== undefined && body.trim() !== '') out.push(body)
+  }
+  return out
+}
+
 export function renderMathInText(text: string, mode: MathMode = 'html'): string {
   let out = ''
   let cursor = 0

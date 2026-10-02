@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import { renderMathInText, texToHtml, texToMathml } from '@examharness/core'
+import { renderMathInText } from '@examharness/core'
 import type {
   Blueprint,
   BlueprintPatch,
@@ -107,15 +107,15 @@ export function renderPaperHtml(meta: SessionMeta, items: readonly Item[], figur
   const rows = items
     .map((item, index) => {
       const options = (item.prose.options ?? [])
-        .map((option) => `${option.key}. ${renderMathInText(option.text)}`)
+        .map((option) => `${option.key}. ${renderMathInText(option.text, 'mathml')}`)
         .join('　　')
       const figure = figureOf(item)
-      const stemTex = item.prose.tex?.stem
+      // 题面里本来就用 $…$ 写着数学：直接渲染成**行内 MathML**（Word 与浏览器都认），
+      // 不再在题面下面单独摆一块公式——那是重复，看着也乱（用户："这个部分意义不大"）。
       return [
         `<div class="q">`,
         `<div class="head"><b>${String(index + 1)}.</b>（${item.slot.type}，${String(item.slot.score)} 分）</div>`,
-        `<div class="stem">${renderMathInText(item.prose.stem)}</div>`,
-        stemTex === undefined ? '' : `<div class="formula">${texToMathml(stemTex)}</div>`,
+        `<div class="stem">${renderMathInText(item.prose.stem, 'mathml')}</div>`,
         options === '' ? '' : `<div class="opts">${options}</div>`,
         figure === '' ? '' : `<div class="fig">${figure}</div>`,
         `</div>`,
@@ -126,11 +126,8 @@ export function renderPaperHtml(meta: SessionMeta, items: readonly Item[], figur
   const answers = items
     .map(
       (item, index) =>
-        `<div class="a"><b>${String(index + 1)}.</b> ${renderMathInText(item.prose.answerText)}<ol>${item.prose.solution
-          .map((step, stepIndex) => {
-            const tex = texSteps(item)[stepIndex]
-            return `<li>${renderMathInText(step)}${tex === undefined ? '' : `<div class="formula">${texToMathml(tex)}</div>`}</li>`
-          })
+        `<div class="a"><b>${String(index + 1)}.</b> ${renderMathInText(item.prose.answerText, 'mathml')}<ol>${item.prose.solution
+          .map((step) => `<li>${renderMathInText(step, 'mathml')}</li>`)
           .join('')}</ol></div>`,
     )
     .join('\n')
@@ -214,16 +211,6 @@ function readBody(req: IncomingMessage): Promise<unknown> {
     })
     req.on('error', fail)
   })
-}
-
-/**
- * 解析里的一步步 LaTeX。**类型上要挡一道**：题库里可能留着早期不合契约的题
- * （例如 solutionTex 曾写成一整段字符串），一条坏数据不该把整个状态接口带崩——
- * 真实踩过：未处理的拒绝把正在跑的那一轮带走，界面再也起不了新一轮。
- */
-function texSteps(item: Item): readonly string[] {
-  const value: unknown = item.prose.tex?.solution
-  return Array.isArray(value) ? value.filter((part): part is string => typeof part === 'string') : []
 }
 
 function send(res: ServerResponse, status: number, body: unknown): void {
@@ -996,7 +983,6 @@ export function apply(ctx: Context, config: WebConfig): void {
 
 /** 推给界面的最小投影：不要整个 Item 糊过去 */
 function summarizeWith(item: Item, figureSvg: string): Record<string, unknown> {
-  const tex = item.prose.tex
   return {
     id: item.id,
     slot: item.slot.key,
@@ -1006,19 +992,12 @@ function summarizeWith(item: Item, figureSvg: string): Record<string, unknown> {
     lifecycle: item.lifecycle,
     stem: item.prose.stem,
     answer: item.prose.answerText,
-    // 正文里的 $...$ 与构造给的 LaTeX 都在服务端渲染成 MathML：界面不引数学库
+    // 数学**写在正文里**（$…$），服务端渲染成 KaTeX HTML：界面不引数学库。
+    // 以前还会额外带一份"公式层"（tex.stemMath 等）让界面单独摆一块公式——
+    // 那是重复（题面里已经写着数学了），已去掉（用户："这个部分意义不大"）。
     stemHtml: renderMathInText(item.prose.stem, 'html'),
     answerHtml: renderMathInText(item.prose.answerText, 'html'),
     solutionHtml: item.prose.solution.map((step) => renderMathInText(step, 'html')),
-    ...(tex === undefined
-      ? {}
-      : {
-          tex: {
-            ...(tex.stem === undefined ? {} : { stem: tex.stem, stemMath: texToHtml(tex.stem) }),
-            ...(tex.answer === undefined ? {} : { answer: tex.answer, answerMath: texToHtml(tex.answer) }),
-            solution: texSteps(item).map((part) => ({ tex: part, math: texToHtml(part) })),
-          },
-        }),
     figure: figureSvg,
     constructor: item.provenance.constructor,
     seed: item.provenance.seed,
