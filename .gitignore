@@ -30,6 +30,10 @@ corpus/*
 .vscode/*
 !.vscode/extensions.json
 
+# 工具写的临时目录（harness / 脚本可能生成，别提交）
+*.tmpdir/
+*.tmp
+
 # 本地草稿
 *.bak
 *.old
