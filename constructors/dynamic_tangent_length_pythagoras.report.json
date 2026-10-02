@@ -1,0 +1,12 @@
+{
+  "kind": "dynamic/tangent_length_pythagoras",
+  "file": "/home/yurikale/examharness/data/constructors/dynamic_tangent_length_pythagoras.mjs",
+  "covers": [
+    "圆与切线"
+  ],
+  "ok": true,
+  "samples": 30,
+  "checks": 90,
+  "problems": [],
+  "at": "2026-10-02T12:29:45.253Z"
+}

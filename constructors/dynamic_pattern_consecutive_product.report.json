@@ -1,0 +1,12 @@
+{
+  "kind": "dynamic/pattern_consecutive_product",
+  "file": "/home/yurikale/examharness/data/constructors/dynamic_pattern_consecutive_product.mjs",
+  "covers": [
+    "规律与代数推理"
+  ],
+  "ok": true,
+  "samples": 30,
+  "checks": 60,
+  "problems": [],
+  "at": "2026-10-02T12:29:45.073Z"
+}

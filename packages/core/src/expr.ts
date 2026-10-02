@@ -18,9 +18,21 @@ export interface CheckPoint {
   expect: number
 }
 
-export function evaluateExpression(source: string, variables: Readonly<Record<string, number>>): number {
+export function evaluateExpression(
+  source: string,
+  variables: Readonly<Record<string, number>>,
+  limits: { steps?: number; maxExponent?: number } = {},
+): number {
   const tokens = tokenize(source)
   let position = 0
+  // **限额是必须的**：这是给"agent 写的题型"用的求值器，被验收的表达式不能把框架拖死
+  const maxSteps = limits.steps ?? 4096
+  const maxExponent = limits.maxExponent ?? 64
+  let steps = 0
+  const spend = (): void => {
+    steps += 1
+    if (steps > maxSteps) throw new Error(`表达式太复杂（超过 ${String(maxSteps)} 步）`)
+  }
 
   const peek = (): string | undefined => tokens[position]
   const next = (): string | undefined => {
@@ -53,8 +65,13 @@ export function evaluateExpression(source: string, variables: Readonly<Record<st
     const base = parsePrimary()
     if (peek() !== '^') return base
     next()
-    // 右结合：2^3^2 = 2^(3^2)
-    return base ** parsePower()
+    // 右结合：2^3^2 = 2^(3^2)；指数必须有限且不大（9^9^9 这种会直接把进程拖死）
+    const exponent = parsePower()
+    spend()
+    if (!Number.isFinite(exponent) || Math.abs(exponent) > maxExponent) {
+      throw new Error(`指数超出允许范围（|指数| ≤ ${String(maxExponent)}）`)
+    }
+    return base ** exponent
   }
 
   const parseProduct = (): number => {
@@ -63,9 +80,11 @@ export function evaluateExpression(source: string, variables: Readonly<Record<st
       const token = peek()
       if (token === '*') {
         next()
+        spend()
         value *= parsePower()
       } else if (token === '/') {
         next()
+        spend()
         const divisor = parsePower()
         if (divisor === 0) throw new Error('表达式里出现除以 0')
         value /= divisor
@@ -80,9 +99,11 @@ export function evaluateExpression(source: string, variables: Readonly<Record<st
       const token = peek()
       if (token === '+') {
         next()
+        spend()
         value += parseProduct()
       } else if (token === '-') {
         next()
+        spend()
         value -= parseProduct()
       } else break
     }

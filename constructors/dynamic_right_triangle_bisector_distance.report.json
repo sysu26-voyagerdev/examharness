@@ -1,0 +1,12 @@
+{
+  "kind": "dynamic/right_triangle_bisector_distance",
+  "file": "/home/yurikale/examharness/data/constructors/dynamic_right_triangle_bisector_distance.mjs",
+  "covers": [
+    "三角形与全等"
+  ],
+  "ok": true,
+  "samples": 30,
+  "checks": 60,
+  "problems": [],
+  "at": "2026-10-02T12:29:45.159Z"
+}

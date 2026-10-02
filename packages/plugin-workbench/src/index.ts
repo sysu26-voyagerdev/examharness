@@ -235,7 +235,8 @@ const WORKSPACE_TOOLS: readonly LlmToolSpec[] = [
 /** 把题型模块写到 data/constructors/（只允许写这里：题型目录是系统配置，不是工作区） */
 function writeConstructor(kindName: string, code: string): string {
   const root = process.cwd()
-  const dir = join(root, 'data', 'constructors')
+  // 写到仓库里的 constructors/：题型是**能力产出**，该被版本化、被团队共享
+  const dir = join(root, 'constructors')
   mkdirSync(dir, { recursive: true })
   const safe = kindName.replace(/[^\w.-]/g, '_').slice(0, 60) || `dynamic-${String(Date.now())}`
   const file = join(dir, `${safe}.mjs`)
@@ -246,6 +247,14 @@ function writeConstructor(kindName: string, code: string): string {
 /** 题位里允许的水平与题型（写错就退回默认，别让坏值进蓝图） */
 const COGNITIVE = new Set(['了解', '理解', '掌握', '灵活运用'])
 const QUESTION_TYPE = new Set(['选择', '填空', '解答'])
+
+const GAP_TOOL: LlmToolSpec = {
+  name: 'gap_report',
+  description:
+    '列出**当前组卷的缺口**：每个缺口题位的知识点、题型、分值、以及它在真题里最常考的领域与支持卷数。' +
+    '要"自己把缺口补上"就先调它——它会告诉你缺什么、该往哪个方向写题型。',
+  parameters: { type: 'object', properties: {}, required: [] },
+}
 
 const CONSTRUCTOR_TOOL: LlmToolSpec = {
   name: 'constructor_write',
@@ -465,7 +474,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     // 组卷是收尾动作；蓝图库让 agent 能"换一份合适的模板再出"
     if (this.ctx.get('session') !== undefined) tools.push(PAPER_TOOL, ...BLUEPRINT_TOOLS)
     // 运行时制作新题型：写模块 → 框架验收 → 通过即生效
-    if (this.ctx.get('constructDynamic') !== undefined) tools.push(CONSTRUCTOR_TOOL)
+    if (this.ctx.get('constructDynamic') !== undefined) tools.push(CONSTRUCTOR_TOOL, GAP_TOOL)
     return tools
   }
 
@@ -912,6 +921,57 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       }
     }
 
+    if (tool === 'gap_report') {
+      const session = this.ctx.get('session')
+      const paper = this.ctx.get('paper')
+      if (session === undefined) return { kind: 'tool', text: 'gap_report：没有会话服务', payload: { error: '未接入会话' } }
+      const liveBlueprint = session.blueprint()
+      const assembled = await paper?.assemble(liveBlueprint)
+      const gaps = assembled?.gaps ?? []
+      // 每个缺口带上"真题里这个题位常考什么"（蓝图里存着统计依据）
+      const rows = gaps.map((gap) => {
+        const row = liveBlueprint.blueprint.find((entry) => entry.key === gap.slot.replace(/-\d+$/, ''))
+        const statKey = '_evidence'
+        const evidence =
+          row === undefined
+            ? undefined
+            : (
+                row as unknown as Record<
+                  string,
+                  { positionDomainCounts?: Record<string, number>; supportPapers?: number } | undefined
+                >
+              )[statKey]
+        return {
+          slot: gap.slot,
+          knowledge: row?.knowledge ?? [],
+          type: row?.type ?? '',
+          score: row?.score ?? 0,
+          reason: gap.reason,
+          domains: evidence?.positionDomainCounts ?? {},
+          supportPapers: evidence?.supportPapers ?? 0,
+        }
+      })
+      if (rows.length === 0) {
+        return { kind: 'tool', text: 'gap_report：没有缺口，题位都齐了。', payload: { gaps: [] } }
+      }
+      return {
+        kind: 'tool',
+        text:
+          `gap_report：${String(rows.length)} 个题位还出不了\n` +
+          rows
+            .map(
+              (row) =>
+                `  · ${row.slot}｜${row.knowledge.join('、')}｜${row.type}｜${String(row.score)} 分｜原因：${row.reason}\n` +
+                `     真题里这个题位常考：${Object.entries(row.domains)
+                  .slice(0, 3)
+                  .map(([domain, count]) => `${domain}${String(count)}`)
+                  .join('、')}（支持 ${String(row.supportPapers)} 份卷）`,
+            )
+            .join('\n'),
+        payload: { gaps: rows },
+      }
+    }
+
     if (tool === 'constructor_write') {
       const dynamic = this.ctx.get('constructDynamic')
       if (dynamic === undefined) return { kind: 'tool', text: 'constructor_write：没有接动态题型服务', payload: { error: '未接入' } }
@@ -1333,6 +1393,13 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     '**老师要的规格库里没有时**：不要反问他"要哪一种"。直接 blueprint_list 看库里有什么 →',
     '   照他的要求 blueprint_create 一份**草稿**（题位尽量贴近他的说法）→ blueprint_use 换上 → 按新题位出题。',
     '   构造器覆盖不到的题位照实写在草稿里并说明"这些题位我出不了"，让老师在界面上改——**草稿是他的起点，不是问他问题**。',
+    '**缺口可以自己补**（这是你的本事，不是等我或者等人改代码）：',
+    '   1) gap_report 看还缺哪些题位、每个题位缺什么（知识点/题型/分值/真题里怎么考）；',
+    '   2) 对每个缺口先 material_search（例如「相似三角形」「规律 猜想」）看真题怎么考、题面长什么样；',
+    '   3) 用 constructor_write 写一个题型模块：真值由参数算出，checks 写清**要被核对的数学事实**；',
+    '      验收不通过就按它给的问题改，直到通过（检验点必须能区分对错，恒等式会被判无效）；',
+    '   4) 再 assemble_paper 组卷，看缺口是否减少；还有缺口就回到第 1 步。',
+    '   **做不到的如实说**：证明题（全等、切线）这类没有"可代入核对的答案"，不要硬凑一个假题型。',
     '**写脚本是本事，不是偷懒**：资料版式怪、要批处理、要核对数值，就 ws_write 写个 python 脚本再 ws_run 跑；',
     '   跑完**自己检查**（抽查几处、对一下总数、和原文核对），别把没验过的结果交上来。',
     '同一个问题（比如卷头分数与题位合计对不上）**只说一次**；说过就别再反复问。',

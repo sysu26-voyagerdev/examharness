@@ -1,8 +1,9 @@
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { checkPointIsDiscriminating, evaluateExpression, fnv1a } from '@examharness/core'
+import { fnv1a } from '@examharness/core'
 import type {
   BlueprintRow,
   CheckPoint,
@@ -41,12 +42,24 @@ export const Config = z.object({
   samples: z.number().default(30),
   /** 一个题型最多覆盖多少知识点（防"什么都能出"的假题型） */
   maxCovers: z.number().default(6),
+  /** 隔离验收脚本（在独立进程里跑，带内存上限与超时） */
+  verifyScript: z.string().default('scripts/verify-constructor.mjs'),
+  /** 验收子进程的内存上限（MB）：模块爆内存也只崩它自己 */
+  maxOldSpaceMb: z.number().default(256),
+  /** 验收子进程超时 */
+  verifyTimeoutMs: z.number().default(10_000),
+  /** 模块允许的堆占用上限（MB）：顶层做重活的模块不许注册 */
+  maxHeapMb: z.number().default(96),
 })
 
 export interface DynamicConfig {
   dir: string
   samples: number
   maxCovers: number
+  verifyScript: string
+  maxOldSpaceMb: number
+  verifyTimeoutMs: number
+  maxHeapMb: number
 }
 
 interface ModuleShape {
@@ -152,16 +165,40 @@ export class DynamicConstructorService extends Service implements DynamicConstru
 
   /** 扫描目录：逐个加载 + 验收（不通过的只在报告里留痕，不注册） */
   async loadAll(): Promise<readonly ConstructorReport[]> {
-    const files = readdirSync(this.dir).filter((file) => file.endsWith('.mjs'))
+    // 两个来源：仓库里的 constructors/（版本化、团队共享）+ data/constructors/（本机实验）
+    const dirs = [resolve(this.root, 'constructors'), this.dir]
+    const files = dirs.flatMap((dir) => {
+      if (!existsSync(dir)) return []
+      return readdirSync(dir)
+        .filter((file) => file.endsWith('.mjs'))
+        .map((file) => join(dir, file))
+    })
     for (const file of files) {
-      // oxlint-disable-next-line no-await-in-loop
-      await this.loadOne(join(this.dir, file))
+      try {
+        // oxlint-disable-next-line no-await-in-loop
+        await this.loadOne(file)
+      } catch (error) {
+        // 一个模块出问题不该让其他题型都加载不了
+        const kind = (file.split('/').at(-1) ?? file).replace(/\.mjs$/, '')
+        this.reports.set(kind, {
+          kind,
+          file,
+          covers: [],
+          ok: false,
+          samples: 0,
+          checks: 0,
+          problems: [`加载时抛错：${error instanceof Error ? error.message : String(error)}`],
+          at: new Date().toISOString(),
+        })
+      }
     }
     return this.list()
   }
 
   /** 加载一个题型模块并验收；通过就注册，不通过就把问题写进报告 */
-  async loadOne(file: string): Promise<ConstructorReport> {
+  async loadOne(modulePath: string): Promise<ConstructorReport> {
+    // 统一成绝对路径：调用方可能给绝对路径（扫描目录）或相对仓库根的路径（工具写入）
+    const file = modulePath.startsWith('/') ? modulePath : resolve(this.root, modulePath)
     const fileName = file.split('/').at(-1) ?? file
     // 报告的 key 先用文件名占位；模块加载后用**它自己声明的 kind**（以模块为准）
     let kind = fileName.replace(/\.mjs$/, '')
@@ -197,76 +234,64 @@ export class DynamicConstructorService extends Service implements DynamicConstru
       return report(false, covers, 0, 0, [`covers 最多 ${String(this.config.maxCovers)} 个：覆盖太多等于"什么都能出"，不是题型`])
     }
 
-    const problems: string[] = []
-    const construct = module.construct as (slot: BlueprintRow, seed: number) => {
-      params?: Record<string, number>
-      answer?: unknown
-      stem?: unknown
-      checks?: CheckPoint[]
-      steps?: unknown
+    // **验收在独立进程里跑**：模块的顶层代码在 import 时就会执行，
+    // 一个 while 循环就能把宿主进程的内存吃光（真实踩过：服务被 agent 的模块搞 OOM）。
+    // 子进程带内存上限与超时，崩了只崩它自己；主进程只认它的报告。
+    const script = resolve(this.root, this.config.verifyScript)
+    if (!existsSync(script)) {
+      return report(false, covers, 0, 0, [`找不到验收脚本：${this.config.verifyScript}`])
     }
-    const probeSlot: BlueprintRow = {
-      key: 'Z1',
-      knowledge: covers.slice(0, 1),
-      cognitive: '掌握',
-      type: '解答',
-      difficulty: [0.6, 0.85],
-      score: 10,
-      count: 1,
-    }
-
-    let checks = 0
-    const seen = new Set<string>()
-    for (let index = 0; index < this.config.samples && problems.length === 0; index += 1) {
-      const seed = 1000 + index * 7
-      let built: ReturnType<typeof construct>
-      try {
-        built = construct(probeSlot, seed)
-      } catch (error) {
-        problems.push(`第 ${String(index + 1)} 条构造就抛错：${error instanceof Error ? error.message : String(error)}`)
-        break
-      }
-      if (typeof built.stem !== 'string' || built.stem.trim() === '') problems.push('题面是空的')
-      if (typeof built.answer !== 'string' || built.answer.trim() === '') problems.push('答案（answer）必须是字符串')
-      if (built.params === undefined || typeof built.params !== 'object') problems.push('没有 params：闸门与验收都靠它')
-      if (!Array.isArray(built.checks) || built.checks.length === 0) {
-        problems.push('没有 checks：题型必须声明"要被核对的数学事实"，否则无法独立验证')
-        break
-      }
-      if (problems.length > 0) break
-
-      // 检验点：能算、成立、而且**能区分对错**
-      for (const check of built.checks ?? []) {
-        checks += 1
-        const verdict = checkPointIsDiscriminating(check)
-        if (!verdict.ok) {
-          problems.push(`检验点无效（${check.expr}）：${verdict.reason ?? ''}`)
-          continue
-        }
-        try {
-          const value = evaluateExpression(check.expr, check.at)
-          if (Math.abs(value - check.expect) > 1e-6) {
-            problems.push(`检验点不成立（${check.expr}）：算出 ${String(value)}，期望 ${String(check.expect)}`)
-          }
-        } catch (error) {
-          problems.push(`检验点算不出来（${check.expr}）：${error instanceof Error ? error.message : String(error)}`)
-        }
-      }
-      if (problems.length > 0) break
-      seen.add(JSON.stringify(built.params))
+    const verified = spawnSync(
+      process.execPath,
+      [`--max-old-space-size=${String(this.config.maxOldSpaceMb)}`, script, file, String(this.config.samples)],
+      { encoding: 'utf8', timeout: this.config.verifyTimeoutMs, maxBuffer: 4 * 1024 * 1024 },
+    )
+    const line = (verified.stdout ?? '').trim().split('\n').at(-1) ?? ''
+    let parsed:
+    | { ok?: boolean; problems?: string[]; samples?: number; checks?: number; covers?: string[]; kind?: string; heapMb?: number }
+    | undefined
+    try {
+      parsed = JSON.parse(line) as typeof parsed
+    } catch {
+      parsed = undefined
     }
 
-    if (problems.length === 0 && seen.size < Math.max(3, Math.floor(this.config.samples / 6))) {
-      problems.push(`不同种子只造出 ${String(seen.size)} 种题：参数空间太小，出卷会反复撞同一道题`)
+    if (parsed === undefined) {
+      const timedOut = verified.error !== undefined && (verified.error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
+      return report(
+        false,
+        covers,
+        0,
+        0,
+        [
+          timedOut
+            ? `验收超时（${String(this.config.verifyTimeoutMs)} ms）：模块里有代价过高的计算（顶层或 construct 里陷进循环了）`
+            : `验收进程没有给出报告（多半是它自己崩了 / 内存爆了）：${(verified.stderr ?? '').trim().slice(0, 200) || '没有输出'}`,
+        ],
+      )
     }
 
-    if (problems.length > 0) return report(false, covers, this.config.samples, checks, problems)
+    const problems = [...(parsed.problems ?? [])]
+    // 顶层占内存过多的模块直接拒（import 进主进程就晚了：内存收不回来）
+    if ((parsed.heapMb ?? 0) > this.config.maxHeapMb) {
+      problems.push(`模块占堆 ${String(parsed.heapMb)} MB（上限 ${String(this.config.maxHeapMb)} MB）：顶层或构造里在造大对象`)
+    }
+    if (parsed.ok !== true || problems.length > 0) {
+      return report(false, parsed.covers ?? covers, parsed.samples ?? 0, parsed.checks ?? 0, problems)
+    }
 
-    // 注册的是"包装过的工厂"：题型只管数学，Item 组装归框架
-    const wrapped: Constructor = (slot: BlueprintRow, seed: number) =>
-      assembleItem(kind, slot, seed, construct(slot, seed) as ModuleOutput)
-    ctx_of(this).construct.register(kind, wrapped, covers)
-    return report(true, covers, this.config.samples, checks, [])
+    // 通过验收才 import 注册（此时它已经在受限进程里证明过自己不会拖垮系统）
+    let moduleOk: ModuleShape
+    try {
+      moduleOk = (await import(pathToFileURL(file).href)) as ModuleShape
+    } catch (error) {
+      return report(false, covers, 0, 0, [`通过验收后却加载不了：${error instanceof Error ? error.message : String(error)}`])
+    }
+    const constructOk = moduleOk.construct as (slot: BlueprintRow, seed: number) => ModuleOutput
+    const finalKind = typeof moduleOk.kind === 'string' && moduleOk.kind !== '' ? moduleOk.kind : kind
+    const wrapped: Constructor = (slot: BlueprintRow, seed: number) => assembleItem(finalKind, slot, seed, constructOk(slot, seed))
+    ctx_of(this).construct.register(finalKind, wrapped, parsed.covers ?? covers)
+    return report(true, parsed.covers ?? covers, parsed.samples ?? 0, parsed.checks ?? 0, [])
   }
 }
 

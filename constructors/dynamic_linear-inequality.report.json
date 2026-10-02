@@ -1,0 +1,12 @@
+{
+  "kind": "dynamic/linear-inequality",
+  "file": "/home/yurikale/examharness/data/constructors/linear-inequality.mjs",
+  "covers": [
+    "一元一次不等式"
+  ],
+  "ok": true,
+  "samples": 30,
+  "checks": 60,
+  "problems": [],
+  "at": "2026-10-02T12:29:45.284Z"
+}

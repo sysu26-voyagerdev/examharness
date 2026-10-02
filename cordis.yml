@@ -58,6 +58,9 @@
       - 锐角三角函数
       - 四边形与特殊平行四边形
       - 圆的性质
+      - 规律与代数推理
+      - 四边形与证明
+      - 圆与切线
 
 # 语料库：真实题库/教材整理件（corpus/ 不进 Git）。缺目录也不影响启动。
 - id: corpus
@@ -123,6 +126,10 @@
     dir: data/constructors
     samples: 30
     maxCovers: 6
+    # 验收在独立进程里跑（内存上限 + 超时）：agent 写的模块崩了也只崩它自己
+    verifyScript: scripts/verify-constructor.mjs
+    maxOldSpaceMb: 256
+    verifyTimeoutMs: 10000
 
 - id: verify-roundtrip
   name: '@examharness/plugin-verify-roundtrip'

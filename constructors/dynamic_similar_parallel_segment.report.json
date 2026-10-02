@@ -1,0 +1,12 @@
+{
+  "kind": "dynamic/similar_parallel_segment",
+  "file": "/home/yurikale/examharness/data/constructors/dynamic_similar_parallel_segment.mjs",
+  "covers": [
+    "相似三角形"
+  ],
+  "ok": true,
+  "samples": 30,
+  "checks": 60,
+  "problems": [],
+  "at": "2026-10-02T12:29:45.203Z"
+}

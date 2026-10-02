@@ -1,0 +1,12 @@
+{
+  "kind": "dynamic/parallelogram_bisector_ratio",
+  "file": "/home/yurikale/examharness/data/constructors/dynamic_parallelogram_bisector_ratio.mjs",
+  "covers": [
+    "四边形与证明"
+  ],
+  "ok": true,
+  "samples": 30,
+  "checks": 150,
+  "problems": [],
+  "at": "2026-10-02T12:29:45.025Z"
+}
