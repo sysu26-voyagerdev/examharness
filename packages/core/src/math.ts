@@ -83,14 +83,32 @@ export function texToHtml(tex: string, display = true): string {
  * 带不带分问序号、带不带名称，都不该影响判定。**比的是数学事实，不是字符串。**
  */
 export function answerValues(text: string): readonly number[] {
-  // 先剥掉分问序号（（1）(1)①第1问）——那是排版，不是答案的一部分
-  const clean = text
-    .replace(/[（(]\s*\d+\s*[)）]/g, ' ')
+  // 顺序有讲究：先把 LaTeX 结构与"排版"剥掉，剩下的数才是答案里的数。
+  let clean = text
+    .replace(/[（(]\s*\d+\s*[)）]/g, ' ') // 分问序号（1）
     .replace(/第\s*\d+\s*问/g, ' ')
     .replace(/[①-⑳]/g, ' ')
+  // 1) LaTeX 分数：\dfrac{6}{14} → 6/14（先做，否则 6 与 14 会被当成两个数）
+  clean = clean.replace(
+    /\\(?:d|t)?frac\s*\{\s*(-?\d+(?:\.\d+)?)\s*\}\s*\{\s*(-?\d+(?:\.\d+)?)\s*\}/g,
+    '$1/$2',
+  )
+  // 2) 指数与下标：x^{2}、x_1 —— 那是排版，不是答案里的数
+  clean = clean.replace(/[_^]\s*\{?\s*[-+]?\d+(?:\.\d+)?\s*\}?/g, ' ')
+  // 3) 其余 LaTeX 命令（\left \right \cdot \sqrt…）当空白
+  clean = clean.replace(/\\[a-zA-Z]+/g, ' ')
+
   const values: number[] = []
-  // 分数（3/4）与小数、整数都算"数"
-  for (const match of clean.matchAll(/(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)|(-?\d+(?:\.\d+)?)/g)) {
+  for (const match of clean.matchAll(
+    /(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)|(-?\d+(?:\.\d+)?)/g,
+  )) {
+    const whole = match[0]
+    const at = match.index ?? 0
+    // **紧跟字母的数是指数或系数**（a²−2ab+b² 里的 2、2x 里的 2），不是答案的数据；
+    // 只有"独立成数"的才参与比对（72、64、5.5、12 个）。
+    const after = clean.slice(at + whole.length).trimStart()[0] ?? ''
+    const coefficient = /[A-Za-z]/.test(after)
+    if (coefficient) continue
     if (match[1] !== undefined && match[2] !== undefined) {
       const denominator = Number(match[2])
       if (denominator !== 0) values.push(Number(match[1]) / denominator)
@@ -121,7 +139,11 @@ export function sameAnswer(constructed: string, parsed: string, tolerance = 1e-6
     const b = right[index]
     if (a === undefined || b === undefined || !closeEnough(a, b, tolerance)) return false
   }
-  const letters = new Set(answerLetters(parsed))
+  // 字母只在**回译答案里也有字母**时比：`圆心O到弦AB的距离 = 12` 与 `12` 是同一个答案，
+  // 而 `y = 2x + 2` 与 `y = 3x + 2` 靠数值就已经分开了
+  const parsedLetters = answerLetters(parsed)
+  if (parsedLetters.length === 0) return true
+  const letters = new Set(parsedLetters)
   return answerLetters(constructed).every((token) => letters.has(token))
 }
 

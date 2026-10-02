@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
 import type { Blueprint, BlueprintRow, Item, LlmMessage, LlmReply } from '@examharness/core'
+import { sameAnswer } from '@examharness/core'
 import * as bankPlugin from '@examharness/plugin-bank'
 import * as constructPlugin from '@examharness/plugin-construct-parabola'
 import * as figurePlugin from '@examharness/plugin-figure'
@@ -410,4 +411,23 @@ describe('回译闸门', () => {
     expect(result.ok).toBe(false)
     expect(result.ok ? '' : result.verdict.reason).toContain('答案不一致')
   })
+
+})
+
+describe('答案按值比（真实用例）', () => {
+  const cases: readonly { constructed: string; parsed: string; same: boolean }[] = [
+    { constructed: '（1）a^{2}-b^{2}=72；（2）a^{2}-2ab+b^{2}=64', parsed: '（1）72；（2）64', same: true },
+    { constructed: '（1）平均数 = 6；（2）中位数 = 5.5；（3）众数 = 6', parsed: '平均数 = 6；中位数 = 5.5；众数 = 6', same: true },
+    { constructed: '圆心 O 到弦 AB 的距离 = 12', parsed: '12', same: true },
+    { constructed: '（1）y = 2x + 2；（2）(-1, 0)；（3）面积为 1', parsed: '（1）y = 2x + 2；（2）交点坐标 (-1, 0)；（3）面积 = 1', same: true },
+    { constructed: '\\dfrac{6}{14}', parsed: '3/7', same: true },
+    { constructed: 'x = 2', parsed: 'x = 3', same: false },
+    { constructed: '\\dfrac{5}{12}', parsed: '5/13', same: false },
+    { constructed: '（1）144；（2）x(x-6)(x+6)', parsed: '(1) 72；(2) x^3-36x = x(x+6)(x-6)', same: false },
+  ]
+  for (const item of cases) {
+    it(`${item.constructed.slice(0, 18)} ${item.same ? '=' : '≠'} ${item.parsed.slice(0, 18)}`, () => {
+      expect(sameAnswer(item.constructed, item.parsed)).toBe(item.same)
+    })
+  }
 })
