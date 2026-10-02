@@ -96,10 +96,10 @@ export class DocService extends Service implements DocApi {
       timeout: this.config.timeoutMs,
       maxBuffer: 8 * 1024 * 1024,
     })
-    const parsed = ((): { ok?: boolean; books?: { source: string; pages: number; examples: number; requirements: number }[] } | undefined => {
+    const parsed = ((): { ok?: boolean; books?: { pdf?: string; text?: string; examples?: string; requirements?: string }[] } | undefined => {
       const line = (result.stdout ?? '').trim().split('\n').at(-1) ?? ''
       try {
-        return JSON.parse(line) as { ok?: boolean; books?: { source: string; pages: number; examples: number; requirements: number }[] }
+        return JSON.parse(line) as { ok?: boolean; books?: { pdf?: string; text?: string; examples?: string; requirements?: string }[] }
       } catch {
         return undefined
       }
@@ -109,12 +109,40 @@ export class DocService extends Service implements DocApi {
       return {
         ok: false,
         outputs,
-        books: parsed?.books ?? [],
+        books: [],
         notes: [],
         error: (result.stderr ?? '').trim().slice(0, 400) || '脚本没有跑成功',
       }
     }
-    return { ok: true, outputs, books: parsed.books ?? [], notes: [] }
+
+    // 条数**自己数**（脚本只报文件路径）：数出来的是"真的写了多少行"，比转述更可信
+    const countLines = (rel: string | undefined): number => {
+      if (rel === undefined) return 0
+      const chunk = this.ctx.workspace.read(workspace, rel, 0, 4_000_000)
+      if (chunk === undefined) return 0
+      return chunk.text.split('\n').filter((line) => line.trim() !== '').length
+    }
+    const countPages = (rel: string | undefined): number => {
+      if (rel === undefined) return 0
+      const chunk = this.ctx.workspace.read(workspace, rel, 0, 4_000_000)
+      if (chunk === undefined) return 0
+      return (chunk.text.match(/（第 \d+ 页）/g) ?? []).length
+    }
+
+    return {
+      ok: true,
+      outputs,
+      books: (parsed.books ?? []).map((book) => ({
+        source: book.pdf === undefined ? '（未知）' : (book.pdf.split('/').at(-1) ?? book.pdf),
+        pages: countPages(book.text),
+        examples: countLines(book.examples),
+        requirements: countLines(book.requirements),
+      })),
+      notes:
+        outputs.length === 0
+          ? ['脚本说成功了，但 out/curriculum/ 里没有看到产出——用 ws_ls 核对一下']
+          : [],
+    }
   }
 
   /** out/curriculum 下产出了什么 */
