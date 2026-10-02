@@ -17,6 +17,7 @@ import CardActions from '@mui/material/CardActions'
 import CardContent from '@mui/material/CardContent'
 import CardHeader from '@mui/material/CardHeader'
 import Chip from '@mui/material/Chip'
+import Tooltip from '@mui/material/Tooltip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Collapse from '@mui/material/Collapse'
 import Divider from '@mui/material/Divider'
@@ -28,7 +29,6 @@ import ListItemIcon from '@mui/material/ListItemIcon'
 import ListItemButton from '@mui/material/ListItemButton'
 import ListItemText from '@mui/material/ListItemText'
 import Stack from '@mui/material/Stack'
-import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import * as api from './api.js'
 import { useApp } from './app-context.js'
@@ -249,6 +249,13 @@ export function PaperView({
         {viewingOld && <Chip label="在看旧版本" color="warning" />}
       </Stack>
 
+      {version.scoreGap > 0 && (
+        <Alert severity="warning" icon={<ReportOutlinedIcon />}>
+          这份卷子只有 {String(version.totalScore)} 分，蓝图卷头写的是更多分——差额 {String(version.scoreGap)} 分。
+          要么在蓝图里补题位，要么把卷头分数改成 {String(version.totalScore)} 分。
+        </Alert>
+      )}
+
       {version.gaps.length > 0 && (
         <Alert severity="warning" icon={<ReportOutlinedIcon />}>
           有 {version.gaps.length} 个题位没凑齐：{version.gaps.map((gap) => `${gap.slot}（${gap.reason}）`).join('；')}
@@ -315,7 +322,9 @@ function QuestionCard({
         <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap' }}>
           {item.difficulty !== undefined && <Chip size="small" variant="outlined" label={`难度 ${String(item.difficulty[0])}–${String(item.difficulty[1])}`} />}
           {mark !== '' && <Chip size="small" color="info" label={mark} />}
-          <Chip size="small" variant="outlined" label={item.id} sx={{ fontFamily: 'monospace' }} />
+          <Tooltip title={`完整编号 ${item.id}`}>
+            <Chip size="small" variant="outlined" label={item.id.slice(-8)} sx={{ fontFamily: 'monospace' }} />
+          </Tooltip>
         </Stack>
 
         <Typography variant="body1">

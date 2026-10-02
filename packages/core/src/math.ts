@@ -15,10 +15,18 @@ import { normalize } from './json.js'
 /** 一段行内数学（`$...$`）或块级数学（`$$...$$`） */
 const MATH_PATTERN = /\$\$([^$]+)\$\$|\$([^$\n]+)\$/g
 
-function render(tex: string, displayMode: boolean): string {
+/**
+ * 渲染成什么：
+ *   - `html`（默认）：KaTeX 的 HTML + 官方 CSS —— **界面用这个**。MathML 那条路试过，
+ *     浏览器里的排版不可靠（逐字符竖排），页面上直接崩；
+ *   - `mathml`：**导出用**。Word 认 MathML，浏览器也认，且不依赖字体与 CSS。
+ */
+type MathMode = 'html' | 'mathml'
+
+function render(tex: string, displayMode: boolean, mode: MathMode): string {
   try {
     return katex.renderToString(tex, {
-      output: 'mathml',
+      output: mode,
       displayMode,
       throwOnError: true,
       // 不允许 \href / \includegraphics 之类能往外跑的东西
@@ -44,7 +52,7 @@ export function escapeHtml(text: string): string {
 /** LaTeX 是否能编译（闸门用；失败时给出原因，模型才知道怎么改） */
 export function checkTex(tex: string): { ok: true } | { ok: false; error: string } {
   try {
-    katex.renderToString(tex, { output: 'mathml', displayMode: true, throwOnError: true, trust: false, strict: false })
+    katex.renderToString(tex, { output: 'html', displayMode: true, throwOnError: true, trust: false, strict: false })
     return { ok: true }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -52,16 +60,21 @@ export function checkTex(tex: string): { ok: true } | { ok: false; error: string
   }
 }
 
-/** 把一个 LaTeX 片段渲染成 MathML（块级） */
+/** 一个 LaTeX 片段 → MathML（导出用；Word 与浏览器都认） */
 export function texToMathml(tex: string): string {
-  return render(tex, true)
+  return render(tex, true, 'mathml')
+}
+
+/** 一个 LaTeX 片段 → KaTeX HTML（界面用） */
+export function texToHtml(tex: string, display = true): string {
+  return render(tex, display, 'html')
 }
 
 /**
  * 把一段**混着数学的正文**渲染成 HTML：`$...$` 变 MathML，其余原样转义。
  * 模型写的题面就走这条路——它只负责在句子里放 `$...$`，数学本体来自构造。
  */
-export function renderMathInText(text: string): string {
+export function renderMathInText(text: string, mode: MathMode = 'html'): string {
   let out = ''
   let cursor = 0
   for (const match of text.matchAll(MATH_PATTERN)) {
@@ -70,7 +83,7 @@ export function renderMathInText(text: string): string {
     const block = match[1]
     const inline = match[2]
     out += escapeHtml(text.slice(cursor, index))
-    out += render(block ?? inline ?? '', block !== undefined)
+    out += render(block ?? inline ?? '', block !== undefined, mode)
     cursor = index + whole.length
   }
   out += escapeHtml(text.slice(cursor))

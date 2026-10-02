@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import { renderMathInText, texToMathml } from '@examharness/core'
+import { renderMathInText, texToHtml, texToMathml } from '@examharness/core'
 import type { Blueprint, BlueprintRow, Item, SessionMeta, SettingsOp } from '@examharness/core'
 import z from 'schemastery'
 
@@ -827,16 +827,16 @@ function summarizeWith(item: Item, figureSvg: string): Record<string, unknown> {
     stem: item.prose.stem,
     answer: item.prose.answerText,
     // 正文里的 $...$ 与构造给的 LaTeX 都在服务端渲染成 MathML：界面不引数学库
-    stemHtml: renderMathInText(item.prose.stem),
-    answerHtml: renderMathInText(item.prose.answerText),
-    solutionHtml: item.prose.solution.map((step) => renderMathInText(step)),
+    stemHtml: renderMathInText(item.prose.stem, 'html'),
+    answerHtml: renderMathInText(item.prose.answerText, 'html'),
+    solutionHtml: item.prose.solution.map((step) => renderMathInText(step, 'html')),
     ...(tex === undefined
       ? {}
       : {
           tex: {
-            ...(tex.stem === undefined ? {} : { stem: tex.stem, stemMath: texToMathml(tex.stem) }),
-            ...(tex.answer === undefined ? {} : { answer: tex.answer, answerMath: texToMathml(tex.answer) }),
-            solution: (tex.solution ?? []).map((part) => ({ tex: part, math: texToMathml(part) })),
+            ...(tex.stem === undefined ? {} : { stem: tex.stem, stemMath: texToHtml(tex.stem) }),
+            ...(tex.answer === undefined ? {} : { answer: tex.answer, answerMath: texToHtml(tex.answer) }),
+            solution: (tex.solution ?? []).map((part) => ({ tex: part, math: texToHtml(part) })),
           },
         }),
     figure: figureSvg,

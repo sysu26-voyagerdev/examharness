@@ -1021,6 +1021,8 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     '说话要短：一句话说清你做了什么、发现了什么。**不要写报告**——不写 Markdown 标题、不加粗、',
     '不列表格、不复述工具原始输出，也不要重复题目全文（卷子页上就有）。',
     '拿不准老师要什么时，问**一个**具体问题就停（别自己替他决定）。',
+    '**别再翻上一轮的产物**：工作区里的 out/、tmp/ 是以前的草稿，除非这次任务需要，不要一上来就重读。',
+    '同一个问题（比如卷头分数与题位合计对不上）**只说一次**；说过就别再反复问。',
     '',
     `本次卷子：${blueprint.paper.title}（${blueprint.paper.className}，${blueprint.paper.totalScore} 分，${blueprint.paper.minutes} 分钟）`,
     '题位：',

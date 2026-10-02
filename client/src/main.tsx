@@ -1,6 +1,8 @@
 import { StrictMode, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { CssBaseline, ThemeProvider } from '@mui/material'
+// 数学排版靠 KaTeX 自己的 CSS（界面用它的 HTML 输出；导出才用 MathML）
+import 'katex/dist/katex.min.css'
 import { App } from './App.js'
 import { makeTheme } from './theme.js'
 
