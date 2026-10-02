@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
-import type { Blueprint, BlueprintRow, FigureSpec, Item } from '@examharness/core'
+import type { Blueprint, BlueprintRow, FunctionGraphSpec, Item } from '@examharness/core'
 import * as bankPlugin from '@examharness/plugin-bank'
 import * as constructPlugin from '@examharness/plugin-construct-parabola'
 import * as figurePlugin from '@examharness/plugin-figure'
@@ -61,7 +61,12 @@ afterEach(async () => {
   rmSync(workdir, { recursive: true, force: true })
 })
 
-const specOf = (quadratics: FigureSpec['quadratics'], points: FigureSpec['points'], domain: readonly [number, number]): FigureSpec => ({
+// FigureSpec 现在是联合类型（函数图 / 平面几何），这里明确是函数图那支
+const specOf = (
+  quadratics: FunctionGraphSpec['quadratics'],
+  points: FunctionGraphSpec['points'],
+  domain: readonly [number, number],
+): FunctionGraphSpec => ({
   kind: 'function-graph',
   quadratics,
   domain,
@@ -73,7 +78,7 @@ describe('图形渲染与第四道闸门', () => {
     const ctx = await boot()
     const item = ctx.construct.generate(row(0), 42)
 
-    const artifact = ctx.figure.render(item.figure?.spec as FigureSpec)
+    const artifact = ctx.figure.render(item.figure?.spec as FunctionGraphSpec)
     expect(artifact.svg).toContain('<polyline')
     expect(artifact.assertions.pointsOnCurve).toBe(true)
     expect(artifact.assertions.distinctPoints).toBe(true)

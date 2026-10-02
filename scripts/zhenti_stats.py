@@ -933,9 +933,9 @@ def parse_paper(path: str, txt_path: str | None = None) -> dict:
             and abs(g["declaredPerScore"] * g["declaredCount"] - g["declaredTotal"]) > 0.01
         ):
             rec["notes"].append(
-                f"第{g['qFrom']}-{g['qTo']}题：标题“每小题{g['declaredPerScore']}分 × "
-                f"{g['declaredCount']}题 = {g['declaredPerScore']*g['declaredCount']}分”"
-                f"与标题“共{g['declaredTotal']}分”不符，采用前者"
+                f"第{g['qFrom']}-{g['qTo']}题：标题“每小题{g['declaredPerScore']:g}分 × "
+                f"{g['declaredCount']}题 = {g['declaredPerScore']*g['declaredCount']:g}分”"
+                f"与标题“共{g['declaredTotal']:g}分”不符，采用前者"
             )
             g["declaredTotal"] = None
         if g["declaredTotal"] is not None:
@@ -979,7 +979,7 @@ def parse_paper(path: str, txt_path: str | None = None) -> dict:
     ]
     for g in suspect:
         rec["notes"].append(
-            f"第{g['qFrom']}-{g['qTo']}题：标题写“共{g['declaredTotal']}分”但声明 {g['count']} 题，"
+            f"第{g['qFrom']}-{g['qTo']}题：标题写“共{g['declaredTotal']:g}分”但声明 {g['count']} 题，"
             f"平均每题不足 1 分，判定为原文笔误/丢字，该段分值记 unknown"
         )
         g["scoreSum"] = None
@@ -1232,7 +1232,7 @@ def build_report(records: list[dict], struct_meta: dict) -> str:
         qs = collections.Counter(r["questionCount"] for r in rs if r.get("questionCount"))
         mins_s = "、".join(f"{k}分钟({v})" for k, v in mins.most_common(3)) or "unknown"
         qs_s = "、".join(f"{k}题({v})" for k, v in qs.most_common(3)) or "unknown"
-        A(f"| {s} | {len(rs)} | {_pct(len(rs), len(papers))} | {mins_s} | {qs_s} |")
+        A(f"| {s:g} | {len(rs)} | {_pct(len(rs), len(papers))} | {mins_s} | {qs_s} |")
     if unknown_score:
         A(f"| unknown | {len(unknown_score)} | {_pct(len(unknown_score), len(papers))} | - | - |")
     A("")
@@ -1251,19 +1251,20 @@ def build_report(records: list[dict], struct_meta: dict) -> str:
         sig_counter[(r["totalScore"], sig)].append(r)
 
     def per_summary(rs: list[dict]) -> str:
+        """每个大题里“每题多少分”的众数。用 大题总分 ÷ 题数 反推，比看标题更可靠。"""
         out = []
         for t in ("选择", "填空", "解答"):
-            c = collections.Counter(
-                g["perScore"]
-                for r in rs
-                for g in r["sections"]
-                if g["type"] == t and isinstance(g.get("perScore"), (int, float))
-            )
+            c = collections.Counter()
+            for r in rs:
+                for g in r["sections"]:
+                    if g["type"] != t or not g.get("scoreSum") or not g["count"]:
+                        continue
+                    c[round(g["scoreSum"] / g["count"], 2)] += 1
             if c:
                 per, n = c.most_common(1)[0]
                 out.append(f"{t}{per:g}分({n})")
             else:
-                out.append(f"{t}分值未知")
+                out.append(f"{t}未知")
         return "；".join(out)
 
     A("| # | 满分 | 结构（题型 × 题数） | 样本数 | 占该制式 | 每小题分值众数（支持卷数） | 平均总题数 |")
@@ -1304,20 +1305,16 @@ def build_report(records: list[dict], struct_meta: dict) -> str:
         sums = collections.Counter(
             g["scoreSum"] for g in rows if g.get("scoreSum") is not None
         )
-        A("| 题数 | 卷数 | | 每小题分值 | 卷数 | | 大题总分 | 卷数 |")
-        A("|---|---|---|---|---|---|---|---|")
+        A("| 题数 | 卷数 | 每小题分值 | 卷数 | 大题总分 | 卷数 |")
+        A("|---|---|---|---|---|---|")
         c_list = cnts.most_common(6)
         p_list = pers.most_common(6)
         s_list = sums.most_common(6)
         for i in range(max(len(c_list), len(p_list), len(s_list))):
             c_cell = f"{c_list[i][0]}题 | {c_list[i][1]}" if i < len(c_list) else " | "
-            p_cell = (
-                f"{p_list[i][0]:g}分 | {p_list[i][1]}" if i < len(p_list) else " | "
-            )
-            s_cell = (
-                f"{s_list[i][0]:g}分 | {s_list[i][1]}" if i < len(s_list) else " | "
-            )
-            A(f"| {c_cell} | | {p_cell} | | {s_cell} |")
+            p_cell = f"{p_list[i][0]:g}分 | {p_list[i][1]}" if i < len(p_list) else " | "
+            s_cell = f"{s_list[i][0]:g}分 | {s_list[i][1]}" if i < len(s_list) else " | "
+            A(f"| {c_cell} | {p_cell} | {s_cell} |")
         A("")
 
     # --- 各分值制式下最常见结构的细目 ---
@@ -1489,26 +1486,28 @@ def build_report(records: list[dict], struct_meta: dict) -> str:
     for n, c in reasons.most_common(25):
         A(f"| {n} | {c} |")
     A("")
-    A(f"非完整解析的卷子共 {sum(1 for r in records if r['parseStatus'] != 'ok')} 份，"
-      f"下面只列**含卷面**的那些（答案/解析版单列在上面的统计表里）：")
+    A(f"进入结构统计的 {len(papers)} 份卷子里，非完整解析的有 {len(partial) + len(no_q)} 份"
+      f"（下面最多列 40 份，全部记录见 `structure.json`）；答案/解析版单列在最后。")
     A("")
+    partial_list = [r for r in papers if r["parseStatus"] != "ok"]
     shown = 0
-    for r in records:
-        if r["parseStatus"] == "ok":
-            continue
-        if r["parseStatus"] == "answer-only":
-            continue
+    for r in partial_list:
+        if shown >= 40:
+            A(f"- ……另有 {len(partial_list) - shown} 份，理由同上，逐份见 `structure.json` 的 `notes`。")
+            break
         shown += 1
-        A(f"- `{r['fileName']}` → **{r['parseStatus']}**；" + "；".join(r.get("notes", [])[:4] or ["-"])[:260])
-    if not shown:
+        A(
+            f"- `{r['fileName']}` → **{r['parseStatus']}**；"
+            + "；".join(r.get("notes", [])[:3] or ["-"])[:220]
+        )
+    if not partial_list:
         A("- （无）")
     A("")
-    A("答案/解析版（不含卷面，共 "
-      f"{sum(1 for r in records if r['parseStatus']=='answer-only')} 份）：")
+    ans_only = [r for r in records if r["parseStatus"] == "answer-only"]
+    A(f"答案/解析版（不含卷面，共 {len(ans_only)} 份，全部排除在统计之外）：")
     A("")
-    for r in records:
-        if r["parseStatus"] == "answer-only":
-            A(f"- `{r['fileName']}`")
+    for r in ans_only:
+        A(f"- `{r['fileName']}`")
     A("")
 
     # --- 原文自相矛盾的卷子（总分/大题分值对不上）---
