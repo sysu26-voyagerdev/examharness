@@ -26,8 +26,10 @@ export interface AppValue {
   log: readonly LogEntryView[]
   /** 正在跑的主线（没有就是 null） */
   running: RunAgentView | null
-  /** 正在跑的**所有** agent：主线 + 子任务（子任务是 agent 自己派的） */
+  /** **当前会话**里在跑的 agent：主线 + 子任务（子任务是 agent 自己派的） */
   agents: readonly RunAgentView[]
+  /** **别的会话**正在跑的一轮（只提示，不挡人：会话之间互不影响） */
+  elsewhere: readonly RunAgentView[]
   /** 正在做的动作（工具名 + 开始时间）：界面显示"正在…（已 n 秒）" */
   doing: { what: string; agent: string; at: number } | null
   live: readonly LiveEvent[]

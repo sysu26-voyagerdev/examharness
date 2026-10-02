@@ -253,4 +253,17 @@ describe('子 agent（并行、可查、可收）', () => {
     expect(() => ctx.workbench.start({ goal: '第五个', blueprint, parent: parent.runId })).toThrow(/最多同时派/u)
     await parent.done
   })
+
+  it('会话之间互不影响：一个会话在跑，另一个会话照样能发起', async () => {
+    const ctx = await boot({ chat: quick })
+    const first = ctx.workbench.start({ goal: '初三(2)班的卷子', blueprint, workspace: 'class-a' })
+    expect(() => ctx.workbench.start({ goal: '同一个会话再来一轮', blueprint, workspace: 'class-a' })).toThrow(/这个会话已经有/u)
+
+    // 另一个会话：照常
+    const second = ctx.workbench.start({ goal: '初三(3)班的卷子', blueprint, workspace: 'class-b' })
+    expect(ctx.workbench.active().map((run) => run.goal).toSorted()).toEqual(['初三(2)班的卷子', '初三(3)班的卷子'])
+
+    await Promise.all([first.done, second.done])
+    expect(ctx.workbench.active()).toHaveLength(0)
+  })
 })

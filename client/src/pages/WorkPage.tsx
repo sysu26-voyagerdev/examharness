@@ -49,7 +49,7 @@ export function diffVersions(before: VersionView | undefined, after: VersionView
 
 export function WorkPage(): React.JSX.Element {
   const app = useApp()
-  const { session, state, log, running, agents, doing, busy } = app
+  const { session, state, log, running, agents, elsewhere, doing, busy } = app
 
   const [draft, setDraft] = useState('')
   const [tab, setTab] = useState<(typeof TABS)[number]['key']>('paper')
@@ -202,6 +202,13 @@ export function WorkPage(): React.JSX.Element {
           </Stack>
         </Box>
         <Divider />
+        {elsewhere.length > 0 && (
+          // 别的会话在跑：只说一句，不挡人（会话之间互不影响）
+          <Alert severity="info" icon={false} sx={{ mx: 2, my: 1 }}>
+            别的会话正在出卷子（{elsewhere.map((run) => run.label ?? run.goal.slice(0, 12)).join('、')}）——
+            这里不受影响，可以照常发起。
+          </Alert>
+        )}
         {/* 谁在干活：主线 + agent 自己派出去的子任务（它们并行跑，记录要分得开） */}
         {(running !== null || children.length > 0) && (
           <Stack direction="row" spacing={1} sx={{ px: 2, py: 1, alignItems: 'center', flexWrap: 'wrap' }}>

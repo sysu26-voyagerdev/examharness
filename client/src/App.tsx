@@ -73,8 +73,15 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
   const [kb, setKb] = useState<KbListView | null>(null)
   const [log, setLog] = useState<readonly LogEntryView[]>([])
   const [runs, setRuns] = useState<readonly RunAgentView[]>([])
-  /** 主线（老师直接起的那一轮）：没有就是空闲 */
-  const running = runs.find((run) => run.parent === undefined) ?? null
+  /**
+   * **当前会话**在跑的那一轮：没有就是空闲。
+   * 按会话分（而不是全局）：别的会话在跑不该挡住我这一轮——会话是各自独立的。
+   */
+  const mine = session?.meta.id ?? ''
+  const running =
+    runs.find((run) => run.parent === undefined && (run.workspace === '' || run.workspace === mine)) ?? null
+  /** 别的会话正在跑（界面上只提示一句，不挡人） */
+  const elsewhere = runs.filter((run) => run.parent === undefined && run.workspace !== '' && run.workspace !== mine)
   /** 正在做的动作（工具名 + 什么时候开始的），用来显示"正在…（已 n 秒）" */
   const [doing, setDoing] = useState<{ what: string; agent: string; at: number } | null>(null)
   const [live, setLive] = useState<readonly LiveEvent[]>([])
@@ -193,7 +200,8 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       kb,
       log,
       running,
-      agents: runs,
+      elsewhere,
+      agents: runs.filter((run) => run.workspace === '' || run.workspace === mine),
       doing,
       live,
       busy,

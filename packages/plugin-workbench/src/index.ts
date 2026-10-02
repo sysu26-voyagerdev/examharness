@@ -600,13 +600,22 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     done: Promise<WorkbenchRun>;
   } {
     const isChild = request.parent !== undefined && request.parent !== "";
-    // 顶层轮次仍然只允许一个（那是老师的工作台）；**子任务可以并行**——
-    // 主线在写题型的时候，另一个子 agent 可以去读真题、核对数据。
+    // **一个"工作区"同时只跑一轮**——工作区就是会话（或者一次资料整理）。
+    // 会话之间**互不影响**：初三(2)班在出卷子，不该挡住另一个班的那一轮
+    // （以前这里是全局互斥，老师的感觉是"别的会话卡住了我"，那是不对的）。
+    const here = this.openWorkspace(request.workspace);
+    const where = here?.name ?? request.workspace ?? "";
+    const workspaceOf = (state: RunState): string => state.workspace?.name ?? state.request.workspace ?? "";
     if (!isChild) {
-      const top = [...this.runs.values()].filter((state) => (state.parent ?? "") === "");
-      if (top.length > 0) {
-        const running = top[0];
-        throw new Error(`已经有 agent 在跑（${running?.id ?? "?"}）：等它结束，或者让它停下来`);
+      const busy = [...this.runs.values()].filter(
+        (state) => (state.parent ?? "") === "" && workspaceOf(state) === where,
+      );
+      if (busy.length > 0) {
+        const running = busy[0];
+        throw new Error(
+          `这个会话已经有 agent 在跑（${running?.id ?? "?"}）：等它结束、或者按停它。` +
+            "别的会话不受影响，可以照常发起。",
+        );
       }
     } else {
       const siblings = [...this.runs.values()].filter((state) => state.parent === request.parent);
@@ -617,7 +626,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       }
     }
     const id = `r${String(Date.now())}-${String((this.counter += 1))}`;
-    const workspace = this.openWorkspace(request.workspace);
+    const workspace = here;
     const state: RunState = {
       id,
       request,
@@ -726,7 +735,13 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   active(): readonly WorkbenchRunState[] {
     return [...this.runs.values()].map((state) =>
       Object.assign(
-        { id: state.id, goal: state.request.goal, steps: state.steps, workspace: state.workspace?.name ?? "" },
+        {
+          id: state.id,
+          goal: state.request.goal,
+          steps: state.steps,
+          // 工作区名：优先用打开后的句柄（真名），退回到请求里给的那个
+          workspace: state.workspace?.name ?? state.request.workspace ?? "",
+        },
         state.label === undefined ? {} : { label: state.label },
         state.parent === undefined ? {} : { parent: state.parent },
       ),

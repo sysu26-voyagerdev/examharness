@@ -35,7 +35,7 @@ import type { SessionMetaView } from '../types.js'
  */
 export function SessionsPage(): React.JSX.Element {
   const app = useApp()
-  const { sessions, session, kb, busy } = app
+  const { sessions, session, kb, busy, agents, elsewhere } = app
   const defaults = sessions?.defaults ?? { className: '', progress: '', blueprintPath: '' }
   const list = sessions?.sessions ?? []
   const groups = sessions?.groups ?? []
@@ -97,6 +97,9 @@ export function SessionsPage(): React.JSX.Element {
               {meta.title}
             </Typography>
             {session?.meta.id === meta.id && <Chip size="small" variant="outlined" label="正在用" />}
+            {[...agents, ...elsewhere].some((run) => run.workspace === meta.id) && (
+              <Chip size="small" color="primary" variant="outlined" label="在跑" />
+            )}
             {meta.frozen && <Chip size="small" variant="outlined" icon={<CheckCircleIcon />} label="已定稿" />}
           </Stack>
         }
