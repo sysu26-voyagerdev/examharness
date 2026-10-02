@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AddCommentOutlinedIcon from '@mui/icons-material/AddCommentOutlined'
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined'
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined'
@@ -66,6 +66,8 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
   const [running, setRunning] = useState<{ runId: string; goal: string; workspace: string } | null>(null)
   const [live, setLive] = useState<readonly LiveEvent[]>([])
   const [busy, setBusy] = useState('')
+  // 当前在跑的那一轮属于哪个工作区：判定事件要跟着它走（用 ref，避免闭包拿到旧值）
+  const runningNow = useRef('')
   const [error, setError] = useState('')
 
   const reload = useCallback(async () => {
@@ -90,12 +92,18 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       (event) => {
         if (event.kind !== 'stored' && event.kind !== 'rejected' && event.kind !== 'confirmed') return
         setLive((previous) => [event, ...previous].slice(0, 20))
-        setLog((previous) => appendLive(previous, event))
+        // 判定属于当前在跑的那一轮（不再"两边都显示"）
+        setLog((previous) => appendLive(previous, event, runningNow.current))
       },
       (signal) => {
-        if (signal.kind === 'started') setRunning({ runId: signal.runId, goal: signal.goal, workspace: signal.workspace })
-        if (signal.kind === 'done') setRunning((current) => (current?.runId === signal.runId ? null : current))
-        else setLog((previous) => appendSignal(previous, signal))
+        if (signal.kind === 'started') {
+          runningNow.current = signal.workspace
+          setRunning({ runId: signal.runId, goal: signal.goal, workspace: signal.workspace })
+        }
+        if (signal.kind === 'done') {
+          if (signal.workspace === runningNow.current) runningNow.current = ''
+          setRunning((current) => (current?.runId === signal.runId ? null : current))
+        } else setLog((previous) => appendSignal(previous, signal))
       },
     )
     return unsubscribe
@@ -248,18 +256,15 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
 
   return (
     <AppCtx.Provider value={value}>
-      <AppBar position="fixed" color="primary" elevation={2}>
-        <Toolbar variant="dense" sx={{ gap: 1.5, minHeight: 56 }}>
+      <AppBar>
+        <Toolbar sx={{ gap: 2, minHeight: 60 }}>
           {!wide && (
-            <IconButton color="inherit" edge="start" onClick={() => setDrawerOpen(true)}>
+            <IconButton edge="start" onClick={() => setDrawerOpen(true)}>
               <MenuIcon />
             </IconButton>
           )}
-          <Typography variant="h6" sx={{ fontSize: 17, whiteSpace: 'nowrap' }}>
-            命题组
-          </Typography>
-          <Typography variant="caption" sx={{ opacity: 0.85, display: { xs: 'none', sm: 'block' } }}>
-            ExamHarness
+          <Typography variant="subtitle1" sx={{ whiteSpace: 'nowrap' }}>
+            {NAV.find((entry) => entry.key === page)?.label ?? '命题组'}
           </Typography>
 
           <Box sx={{ flex: 1 }} />
@@ -269,8 +274,8 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
               <Typography variant="body2" noWrap sx={{ maxWidth: 220 }}>
                 {session.meta.title}
               </Typography>
-              <Chip size="small" variant="outlined" label={session.meta.className} sx={{ color: 'inherit', borderColor: 'rgba(255,255,255,.5)' }} />
-              {session.meta.frozen && <Chip size="small" color="warning" label="已定稿" />}
+              <Chip size="small" variant="outlined" label={session.meta.className} />
+              {session.meta.frozen && <Chip size="small" color="warning" variant="outlined" label="已定稿" />}
             </Stack>
           )}
 
@@ -279,6 +284,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
               <Chip
                 size="small"
                 color={runtime.modelConfigured ? 'success' : 'warning'}
+                variant="outlined"
                 label={runtime.modelConfigured ? '模型就绪' : '模型未配置'}
                 onClick={() => value.go('settings')}
               />
@@ -286,24 +292,22 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
           )}
 
           <Tooltip title={dark ? '浅色' : '深色'}>
-            <IconButton color="inherit" onClick={onToggleDark}>
+            <IconButton onClick={onToggleDark}>
               {dark ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />}
             </IconButton>
           </Tooltip>
 
           <Button
-            color="inherit"
             variant="outlined"
             size="small"
             startIcon={<DownloadOutlinedIcon />}
             href={api.exportUrl('html')}
             disabled={session === null || session.versions.length === 0}
-            sx={{ borderColor: 'rgba(255,255,255,.5)' }}
           >
             导出
           </Button>
         </Toolbar>
-        {busy !== '' && <LinearProgress color="secondary" />}
+        {busy !== '' && <LinearProgress />}
       </AppBar>
 
       {wide ? (
@@ -321,9 +325,9 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         sx={{
           flexGrow: 1,
           ml: { md: `${String(DRAWER_WIDTH)}px` },
-          mt: '56px',
-          height: { md: 'calc(100vh - 56px)' },
-          minHeight: 'calc(100vh - 56px)',
+          mt: '60px',
+          height: { md: 'calc(100vh - 60px)' },
+          minHeight: 'calc(100vh - 60px)',
           display: 'flex',
           flexDirection: 'column',
           minWidth: 0,

@@ -183,13 +183,20 @@ export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: R
     onEvent({ ...(JSON.parse(message.data) as object), kind, at: at() } as LiveEvent)
   }
   const step = (message: MessageEvent<string>): void => {
-    const payload = JSON.parse(message.data) as { runId?: string; step: number; kind: RunEventView['kind']; text: string }
+    const payload = JSON.parse(message.data) as {
+      runId?: string
+      step: number
+      kind: RunEventView['kind']
+      text: string
+      workspace?: string
+    }
     onRun({
       kind: 'step',
       ...(payload.runId === undefined ? {} : { runId: payload.runId }),
       step: payload.step,
       stepKind: payload.kind,
       text: payload.text,
+      workspace: payload.workspace ?? '',
     })
   }
   const started = (message: MessageEvent<string>): void => {
@@ -202,8 +209,9 @@ export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: R
       stopped: RunView['stopped']
       steps: number
       stored: readonly string[]
+      workspace?: string
     }
-    onRun({ kind: 'done', ...payload })
+    onRun({ kind: 'done', ...payload, workspace: payload.workspace ?? '' })
   }
   const handlers: [string, (message: MessageEvent<string>) => void][] = [
     ['stored', simple('stored')],

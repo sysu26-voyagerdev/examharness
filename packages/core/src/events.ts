@@ -25,7 +25,14 @@ declare module '@deepseek-ai/cordis' {
     /** 一轮 agent 循环开始（emit，仅广播；界面据此把"正在跑"显示出来） */
     'run:started'(payload: { runId: string; goal: string; workspace: string; label?: string }): void
     /** 工作台的一步（emit，仅广播；界面实时显示 agent 在干什么） */
-    'run:step'(payload: { runId: string; step: number; kind: 'assistant' | 'tool' | 'gate' | 'user'; text: string }): void
+    'run:step'(payload: {
+      runId: string
+      step: number
+      kind: 'assistant' | 'tool' | 'gate' | 'user'
+      text: string
+      /** 属于哪个工作区：界面靠它把"这个会话的活"和"这一批资料的活"分开 */
+      workspace: string
+    }): void
     /** 一轮结束（emit，仅广播；界面据此收尾并刷新数据） */
     'run:done'(payload: {
       runId: string

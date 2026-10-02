@@ -7,6 +7,8 @@ import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Card from '@mui/material/Card'
 import CardContent from '@mui/material/CardContent'
+import CardHeader from '@mui/material/CardHeader'
+import Divider from '@mui/material/Divider'
 import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
 import Stack from '@mui/material/Stack'
@@ -91,13 +93,19 @@ export function WorkPage(): React.JSX.Element {
   }
 
   return (
-    <Box sx={{ display: 'flex', height: '100%', minHeight: 0, gap: 2, p: 2 }}>
+    <Box sx={{ display: 'flex', height: '100%', minHeight: 0, gap: 2.5, p: 2.5 }}>
       {/* 会话记录 */}
       <Card sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <CardHeader
+          title="工作记录"
+          subheader="你说的、它做的、检查结论，按时间排在一起"
+          action={running !== null ? <Chip color="primary" variant="outlined" label="正在做" /> : undefined}
+        />
+        <Divider />
         <Box sx={{ flex: 1, minHeight: 0 }}>
           <Timeline entries={entries} running={running !== null} />
         </Box>
-        <CardContent sx={{ borderTop: 1, borderColor: 'divider', py: 2 }}>
+        <CardContent sx={{ borderTop: 1, borderColor: 'divider', py: 2, bgcolor: 'action.hover' }}>
           {running !== null && (
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1.5 }}>
               <Chip color="primary" label="正在做" />

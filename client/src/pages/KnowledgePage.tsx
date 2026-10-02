@@ -17,6 +17,7 @@ import Typography from '@mui/material/Typography'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import { FilesView, Timeline } from '../components.js'
+import { forWorkspace } from '../log.js'
 import type { KbBatchView, KbStatus } from '../types.js'
 
 const STATUS: Readonly<Record<KbStatus, { text: string; color?: 'warning' | 'success' | 'info' }>> = {
@@ -45,7 +46,7 @@ export function KnowledgePage(): React.JSX.Element {
   const pending = pasted.trim() === '' ? files : [...files, { name: pastedName === '' ? '粘贴的资料.txt' : pastedName, text: pasted }]
 
   // 只显示**这一批**的活：主 agent 的对话属于工作台，不该混进来
-  const entries = useMemo(() => log.filter((entry) => open !== '' && entry.workspace === open), [log, open])
+  const entries = useMemo(() => forWorkspace(log, open), [log, open])
 
   const pick = async (list: FileList | null): Promise<void> => {
     setReading(true)
@@ -92,12 +93,10 @@ export function KnowledgePage(): React.JSX.Element {
   const batches = kb?.batches ?? []
 
   return (
-    <Box sx={{ display: 'flex', height: '100%', minHeight: 0, gap: 2, p: 2 }}>
+    <Box sx={{ display: 'flex', height: '100%', minHeight: 0, gap: 2.5, p: 2.5 }}>
       <Box sx={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
-        <Typography variant="h5" gutterBottom>
-          资料
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        <Typography variant="h5">资料</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
           给 agent 参考的真资料：真题、课标、教材、教研笔记。整理之后，抽出来的题目会进入可比对的范围。
         </Typography>
 
@@ -200,11 +199,12 @@ export function KnowledgePage(): React.JSX.Element {
           subheader={open === '' ? '选一批资料，这里显示它读到了什么' : (batches.find((batch) => batch.id === open)?.name ?? '')}
           action={running !== null ? <Chip color="warning" label="正在整理" /> : undefined}
         />
+        <Divider />
         <Box sx={{ flex: 1, minHeight: 0 }}>
           {open === '' ? (
             <Box sx={{ p: 3 }}>
               <Typography variant="body2" color="text.secondary">
-                还没有选资料。
+                先选一批资料，这里会显示它读到了什么、抽出了什么。
               </Typography>
             </Box>
           ) : (

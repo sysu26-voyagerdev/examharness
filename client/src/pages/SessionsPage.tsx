@@ -113,7 +113,7 @@ export function SessionsPage(): React.JSX.Element {
   )
 
   return (
-    <Container maxWidth="md" sx={{ py: 3 }}>
+    <Container maxWidth="md" sx={{ py: 4 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 2 }}>
         <Typography variant="h5">会话</Typography>
         <Chip label={`${String(list.length)} 个`} variant="outlined" />

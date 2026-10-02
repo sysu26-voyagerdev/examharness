@@ -237,26 +237,19 @@ export function apply(ctx: Context, config: WebConfig): void {
 
   // 当前在跑的那一轮属于哪个工作区：判定类事件也要归到它名下
   let activeWorkspace = ''
+  /** 记录一定有归属：没有正在跑的轮次，就归当前会话。**没有"两边都显示"这种中间态。** */
+  const owner = (): string => (activeWorkspace === '' ? ctx.session.current().id : activeWorkspace)
   ctx.on('item:stored', ({ item }) => {
-    ctx.session.appendLog({ kind: 'verdict', text: `入库：第 ${item.slot.key} 题`, ...(activeWorkspace === '' ? {} : { workspace: activeWorkspace }) })
+    ctx.session.appendLog({ kind: 'verdict', text: `入库：第 ${item.slot.key} 题`, workspace: owner() })
     broadcast('stored', summarize(item))
   })
   ctx.on('item:confirmed', ({ item, by }) => {
-    ctx.session.appendLog({
-      kind: 'verdict',
-      text: `${by} 确认了第 ${item.slot.key} 题`,
-      ...(activeWorkspace === '' ? {} : { workspace: activeWorkspace }),
-    })
+    ctx.session.appendLog({ kind: 'verdict', text: `${by} 确认了第 ${item.slot.key} 题`, workspace: owner() })
     broadcast('confirmed', { ...summarize(item), by })
   })
   ctx.on('run:started', ({ runId, goal, workspace, label }) => {
     activeWorkspace = workspace
-    ctx.session.appendLog({
-      kind: 'user',
-      text: label ?? goal,
-      runId,
-      ...(workspace === '' ? {} : { workspace }),
-    })
+    ctx.session.appendLog({ kind: 'user', text: label ?? goal, runId, workspace: workspace === '' ? owner() : workspace })
     broadcast('run:started', { runId, goal, workspace, ...(label === undefined ? {} : { label }) })
   })
   ctx.on('run:step', (payload) => {
@@ -267,7 +260,7 @@ export function apply(ctx: Context, config: WebConfig): void {
       kind: payload.kind === 'user' ? 'user' : payload.kind,
       text: tool === undefined ? payload.text : (match?.[2] ?? ''),
       runId: payload.runId,
-      ...(activeWorkspace === '' ? {} : { workspace: activeWorkspace }),
+      workspace: payload.workspace === '' ? owner() : payload.workspace,
       ...(tool === undefined || payload.kind !== 'tool' ? {} : { tool }),
     })
     broadcast('run:step', payload)

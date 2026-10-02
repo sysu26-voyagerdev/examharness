@@ -38,9 +38,15 @@ export function toolLabel(tool: string | undefined): string {
   return TOOL_LABEL[tool] ?? tool
 }
 
-/** 记录里属于某个工作区的行（工作台看会话的，资料页看那一批资料的） */
+/**
+ * 记录里属于某个工作区的行：**严格相等**。
+ *
+ * 以前这里是 `undefined 也算`，结果客户端本地追加的那几行（当时没带 workspace）
+ * 在工作台和资料页都显示——"串"就是这么来的。现在每行都有归属。
+ */
 export function forWorkspace(log: readonly LogEntryView[], workspace: string): readonly LogEntryView[] {
-  return log.filter((entry) => entry.workspace === undefined || entry.workspace === workspace)
+  if (workspace === '') return []
+  return log.filter((entry) => entry.workspace === workspace)
 }
 
 let counter = 0
@@ -61,6 +67,7 @@ export function appendSignal(log: readonly LogEntryView[], signal: RunSignal): r
         kind: signal.stepKind === 'user' ? 'user' : signal.stepKind,
         text: signal.text,
         ...(signal.runId === undefined ? {} : { runId: signal.runId }),
+        ...(signal.workspace === '' ? {} : { workspace: signal.workspace }),
       },
     ]
   }
@@ -68,13 +75,14 @@ export function appendSignal(log: readonly LogEntryView[], signal: RunSignal): r
 }
 
 /** 判定类事件（入库/没通过/确认）也进同一条时间线 */
-export function appendLive(log: readonly LogEntryView[], event: LiveEvent): readonly LogEntryView[] {
+export function appendLive(log: readonly LogEntryView[], event: LiveEvent, workspace = ''): readonly LogEntryView[] {
   const at = event.at
+  const owner = workspace === '' ? {} : { workspace }
   if (event.kind === 'stored') {
-    return [...log, { id: localId(), at, kind: 'verdict', text: `入库：第 ${event.slot ?? ''} 题` }]
+    return [...log, { id: localId(), at, kind: 'verdict', text: `入库：第 ${event.slot ?? ''} 题`, ...owner }]
   }
   if (event.kind === 'confirmed') {
-    return [...log, { id: localId(), at, kind: 'verdict', text: `${event.by ?? '老师'}确认了第 ${event.slot ?? ''} 题` }]
+    return [...log, { id: localId(), at, kind: 'verdict', text: `${event.by ?? '老师'}确认了第 ${event.slot ?? ''} 题`, ...owner }]
   }
   if (event.kind === 'rejected') {
     const verdict = event.verdict
@@ -85,6 +93,7 @@ export function appendLive(log: readonly LogEntryView[], event: LiveEvent): read
         at,
         kind: 'verdict',
         text: verdict === undefined ? '有一道题没通过' : `没通过「${verdict.gate}」：${verdict.reason}`,
+        ...owner,
       },
     ]
   }

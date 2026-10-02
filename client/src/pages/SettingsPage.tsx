@@ -108,7 +108,7 @@ export function SettingsPage(): React.JSX.Element {
   }
 
   return (
-    <Container maxWidth="sm" sx={{ py: 3 }}>
+    <Container maxWidth="sm" sx={{ py: 4 }}>
       <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 2 }}>
         <Typography variant="h5">设置</Typography>
         <Typography variant="caption">{note === '' ? '改完立刻生效' : note}</Typography>

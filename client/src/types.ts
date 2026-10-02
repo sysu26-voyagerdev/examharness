@@ -237,8 +237,8 @@ export interface RunView {
 /** agent 循环的生命周期信号（SSE 里的 run:*） */
 export type RunSignal =
   | { kind: 'started'; runId: string; goal: string; workspace: string }
-  | { kind: 'step'; runId?: string; step: number; stepKind: RunEventView['kind']; text: string }
-  | { kind: 'done'; runId: string; stopped: RunView['stopped']; steps: number; stored: readonly string[] }
+  | { kind: 'step'; runId?: string; step: number; stepKind: RunEventView['kind']; text: string; workspace: string }
+  | { kind: 'done'; runId: string; stopped: RunView['stopped']; steps: number; stored: readonly string[]; workspace: string }
 
 export interface LiveEvent {
   kind:

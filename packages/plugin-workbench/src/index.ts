@@ -419,7 +419,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     const say = (step: number, kind: WorkbenchEvent['kind'], text: string): void => {
       state.transcript.push({ step, kind, text })
       // 实时推给界面：工作记录是"看得见的 agent"，不是跑完才出现的一坨
-      this.ctx.emit('run:step', { runId: state.id, step, kind, text })
+      this.ctx.emit('run:step', { runId: state.id, step, kind, text, workspace: workspace?.name ?? '' })
     }
 
     const finish = (stopped: WorkbenchRun['stopped']): WorkbenchRun => {
