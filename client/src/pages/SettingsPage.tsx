@@ -1,58 +1,64 @@
 import { useEffect, useState } from 'react'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
+import Container from '@mui/material/Container'
+import Divider from '@mui/material/Divider'
+import MenuItem from '@mui/material/MenuItem'
+import Paper from '@mui/material/Paper'
+import Switch from '@mui/material/Switch'
+import TextField from '@mui/material/TextField'
+import Typography from '@mui/material/Typography'
+import { Flex } from '../components.js'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import type { AppSettingsView } from '../types.js'
 
 /**
- * 设置：**能改的都当场生效，改不了的明说**。
+ * 设置：模型、联网、资料目录、新会话默认值、判重标准。
  *
- * 密钥这块照 DeepSeek Harness 的做法（docs/agent/06 ADR-0022）：
- *   - 后端只回 {已配置/未配置, 来源, 能不能改}，**值从不回传**；所以界面上永远看不到密钥；
- *   - 因为看不到，就**不能整体替换**设置：写入是按路径的补丁（`{path, value}`），
- *     否则"保存"会把界面从没见过的密钥一起删掉；
- *   - 写入带修订号：别人改过了就明确报冲突，而不是默默覆盖。
+ * 两条规矩：
+ *   1. **密钥只写不读**——页面上永远看不到它，只显示"配没配"和"从哪来"（照 DSH 的做法）；
+ *   2. 保存是**按路径改**而不是整体覆盖：界面看不到密钥，整体覆盖会把它一起抹掉。
  */
 
-const MODEL_KEY_REF = 'model.apiKeyEnv'
-
-/** 按叶子路径比对出补丁（数组整片替换，对象逐层下钻） */
 function diffOps(base: unknown, next: unknown, path: readonly string[] = []): api.SettingsOp[] {
   if (base === next) return []
   const bothObjects =
     typeof base === 'object' && base !== null && typeof next === 'object' && next !== null && !Array.isArray(base) && !Array.isArray(next)
   if (!bothObjects) return [{ path, value: next }]
-  const keys = new Set([...Object.keys(base as object), ...Object.keys(next as object)])
-  return [...keys].flatMap((key) =>
-    key === MODEL_KEY_REF.split('.').at(-1) && path.length === 1 && path[0] === 'model'
-      ? [] // 密钥引用名不在界面上改
+  return [...new Set([...Object.keys(base as object), ...Object.keys(next as object)])].flatMap((key) =>
+    // 密钥的引用名不在界面上改
+    path.length === 1 && path[0] === 'model' && key === 'apiKeyEnv'
+      ? []
       : diffOps((base as Record<string, unknown>)[key], (next as Record<string, unknown>)[key], [...path, key]),
   )
 }
 
 export function SettingsPage(): React.JSX.Element {
   const app = useApp()
-  const { settings, busy, error } = app
+  const { settings, busy } = app
   const [draft, setDraft] = useState<AppSettingsView | null>(null)
-  const [saved, setSaved] = useState('')
+  const [note, setNote] = useState('')
   const [keyInput, setKeyInput] = useState('')
   const [models, setModels] = useState<readonly { id: string; name: string }[]>([])
   const [fetching, setFetching] = useState(false)
 
-  // 只灌一次：之后 SSE 触发的 reload 不该把正在编辑的内容冲掉
+  // 只灌一次：后台刷新不该把正在编辑的内容冲掉
   useEffect(() => {
     if (draft === null && settings !== null) {
-      const { apiKey: _ignored, ...model } = settings.app.model
+      const { apiKey: _info, ...model } = settings.app.model
       setDraft({ ...settings.app, model })
     }
   }, [settings, draft])
 
   if (settings === null || draft === null) {
     return (
-      <div className="page">
-        <div className="wrap">
-          <div className="hint">正在读取设置…</div>
-        </div>
-      </div>
+      <Container maxWidth="sm" sx={{ py: 4 }}>
+        <Typography variant="body2" color="text.secondary">
+          正在读取…
+        </Typography>
+      </Container>
     )
   }
 
@@ -60,21 +66,19 @@ export function SettingsPage(): React.JSX.Element {
   const key = settings.app.model.apiKey
   const edit = (patch: Partial<AppSettingsView>): void => {
     setDraft({ ...draft, ...patch })
-    setSaved('')
+    setNote('')
   }
   const dirs = draft.corpusDirs
-  const setDir = (index: number, value: string): void => edit({ corpusDirs: dirs.map((dir, at) => (at === index ? value : dir)) })
 
-  /** 保存：只发改动过的那几片（整体替换会删掉密钥） */
   const save = (): void => {
     const ops = diffOps(settings.app, { ...draft, model: { ...draft.model, apiKeyEnv: settings.app.model.apiKeyEnv } })
     if (ops.length === 0) {
-      setSaved('没有改动')
+      setNote('没有改动')
       return
     }
     void app.guard('settings', async () => {
       await api.patchSettings(ops, settings.revision)
-      setSaved(`已保存 ${String(ops.length)} 项（立刻生效）`)
+      setNote('已保存')
       await app.reload()
     })
   }
@@ -84,15 +88,7 @@ export function SettingsPage(): React.JSX.Element {
     void app.guard('key', async () => {
       await api.setCredential(key.ref, keyInput)
       setKeyInput('')
-      setSaved('密钥已保存（只进不出，界面上不会再显示）')
-      await app.reload()
-    })
-  }
-
-  const clearKey = (): void => {
-    void app.guard('key', async () => {
-      await api.setCredential(key.ref, null)
-      setSaved('密钥已清除')
+      setNote('密钥已保存（页面上不会再显示它）')
       await app.reload()
     })
   }
@@ -101,259 +97,240 @@ export function SettingsPage(): React.JSX.Element {
     setFetching(true)
     void app
       .guard('models', async () => {
-        // 先试后存：输入框里刚填的新密钥可以一次性带上，不落盘
-        const result = await api.discoverModels(
-          draft.model.baseUrl,
-          keyInput === '' ? undefined : keyInput,
-        )
+        const result = await api.discoverModels(draft.model.baseUrl, keyInput === '' ? undefined : keyInput)
         setModels(result.models)
-        setSaved(`拉到 ${String(result.models.length)} 个模型`)
+        setNote(`找到了 ${String(result.models.length)} 个模型`)
       })
       .finally(() => setFetching(false))
   }
 
   return (
-    <div className="page">
-      <div className="wrap">
-        <div className="pagehd">
-          <h1>设置</h1>
-          <span className="hint">{saved === '' ? '改动即时生效，落盘 data/settings.json' : saved}</span>
-          <span className="r">
-            <button className="pri" disabled={busy !== ''} onClick={save}>
-              保存
-            </button>
-          </span>
-        </div>
+    <Container maxWidth="sm" sx={{ py: 3 }}>
+      <Flex row gap={2} align="center" sx={{ mb: 2 }}>
+        <Typography variant="h2">设置</Typography>
+        <Typography variant="caption">{note === '' ? '改完立刻生效' : note}</Typography>
+        <Box sx={{ flex: 1 }} />
+        <Button variant="contained" size="small" disabled={busy !== ''} onClick={save}>
+          保存
+        </Button>
+      </Flex>
 
-        {error !== '' && <div className="hint err">{error}</div>}
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
+        <Typography variant="h3" sx={{ mb: 1.5 }}>
+          模型
+        </Typography>
+        <Flex gap={2}>
+          <TextField
+            label="API 地址"
+            value={draft.model.baseUrl}
+            placeholder="https://api.deepseek.com/v1"
+            onChange={(event) => edit({ model: { ...draft.model, baseUrl: event.target.value } })}
+          />
+          <Flex row gap={1} align="flex-end">
+            <TextField
+              label="模型"
+              fullWidth
+              value={draft.model.model}
+              placeholder="deepseek-chat"
+              onChange={(event) => edit({ model: { ...draft.model, model: event.target.value } })}
+            />
+            <Button size="small" disabled={busy !== '' || fetching} onClick={fetchModels}>
+              获取可用模型
+            </Button>
+          </Flex>
+          {models.length > 0 && (
+            <TextField
+              select
+              label="从拉到的列表里选"
+              value=""
+              onChange={(event) => edit({ model: { ...draft.model, model: event.target.value } })}
+            >
+              {models.map((entry) => (
+                <MenuItem key={entry.id} value={entry.id}>
+                  {entry.id}
+                </MenuItem>
+              ))}
+            </TextField>
+          )}
 
-        {/* ── 模型（照 DSH 的模型卡片：地址 / 密钥 / 模型 / 拉列表）── */}
-        <div className="panel card2">
-          <div className="grid2">
-            <div className="field">
-              <label>API 地址</label>
-              <input
-                value={draft.model.baseUrl}
-                placeholder="https://api.deepseek.com/v1"
-                onChange={(event) => edit({ model: { ...draft.model, baseUrl: event.target.value } })}
-              />
-            </div>
-            <div className="field">
-              <label>模型</label>
-              <input
-                value={draft.model.model}
-                placeholder="deepseek-chat"
-                list="model-options"
-                onChange={(event) => edit({ model: { ...draft.model, model: event.target.value } })}
-              />
-              <datalist id="model-options">
-                {models.map((entry) => (
-                  <option key={entry.id} value={entry.id} />
-                ))}
-              </datalist>
-            </div>
-          </div>
-
-          <div className="field">
-            <label>
-              API 密钥　<span className="mono">{key.ref}</span>
-            </label>
+          <Divider />
+          <Box>
+            <Typography variant="body2" sx={{ mb: 1 }}>
+              API 密钥
+              <Typography component="span" variant="caption" sx={{ ml: 1, fontFamily: 'monospace' }}>
+                {key.ref}
+              </Typography>
+            </Typography>
             {key.source === 'env' ? (
-              <div className="hint">由启动环境提供（只读）：界面改不了，改环境变量再启动</div>
+              <Typography variant="caption">由启动时的环境变量提供，页面上改不了：改环境变量再重启。</Typography>
             ) : (
-              <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
-                <input
+              <Flex row gap={1} align="center">
+                <TextField
+                  fullWidth
                   type="password"
-                  style={{ flex: 1 }}
-                  value={keyInput}
                   autoComplete="off"
-                  placeholder={key.configured ? '已配置——输入新值可替换' : '还没配置'}
+                  value={keyInput}
+                  placeholder={key.configured ? '已配置——输入新值可替换' : '还没有配置'}
                   onChange={(event) => setKeyInput(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') saveKey()
                   }}
                 />
-                <button className="pri" disabled={busy !== '' || keyInput === ''} onClick={saveKey}>
-                  保存密钥
-                </button>
+                <Button variant="contained" size="small" disabled={busy !== '' || keyInput === ''} onClick={saveKey}>
+                  保存
+                </Button>
                 {key.configured && (
-                  <button className="ghost" disabled={busy !== ''} onClick={clearKey}>
+                  <Button
+                    size="small"
+                    disabled={busy !== ''}
+                    onClick={() =>
+                      void app.guard('key', async () => {
+                        await api.setCredential(key.ref, null)
+                        setNote('密钥已清除')
+                        await app.reload()
+                      })
+                    }
+                  >
                     清除
-                  </button>
+                  </Button>
                 )}
-              </div>
+              </Flex>
             )}
-          </div>
+            <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
+              密钥只写不读：存本机 data/credentials.json（仅本人可读），页面与接口都不会回传它。
+              {runtime.modelConfigured ? `　当前可用：${runtime.modelName}` : '　当前还没有可用的模型。'}
+            </Typography>
+          </Box>
+        </Flex>
+      </Paper>
 
-          <div className="acts">
-            <span className="hint">
-              密钥只写不读：存 data/credentials.json（0600），从不回传界面。
-              当前：
-              {runtime.modelConfigured ? `已配置（${runtime.modelName}，来源 ${runtime.modelSource}）` : '未配置——工作台会拒绝运行'}
-            </span>
-            <button className="ghost" disabled={busy !== '' || fetching} onClick={fetchModels}>
-              获取可用模型
-            </button>
-          </div>
-        </div>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
+        <Typography variant="h3" sx={{ mb: 1.5 }}>
+          联网搜索
+        </Typography>
+        <Flex row gap={1} align="center" sx={{ mb: 1.5 }}>
+          <Switch
+            checked={draft.websearch.enabled}
+            onChange={(event) => edit({ websearch: { ...draft.websearch, enabled: event.target.checked } })}
+          />
+          <Typography variant="body2">允许 agent 上网查资料</Typography>
+        </Flex>
+        <TextField
+          label="搜索网关"
+          fullWidth
+          value={draft.websearch.endpoint}
+          placeholder="留空就是不启用"
+          onChange={(event) => edit({ websearch: { ...draft.websearch, endpoint: event.target.value } })}
+        />
+        <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
+          联网只是帮它找情境和数据；拦不拦得住抄原题，由判重负责。
+        </Typography>
+      </Paper>
 
-        <div className="panel card2">
-          <div className="grid2">
-            <div className="field">
-              <label>联网搜索</label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={draft.websearch.enabled}
-                  onChange={(event) => edit({ websearch: { ...draft.websearch, enabled: event.target.checked } })}
-                />
-                <span>启用（agent 才看得到 web_search 工具）</span>
-              </label>
-            </div>
-            <div className="field">
-              <label>搜索网关</label>
-              <input
-                value={draft.websearch.endpoint}
-                placeholder="留空 = 用内置检索"
-                onChange={(event) => edit({ websearch: { ...draft.websearch, endpoint: event.target.value } })}
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
+        <Typography variant="h3" sx={{ mb: 1.5 }}>
+          资料目录
+        </Typography>
+        <Flex gap={1}>
+          {dirs.map((dir, index) => (
+            <Flex key={`${dir}-${String(index)}`} row gap={1} align="center">
+              <TextField
+                fullWidth
+                value={dir}
+                onChange={(event) => edit({ corpusDirs: dirs.map((entry, at) => (at === index ? event.target.value : entry)) })}
               />
-            </div>
-          </div>
-          <div className="hint">
-            联网是**引导不是闸门**：它帮 agent 找情境，拦不拦得住抄原题由查重闸门负责。当前：
-            {runtime.websearchEnabled ? '已开' : '未开'}
-          </div>
-        </div>
+              <Button size="small" onClick={() => edit({ corpusDirs: dirs.filter((_, at) => at !== index) })}>
+                移除
+              </Button>
+            </Flex>
+          ))}
+          <Flex row gap={1} align="center">
+            <Button size="small" onClick={() => edit({ corpusDirs: [...dirs, 'corpus/'] })}>
+              加一条
+            </Button>
+            <Typography variant="caption" sx={{ flex: 1 }}>
+              agent 从资料里抽出来的题会落在 corpus/extracted。
+            </Typography>
+          </Flex>
+        </Flex>
+      </Paper>
 
-        <div className="panel card2">
-          <div className="field">
-            <label>语料目录（改完立刻重扫）</label>
-            {dirs.map((dir, index) => (
-              <div key={`${dir}-${String(index)}`} style={{ display: 'flex', gap: 'var(--sp-3)', marginBottom: 'var(--sp-2)' }}>
-                <input value={dir} onChange={(event) => setDir(index, event.target.value)} style={{ flex: 1 }} />
-                <button className="ghost" onClick={() => edit({ corpusDirs: dirs.filter((_, at) => at !== index) })}>
-                  移除
-                </button>
-              </div>
-            ))}
-            <div className="acts">
-              <button className="ghost" onClick={() => edit({ corpusDirs: [...dirs, 'corpus/'] })}>
-                加一条
-              </button>
-              <span className="hint">
-                真实题库/教材整理件放这里；agent 从知识库抽出来的题落 corpus/extracted
-              </span>
-            </div>
-          </div>
-        </div>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
+        <Typography variant="h3" sx={{ mb: 1.5 }}>
+          判重标准
+        </Typography>
+        <Flex row gap={2}>
+          <TextField
+            label="数字重合度"
+            type="number"
+            value={draft.gates.corpusNumbersMin}
+            slotProps={{ htmlInput: { step: 0.05, min: 0, max: 1 } }}
+            onChange={(event) => edit({ gates: { ...draft.gates, corpusNumbersMin: Number(event.target.value) } })}
+          />
+          <TextField
+            label="措辞相似度"
+            type="number"
+            value={draft.gates.corpusWordingMax}
+            slotProps={{ htmlInput: { step: 0.05, min: 0, max: 1 } }}
+            onChange={(event) => edit({ gates: { ...draft.gates, corpusWordingMax: Number(event.target.value) } })}
+          />
+          <TextField
+            label="与自家题库"
+            type="number"
+            value={draft.gates.bankMaxSimilarity}
+            slotProps={{ htmlInput: { step: 0.05, min: 0, max: 1 } }}
+            onChange={(event) => edit({ gates: { ...draft.gates, bankMaxSimilarity: Number(event.target.value) } })}
+          />
+        </Flex>
+        <Typography variant="caption" sx={{ display: 'block', mt: 1 }}>
+          数字和措辞**同时**超过标准，才算跟资料里那道题太像——只看措辞会把"同一知识点、换了数字"的题全误伤。
+        </Typography>
+      </Paper>
 
-        <div className="panel card2">
-          <div className="grid2">
-            <div className="field">
-              <label>新建会话默认班级</label>
-              <input
-                value={draft.sessionDefaults.className}
-                onChange={(event) => edit({ sessionDefaults: { ...draft.sessionDefaults, className: event.target.value } })}
-              />
-            </div>
-            <div className="field">
-              <label>默认教学进度</label>
-              <input
-                value={draft.sessionDefaults.progress}
-                onChange={(event) => edit({ sessionDefaults: { ...draft.sessionDefaults, progress: event.target.value } })}
-              />
-            </div>
-            <div className="field">
-              <label>默认蓝图文件</label>
-              <input
-                value={draft.sessionDefaults.blueprintPath}
-                onChange={(event) =>
-                  edit({ sessionDefaults: { ...draft.sessionDefaults, blueprintPath: event.target.value } })
-                }
-              />
-            </div>
-          </div>
-        </div>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, mb: 2 }}>
+        <Typography variant="h3" sx={{ mb: 1.5 }}>
+          新会话默认值
+        </Typography>
+        <Flex gap={2}>
+          <TextField
+            label="班级"
+            value={draft.sessionDefaults.className}
+            onChange={(event) => edit({ sessionDefaults: { ...draft.sessionDefaults, className: event.target.value } })}
+          />
+          <TextField
+            label="讲到哪里了"
+            value={draft.sessionDefaults.progress}
+            onChange={(event) => edit({ sessionDefaults: { ...draft.sessionDefaults, progress: event.target.value } })}
+          />
+          <TextField
+            label="蓝图"
+            value={draft.sessionDefaults.blueprintPath}
+            onChange={(event) => edit({ sessionDefaults: { ...draft.sessionDefaults, blueprintPath: event.target.value } })}
+          />
+        </Flex>
+      </Paper>
 
-        <div className="panel card2">
-          <div className="grid2">
-            <div className="field">
-              <label>与语料库：措辞相似上限</label>
-              <input
-                className="mono"
-                type="number"
-                step="0.05"
-                min="0"
-                max="1"
-                value={draft.gates.corpusWordingMax}
-                onChange={(event) => edit({ gates: { ...draft.gates, corpusWordingMax: Number(event.target.value) } })}
-              />
-            </div>
-            <div className="field">
-              <label>与语料库：数字重合下限</label>
-              <input
-                className="mono"
-                type="number"
-                step="0.05"
-                min="0"
-                max="1"
-                value={draft.gates.corpusNumbersMin}
-                onChange={(event) => edit({ gates: { ...draft.gates, corpusNumbersMin: Number(event.target.value) } })}
-              />
-            </div>
-            <div className="field">
-              <label>与自家题库相似上限</label>
-              <input
-                className="mono"
-                type="number"
-                step="0.05"
-                min="0"
-                max="1"
-                value={draft.gates.bankMaxSimilarity}
-                onChange={(event) => edit({ gates: { ...draft.gates, bankMaxSimilarity: Number(event.target.value) } })}
-              />
-            </div>
-          </div>
-          <div className="hint">两条语料阈值要同时满足才算「抄原题」：只看措辞会把同知识点不同数值的题全误伤。</div>
-        </div>
-
-        <div className="panel card2">
-          <div className="kpi">
-            <div>
-              语料条目
-              <b>{runtime.corpusTotal}</b>
-            </div>
-            <div>
-              可对外分发
-              <b>{runtime.corpusDistributable}</b>
-            </div>
-            <div>
-              构造器
-              <b>{runtime.constructors.length}</b>
-            </div>
-          </div>
-          <dl className="kv">
-            <dt>来源分布</dt>
-            <dd className="mono">
-              {Object.entries(runtime.corpusBySource).length === 0
-                ? '无'
-                : Object.entries(runtime.corpusBySource)
-                    .map(([source, count]) => `${source} ${String(count)}`)
-                    .join('　')}
-            </dd>
-            <dt>构造器</dt>
-            <dd className="mono">{runtime.constructors.join('、')}</dd>
-            <dt>闸门链</dt>
-            <dd className="mono">{runtime.gates.join(' → ')}</dd>
-            <dt>设置修订号</dt>
-            <dd className="mono">r{settings.revision}</dd>
-            <dt>需重启才生效</dt>
-            <dd className="mono">
-              {runtime.restartRequired.length === 0 ? '无（都是热设置）' : runtime.restartRequired.join('、')}
-            </dd>
-          </dl>
-        </div>
-      </div>
-    </div>
+      <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+        <Typography variant="h3" sx={{ mb: 1.5 }}>
+          现在的状况
+        </Typography>
+        <Flex gap={0.75}>
+          <Typography variant="body2">
+            资料里的题：{runtime.corpusTotal} 条　可以对外用：{runtime.corpusDistributable} 条
+          </Typography>
+          <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+            能造的题型：{runtime.constructors.join('、')}
+          </Typography>
+          <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+            出题时的检查顺序：{runtime.gates.join(' → ')}
+          </Typography>
+          {runtime.corpusTotal === 0 && (
+            <Typography variant="caption">
+              现在资料是空的：出题不会拿它做参考，判重也只会跟自家题库比。
+            </Typography>
+          )}
+        </Flex>
+      </Paper>
+    </Container>
   )
 }

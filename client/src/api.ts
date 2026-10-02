@@ -96,7 +96,10 @@ export const discoverModels = (
 
 export const getKb = (): Promise<KbListView> => fetch('/api/kb').then((r) => json<KbListView>(r))
 
-export const uploadKb = (name: string, files: readonly { name: string; text: string }[]): Promise<KbBatchView> =>
+export const uploadKb = (
+  name: string,
+  files: readonly { name: string; text?: string; base64?: string }[],
+): Promise<KbBatchView> =>
   send('POST', '/api/kb/upload', { name, files }).then((r) => json<KbBatchView>(r))
 
 export const previewKb = (

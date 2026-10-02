@@ -1,42 +1,45 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined'
+import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined'
+import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined'
+import Alert from '@mui/material/Alert'
+import AppBar from '@mui/material/AppBar'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
+import Container from '@mui/material/Container'
+import IconButton from '@mui/material/IconButton'
+import LinearProgress from '@mui/material/LinearProgress'
+import Snackbar from '@mui/material/Snackbar'
+import Tab from '@mui/material/Tab'
+import Tabs from '@mui/material/Tabs'
+import Tooltip from '@mui/material/Tooltip'
+import Typography from '@mui/material/Typography'
 import * as api from './api.js'
-import { AppCtx, type AppValue, type RunLogEntry } from './app-context.js'
-import { Icon, type IconName } from './icons.js'
-import { KbPage } from './pages/KbPage.js'
+import { AppCtx, type AppValue } from './app-context.js'
+import { appendLive, appendSignal } from './log.js'
+import { KnowledgePage } from './pages/KnowledgePage.js'
 import { SessionsPage } from './pages/SessionsPage.js'
 import { SettingsPage } from './pages/SettingsPage.js'
 import { WorkPage } from './pages/WorkPage.js'
 import { useRoute } from './router.js'
-import { mergeRunSignal } from './runs.js'
-import type {
-  KbListView,
-  LiveEvent,
-  SessionView,
-  SessionsView,
-  SettingsView,
-  StateView,
-} from './types.js'
+import type { KbListView, LiveEvent, LogEntryView, SessionView, SessionsView, SettingsView, StateView } from './types.js'
 
 /**
- * 应用外壳（信息架构见 docs/agent/07）。
+ * 外壳：四个页面，一条顶栏。
  *
- * 四页：工作台（命题协作）、会话（分组/新建/约定）、知识库（上传 + 让 agent 整理）、设置。
- * 外壳只做两件事：**取服务端投影**、**给各页一个受控动作入口**；业务状态一律留在服务端。
- *
- * 三条自觉（ADR-0015 / 07）：
- *   - 界面不写死数学：题面、图、证据、版本全部来自服务端投影；
- *   - 界面不是写入口：所有动作都是请服务端去改，改完以服务端返回为准；
- *   - 文字克制：一行一个事实，正常态不上色，异常才 warn。
+ * 这里只做两件事：取服务端的投影、给页面一个受控的动作入口。
+ * 业务状态一律留在服务端——界面上看到的每个数字都能在接口里找到出处。
  */
 
-const NAV: readonly { key: string; label: string; icon: IconName }[] = [
-  { key: 'work', label: '工作台', icon: 'tool' },
-  { key: 'sessions', label: '会话', icon: 'chat' },
-  { key: 'knowledge', label: '知识库', icon: 'layers' },
-  { key: 'settings', label: '设置', icon: 'sliders' },
+const NAV: readonly { key: string; label: string }[] = [
+  { key: 'work', label: '工作台' },
+  { key: 'sessions', label: '会话' },
+  { key: 'materials', label: '资料' },
+  { key: 'settings', label: '设置' },
 ]
 
-export function App(): React.JSX.Element {
+export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () => void }): React.JSX.Element {
   const { route, go } = useRoute()
 
   const [session, setSession] = useState<SessionView | null>(null)
@@ -45,11 +48,9 @@ export function App(): React.JSX.Element {
   const [settings, setSettings] = useState<SettingsView | null>(null)
   const [kb, setKb] = useState<KbListView | null>(null)
 
-  const [runs, setRuns] = useState<readonly RunLogEntry[]>([])
+  const [log, setLog] = useState<readonly LogEntryView[]>([])
+  const [running, setRunning] = useState<{ runId: string; goal: string; workspace: string } | null>(null)
   const [live, setLive] = useState<readonly LiveEvent[]>([])
-  const [workspaceTick, setWorkspaceTick] = useState(0)
-
-  const [dark, setDark] = useState(false)
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
 
@@ -66,30 +67,31 @@ export function App(): React.JSX.Element {
     setState(nextState)
     setSettings(nextSettings)
     setKb(nextKb)
+    // 记录以服务端为准：刷新不丢，一轮结束时也用它把本地增量对齐
+    setLog(nextSession.log)
   }, [])
 
   useEffect(() => {
     void reload().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
     const unsubscribe = api.subscribe(
       (event) => {
-        // run:* 与 workspace:changed 是"过程"，不进实时结论列表
-        if (event.kind !== 'run:step' && event.kind !== 'run:started' && event.kind !== 'run:done' && event.kind !== 'workspace:changed') {
-          setLive((previous) => [event, ...previous].slice(0, 30))
-          void reload().catch(() => undefined)
-        }
-        if (event.kind === 'workspace:changed') setWorkspaceTick((previous) => previous + 1)
-        if (event.kind === 'run:done') void reload().catch(() => undefined)
+        if (event.kind !== 'stored' && event.kind !== 'rejected' && event.kind !== 'confirmed') return
+        setLive((previous) => [event, ...previous].slice(0, 20))
+        setLog((previous) => appendLive(previous, event))
       },
       (signal) => {
-        setRuns((previous) => mergeRunSignal(previous, signal))
+        if (signal.kind === 'started') setRunning({ runId: signal.runId, goal: signal.goal, workspace: signal.workspace })
+        if (signal.kind === 'done') setRunning((current) => (current?.runId === signal.runId ? null : current))
+        else setLog((previous) => appendSignal(previous, signal))
       },
     )
     return unsubscribe
   }, [reload])
 
+  // 一轮结束后重取投影（记录、进度、文件清单都以服务端为准）
   useEffect(() => {
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-  }, [dark])
+    if (running === null) void reload().catch(() => undefined)
+  }, [running, reload])
 
   const guard = useCallback(async (label: string, action: () => Promise<void>): Promise<void> => {
     setBusy(label)
@@ -103,15 +105,9 @@ export function App(): React.JSX.Element {
     }
   }, [])
 
-  const clearLog = useCallback(() => {
-    setRuns([])
-    setLive([])
-  }, [])
-
   const startRun = useCallback(
     async (goal: string): Promise<void> => {
       await guard('run', async () => {
-        // 服务端会立刻回 runId，过程走 SSE；这里不 await 那一轮跑完
         await api.startRun(goal)
       })
     },
@@ -120,22 +116,20 @@ export function App(): React.JSX.Element {
 
   const interject = useCallback(
     async (text: string): Promise<void> => {
-      const active = runs.find((entry) => entry.stopped === '')
-      if (active === undefined) return
+      if (running === null) return
       await guard('interject', async () => {
-        await api.interjectRun(active.id, text)
+        await api.interjectRun(running.runId, text)
       })
     },
-    [guard, runs],
+    [guard, running],
   )
 
   const stopRun = useCallback(async (): Promise<void> => {
-    const active = runs.find((entry) => entry.stopped === '')
-    if (active === undefined) return
+    if (running === null) return
     await guard('stop', async () => {
-      await api.stopRun(active.id)
+      await api.stopRun(running.runId)
     })
-  }, [guard, runs])
+  }, [guard, running])
 
   const value: AppValue = useMemo(
     () => ({
@@ -144,26 +138,24 @@ export function App(): React.JSX.Element {
       state,
       settings,
       kb,
-      runs,
-      activeRun: runs.find((entry) => entry.stopped === '') ?? null,
+      log,
+      running,
       live,
-      workspaceTick,
       busy,
       error,
-      dark,
-      toggleDark: () => setDark((previous) => !previous),
+      clearError: () => setError(''),
       reload,
       guard,
       startRun,
       interject,
       stopRun,
-      clearLog,
       go,
     }),
-    [session, sessions, state, settings, kb, runs, live, workspaceTick, busy, error, dark, reload, guard, startRun, interject, stopRun, clearLog, go],
+    [session, sessions, state, settings, kb, log, running, live, busy, error, reload, guard, startRun, interject, stopRun, go],
   )
 
   const page = NAV.some((entry) => entry.key === route.page) ? route.page : 'work'
+  const runtime = settings?.runtime
   const needsReview =
     session === null
       ? 0
@@ -173,67 +165,86 @@ export function App(): React.JSX.Element {
 
   return (
     <AppCtx.Provider value={value}>
-      <header className="top">
-        <span className="brand">
-          命题组<span>examharness</span>
-        </span>
+      <AppBar position="sticky">
+        <Container
+          maxWidth={false}
+          sx={{ px: { xs: 2, md: 3 }, display: 'flex', alignItems: 'center', gap: 2, minHeight: 52 }}
+        >
+          <Typography sx={{ fontWeight: 600, fontSize: 15, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+            命题组
+          </Typography>
 
-        <nav className="navtabs">
-          {NAV.map((entry) => (
-            <button key={entry.key} className={page === entry.key ? 'on' : ''} onClick={() => go(entry.key)}>
-              <Icon name={entry.icon} />
-              {entry.label}
-            </button>
-          ))}
-        </nav>
+          <Tabs
+            value={page}
+            onChange={(_event, next: string) => go(next)}
+            sx={{ minHeight: 52, '& .MuiTabs-indicator': { bottom: 0 } }}
+          >
+            {NAV.map((entry) => (
+              <Tab key={entry.key} value={entry.key} label={entry.label} />
+            ))}
+          </Tabs>
 
-        <div className="right">
+          <Box sx={{ flex: 1 }} />
+
           {session !== null && page === 'work' && (
-            <>
-              <span className="title">
+            <Box sx={{ display: { xs: 'none', lg: 'flex' }, alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+              <Typography variant="body2" noWrap sx={{ maxWidth: 240, color: 'text.primary' }}>
                 {session.meta.title}
-                {session.versions.length > 0 && <span className="ver mono"> v{session.versions.at(-1)?.version ?? 0}</span>}
-              </span>
-              <span className="meta">
-                <span>{session.meta.className}</span>
-                <span>{session.meta.progress}</span>
-                <span>
-                  满分 <b className="mono">{session.blueprint.paper.totalScore}</b>
-                </span>
-                <span>
-                  <b className="mono">{session.blueprint.paper.minutes}</b> 分钟
-                </span>
-                {session.meta.frozen && <span className="chip warn">已冻结</span>}
-                {needsReview > 0 && <span className="chip warn">待复核 {needsReview}</span>}
-              </span>
-            </>
+              </Typography>
+              <Typography variant="caption" noWrap>
+                {session.meta.className}　{session.meta.progress}
+              </Typography>
+              {session.meta.frozen && <Chip size="small" label="已定稿" variant="outlined" />}
+              {needsReview > 0 && (
+                <Chip size="small" color="warning" variant="outlined" label={`${String(needsReview)} 道待确认`} />
+              )}
+            </Box>
           )}
-          {settings !== null && (
-            <span className="chips">
-              <button className="chip click" onClick={() => go('settings')}>
-                {settings.runtime.modelConfigured ? settings.runtime.modelName : '模型未配置'}
-              </button>
-              <button className="chip click" onClick={() => go('knowledge')}>
-                语料 {settings.runtime.corpusTotal}
-              </button>
-              <button className="chip click" onClick={() => go('settings')}>
-                联网{settings.runtime.websearchEnabled ? '已开' : '未开'}
-              </button>
-            </span>
+
+          {runtime !== undefined && (
+            <Tooltip title={runtime.modelConfigured ? `正在用 ${runtime.modelName}` : '还没有配置模型，去设置里填'}>
+              <Chip
+                size="small"
+                variant="outlined"
+                color={runtime.modelConfigured ? 'default' : 'warning'}
+                label={runtime.modelConfigured ? '模型就绪' : '模型未配置'}
+                onClick={() => go('settings')}
+                sx={{ cursor: 'pointer' }}
+              />
+            </Tooltip>
           )}
-          <button className="ibtn" title="明暗" onClick={() => setDark((previous) => !previous)}>
-            <Icon name={dark ? 'sun' : 'moon'} />
-          </button>
-          <a className="ghost" href={api.exportUrl('html')} style={{ textDecoration: 'none' }}>
+
+          <IconButton onClick={onToggleDark} title={dark ? '切换到浅色' : '切换到深色'}>
+            {dark ? <LightModeOutlinedIcon fontSize="small" /> : <DarkModeOutlinedIcon fontSize="small" />}
+          </IconButton>
+
+          <Button
+            size="small"
+            startIcon={<DownloadOutlinedIcon fontSize="small" />}
+            href={api.exportUrl('html')}
+            disabled={session === null || session.versions.length === 0}
+          >
             导出
-          </a>
-        </div>
-      </header>
+          </Button>
+        </Container>
+        {busy !== '' && <LinearProgress />}
+      </AppBar>
 
       {page === 'work' && <WorkPage />}
       {page === 'sessions' && <SessionsPage />}
-      {page === 'knowledge' && <KbPage />}
+      {page === 'materials' && <KnowledgePage />}
       {page === 'settings' && <SettingsPage />}
+
+      <Snackbar
+        open={error !== ''}
+        autoHideDuration={9000}
+        onClose={() => setError('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="error" variant="outlined" onClose={() => setError('')} sx={{ maxWidth: 560 }}>
+          {error}
+        </Alert>
+      </Snackbar>
     </AppCtx.Provider>
   )
 }

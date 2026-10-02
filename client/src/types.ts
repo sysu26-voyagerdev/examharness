@@ -8,6 +8,15 @@ export interface EvidenceView {
   detail?: string
 }
 
+/** 服务端渲染好的数学：stem/answer 里是正文，html 字段里是 MathML */
+export interface TexView {
+  stem?: string
+  stemMath?: string
+  answer?: string
+  answerMath?: string
+  solution: readonly { tex: string; math: string }[]
+}
+
 export interface ItemView {
   id: string
   slot: string
@@ -17,6 +26,11 @@ export interface ItemView {
   lifecycle: string
   stem: string
   answer: string
+  /** 正文（含 $...$）已经渲染成 MathML，界面直接显示，不引数学库 */
+  stemHtml: string
+  answerHtml: string
+  solutionHtml: readonly string[]
+  tex?: TexView
   /** 图由服务端按 spec 渲染好；界面只显示 */
   figure: string
   constructor: string
@@ -95,12 +109,22 @@ export interface SessionsView {
   defaults: { className: string; progress: string; blueprintPath: string }
 }
 
+/** 会话记录的一行：老师说的、agent 做的、闸门判的，按时间排在一起 */
+export interface LogEntryView {
+  id: string
+  at: string
+  kind: 'user' | 'assistant' | 'tool' | 'gate' | 'verdict'
+  text: string
+  runId?: string
+}
+
 export interface SessionView {
   meta: SessionMetaView
   blueprint: BlueprintView
   slots: readonly ItemView[]
   versions: readonly VersionView[]
   diff: readonly SlotChangeView[]
+  log: readonly LogEntryView[]
 }
 
 export interface KnowledgeView {
@@ -197,7 +221,7 @@ export interface RunView {
   steps: number
   transcript: readonly RunEventView[]
   stored: readonly string[]
-  stopped: 'done' | 'max-steps' | 'no-llm' | 'stopped'
+  stopped: 'done' | 'no-llm' | 'stopped'
   /** 这一轮留下的工作区 */
   workspace?: { name: string; files: readonly WorkspaceFileView[] }
 }

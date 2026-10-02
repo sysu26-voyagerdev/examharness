@@ -1,21 +1,40 @@
 import { useMemo, useState } from 'react'
+import AddCommentOutlinedIcon from '@mui/icons-material/AddCommentOutlined'
+import SendOutlinedIcon from '@mui/icons-material/SendOutlined'
+import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined'
+import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
+import Chip from '@mui/material/Chip'
+import Divider from '@mui/material/Divider'
+import IconButton from '@mui/material/IconButton'
+import List from '@mui/material/List'
+import ListItemButton from '@mui/material/ListItemButton'
+import ListItemText from '@mui/material/ListItemText'
+import Tab from '@mui/material/Tab'
+import Tabs from '@mui/material/Tabs'
+import TextField from '@mui/material/TextField'
+import Tooltip from '@mui/material/Tooltip'
+import Typography from '@mui/material/Typography'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
-import { Icon } from '../icons.js'
+import { EvidenceView, FilesView, Flex, KnowledgeView, PaperView, Timeline } from '../components.js'
 import type { ItemView, SlotChangeView, VersionView } from '../types.js'
-import { EvidencePane, KnowledgePane, PaperPane, SessionDialog, TranscriptView } from '../views.js'
-import { WorkspacePane } from '../WorkspacePane.js'
+
+/**
+ * 工作台：左边会话，中间记录，右边这份卷子。
+ *
+ * 中间那一条是**会话记录**：老师说的、agent 做的、检查的结论，按时间排在一起。
+ * 跑起来时输入框变成插话——它下一步会读到；也可以直接按停。
+ */
 
 const TABS = [
-  { key: 'paper', label: '卷子' },
-  { key: 'net', label: '知识网络' },
-  { key: 'ev', label: '证据' },
-  { key: 'ws', label: '工作区' },
+  { key: 'paper', label: '试卷' },
+  { key: 'knowledge', label: '知识点' },
+  { key: 'evidence', label: '依据' },
+  { key: 'files', label: '文件' },
 ] as const
 
-type TabKey = (typeof TABS)[number]['key']
-
-/** 两个版本之间的题位变化（服务端只算最新一版，界面要能看任意两版） */
+/** 两版之间的题位变化（服务端只算最新一版，界面要能看任意两版） */
 export function diffVersions(before: VersionView | undefined, after: VersionView): SlotChangeView[] {
   if (before === undefined) return []
   const slots = new Set([
@@ -34,22 +53,13 @@ export function diffVersions(before: VersionView | undefined, after: VersionView
   })
 }
 
-/** 工作台：会话（左）· 工作记录（中）· 卷子/网络/证据（右）。三栏各自独立滚动。 */
 export function WorkPage(): React.JSX.Element {
   const app = useApp()
-  const { session, sessions, state, busy, error, workspaceTick, live } = app
+  const { session, sessions, state, log, running, busy } = app
 
-  // 正在跑的那一轮优先显示；没有就跑最近一轮（老师能看到刚刚 agent 干了什么）
-  const active = app.activeRun
-  const currentRun = active ?? app.runs.at(-1) ?? null
-  const transcript = currentRun?.events ?? []
-  const runGoal = currentRun?.goal ?? ''
-  const stopped = currentRun?.stopped ?? ''
-
-  const [goal, setGoal] = useState('按蓝图出一份课后作业卷')
-  const [tab, setTab] = useState<TabKey>('paper')
+  const [draft, setDraft] = useState('')
+  const [tab, setTab] = useState<(typeof TABS)[number]['key']>('paper')
   const [viewVersion, setViewVersion] = useState<number | null>(null)
-  const [editing, setEditing] = useState(false)
 
   const versions = session?.versions ?? []
   const latest = versions.at(-1)
@@ -59,7 +69,6 @@ export function WorkPage(): React.JSX.Element {
   )
   const viewingOld = shown !== undefined && latest !== undefined && shown.version !== latest.version
 
-  /** itemId → 题（题位那一份信息更全，优先用它） */
   const itemsById = useMemo(() => {
     const map = new Map<string, ItemView>()
     for (const item of state?.items ?? []) map.set(item.id, item)
@@ -71,17 +80,18 @@ export function WorkPage(): React.JSX.Element {
     const item = itemsById.get(binding.itemId)
     return item === undefined ? [] : [{ binding, item }]
   })
-  const needsReview = rows.filter(({ item }) => item.lifecycle === 'needs_review').length
   const frozen = session?.meta.frozen === true
 
-  /** 没在跑 = 起一轮；正在跑 = 插话（下一步就生效），这才是"可插话"的意思 */
-  const send = (text: string): void => {
-    if (active !== null) {
-      void app.interject(text === '' ? '继续' : text)
-      setGoal('')
+  const send = (): void => {
+    const text = draft.trim()
+    if (running !== null) {
+      if (text === '') return
+      void app.interject(text)
+      setDraft('')
       return
     }
-    void app.startRun(text === '' ? '出题' : text)
+    void app.startRun(text === '' ? '按蓝图出一份课后作业卷' : text)
+    setDraft('')
     setViewVersion(null)
   }
 
@@ -93,160 +103,141 @@ export function WorkPage(): React.JSX.Element {
     })
   }
 
-  const groupOf = (groupId: string): string =>
-    groupId === '' ? '' : (sessions?.groups.find((group) => group.id === groupId)?.name ?? '')
-
   return (
-    <div className="shell">
-      <aside className="col side">
-        <div className="hd">
-          会话
-          <span className="r" style={{ marginLeft: 'auto', display: 'flex', gap: 'var(--sp-3)' }}>
-            <button className="chip click" onClick={() => app.go('sessions')}>
-              管理
-            </button>
-            <button
-              className="chip click"
+    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '224px 1fr 1.05fr' }, height: 'calc(100vh - 52px)' }}>
+      {/* 会话 */}
+      <Box sx={{ borderRight: { md: '1px solid' }, borderColor: 'divider', bgcolor: 'background.paper', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <Flex row align="center" sx={{ px: 1.5, py: 1.25 }}>
+          <Typography variant="caption">会话</Typography>
+          <Box sx={{ flex: 1 }} />
+          <Tooltip title="新建会话">
+            <IconButton
+              size="small"
               disabled={busy !== ''}
               onClick={() =>
                 void app.guard('new', async () => {
                   await api.createSession()
                   setViewVersion(null)
-                  app.clearLog()
                   await app.reload()
                 })
               }
             >
-              新建
-            </button>
-          </span>
-        </div>
-        <div className="bd">
-          <div className="nav">
-            {sessions?.sessions.map((meta) => (
-              <div
-                key={meta.id}
-                className={`row ${session?.meta.id === meta.id ? 'on' : ''}`}
-                onClick={() =>
-                  void app.guard('switch', async () => {
-                    await api.switchSession(meta.id)
-                    setViewVersion(null)
-                    app.clearLog()
-                    await app.reload()
-                  })
-                }
-              >
-                <span className="t">{meta.title}</span>
-                <span className="s">
-                  {meta.frozen ? '已冻结' : groupOf(meta.groupId) === '' ? meta.className : groupOf(meta.groupId)}
-                </span>
-              </div>
-            ))}
-          </div>
-          {session !== null && (
-            <div className="panel">
-              <div className="hint">
-                {session.meta.className}　{session.meta.progress}
-                <br />
-                {session.meta.blueprintPath}
-              </div>
-              <button className="ghost" style={{ marginTop: 'var(--sp-3)' }} onClick={() => setEditing(true)}>
-                编辑会话约定
-              </button>
-            </div>
-          )}
-        </div>
-      </aside>
-
-      <section className="col">
-        <div className="hd">工作记录</div>
-        <div className="bd">
-          <TranscriptView goal={runGoal} events={transcript} live={live} stopped={stopped} />
-        </div>
-        <div className="cmp">
-          <div className="quick">
-            {active !== null ? (
-              <>
-                <span className="chip warn">agent 正在跑（第 {active.steps} 步）</span>
-                <button className="ghost" disabled={busy !== ''} onClick={() => void app.stopRun()}>
-                  叫停
-                </button>
-              </>
-            ) : (
-              <button className="ghost" disabled={busy !== ''} onClick={() => send(goal)}>
-                跑一次命题组
-              </button>
-            )}
-            <button className="ghost" disabled={busy !== '' || frozen} onClick={assemble}>
-              按蓝图组卷
-            </button>
-            <button
-              className="ghost"
-              disabled={busy !== '' || frozen}
-              title="冻结后所有写操作一律拒绝（R3）"
+              <AddCommentOutlinedIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Flex>
+        <List dense sx={{ overflowY: 'auto', px: 0.5, pb: 1 }}>
+          {(sessions?.sessions ?? []).map((meta) => (
+            <ListItemButton
+              key={meta.id}
+              selected={session?.meta.id === meta.id}
               onClick={() =>
-                void app.guard('freeze', async () => {
-                  await api.freezeSession()
+                void app.guard('switch', async () => {
+                  if (meta.id === session?.meta.id) return
+                  await api.switchSession(meta.id)
+                  setViewVersion(null)
                   await app.reload()
                 })
               }
             >
-              定稿冻结
-            </button>
-            <span className="meter">
-              {busy === '' ? `v${latest?.version ?? 0} · 入库 ${state?.items.length ?? 0} 题` : '进行中…'}
-            </span>
-          </div>
-          <div className="in">
-            <input
-              value={goal}
-              placeholder={active === null ? '说需求、纠正，或只改某一道题' : '插一句话：下一步它会读到（不是另起一轮）'}
-              onChange={(event) => setGoal(event.target.value)}
+              <ListItemText
+                primary={meta.title}
+                secondary={meta.frozen ? '已定稿' : meta.className}
+                slotProps={{ primary: { noWrap: true }, secondary: { noWrap: true } }}
+              />
+            </ListItemButton>
+          ))}
+        </List>
+        <Box sx={{ flex: 1 }} />
+        <Divider />
+        <Box sx={{ p: 1.5 }}>
+          <Typography variant="caption" sx={{ display: 'block' }}>
+            {session === null ? '' : `${session.meta.className}　${session.meta.progress}`}
+          </Typography>
+          <Button size="small" sx={{ mt: 0.5, px: 0 }} onClick={() => app.go('sessions')}>
+            管理会话
+          </Button>
+        </Box>
+      </Box>
+
+      {/* 记录 */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 0, borderRight: { md: '1px solid' }, borderColor: 'divider' }}>
+        <Box sx={{ flex: 1, minHeight: 0 }}>
+          <Timeline entries={log} running={running !== null} />
+        </Box>
+        <Divider />
+        <Box sx={{ p: 1.5 }}>
+          {running !== null && (
+            <Flex row gap={1} align="center" sx={{ mb: 1 }}>
+              <Chip size="small" color="primary" variant="outlined" label="正在做" />
+              <Typography variant="caption">说的下一句它马上会看到</Typography>
+              <Box sx={{ flex: 1 }} />
+              <Button size="small" startIcon={<StopCircleOutlinedIcon fontSize="small" />} disabled={busy !== ''} onClick={() => void app.stopRun()}>
+                按停
+              </Button>
+            </Flex>
+          )}
+          <Flex row gap={1} align="flex-end">
+            <TextField
+              fullWidth
+              multiline
+              maxRows={6}
+              value={draft}
+              placeholder={running === null ? '说说你要什么样的卷子' : '插一句话'}
+              onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && busy === '') send(goal)
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault()
+                  if (busy === '') send()
+                }
               }}
             />
-            <button className="send" disabled={busy !== ''} title="发送" onClick={() => send(goal)}>
-              <Icon name="send" />
-            </button>
-          </div>
-          {error !== '' && <div className="hint err">{error}</div>}
-        </div>
-      </section>
+            <IconButton color="primary" disabled={busy !== '' || (running !== null && draft.trim() === '')} onClick={send} title="发送">
+              <SendOutlinedIcon />
+            </IconButton>
+          </Flex>
+          {running === null && (
+            <Flex row gap={2} sx={{ mt: 1 }} align="center">
+              <Button size="small" sx={{ px: 0 }} disabled={busy !== ''} onClick={() => void app.startRun('按蓝图出一份课后作业卷')}>
+                出一份课后作业卷
+              </Button>
+              <Button size="small" sx={{ px: 0 }} disabled={busy !== '' || frozen} onClick={assemble}>
+                按蓝图组卷
+              </Button>
+              <Box sx={{ flex: 1 }} />
+              <Typography variant="caption">
+                {latest === undefined ? '还没有试卷' : `第 ${latest.version} 版`}　{state?.items.length ?? 0} 道题在库
+              </Typography>
+            </Flex>
+          )}
+        </Box>
+      </Box>
 
-      <section className="col">
-        <div className="tabs">
+      {/* 这份卷子 */}
+      <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: 0, bgcolor: 'background.default' }}>
+        <Tabs value={tab} onChange={(_event, next: (typeof TABS)[number]['key']) => setTab(next)}>
           {TABS.map((entry) => (
-            <button key={entry.key} className={tab === entry.key ? 'on' : ''} onClick={() => setTab(entry.key)}>
-              {entry.label}
-            </button>
+            <Tab key={entry.key} value={entry.key} label={entry.label} />
           ))}
-          <span className="r">{shown === undefined ? '未组卷' : `v${shown.version} · 满分 ${shown.totalScore}`}</span>
-        </div>
-
-        {versions.length > 0 && (
-          <div className="panel" style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-            {versions.map((version) => (
-              <button
-                key={version.version}
-                className={`chip click ${shown?.version === version.version ? 'on' : ''}`}
-                title={`${new Date(version.at).toLocaleString('zh-CN')}　${version.reason}`}
-                onClick={() => setViewVersion(version.version)}
-              >
-                v{version.version}
-              </button>
-            ))}
-            {viewingOld && (
-              <button className="chip click" onClick={() => setViewVersion(null)}>
-                回到最新
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="bd p0">
+        </Tabs>
+        <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+          {versions.length > 1 && (
+            <Flex row gap={0.75} sx={{ px: 2, pt: 1.5 }} wrap>
+              {versions.map((version) => (
+                <Chip
+                  key={version.version}
+                  size="small"
+                  variant={shown?.version === version.version ? 'filled' : 'outlined'}
+                  label={`第 ${version.version} 版`}
+                  onClick={() => setViewVersion(version.version)}
+                  sx={{ cursor: 'pointer' }}
+                />
+              ))}
+              {viewingOld && <Chip size="small" variant="outlined" label="回到最新" onClick={() => setViewVersion(null)} sx={{ cursor: 'pointer' }} />}
+            </Flex>
+          )}
           {tab === 'paper' && (
-            <PaperPane
+            <PaperView
               version={shown}
               rows={rows}
               changes={shown === undefined ? [] : diffVersions(versions[shown.version - 2], shown)}
@@ -256,7 +247,7 @@ export function WorkPage(): React.JSX.Element {
               onRegenerate={(slotKey) =>
                 void app.guard(`regen:${slotKey}`, async () => {
                   const result = await api.regenerate(slotKey)
-                  if (!result.ok) throw new Error(result.reason ?? '重做被拒')
+                  if (!result.ok) throw new Error(result.reason ?? '这道题没能重做，换个要求再试')
                   setViewVersion(null)
                   await app.reload()
                 })
@@ -270,30 +261,12 @@ export function WorkPage(): React.JSX.Element {
               onAssemble={assemble}
             />
           )}
-          {tab === 'net' && state !== null && <KnowledgePane knowledge={state.knowledge} items={state.items} />}
-          {tab === 'ev' && <EvidencePane rows={rows} events={transcript} versions={versions} />}
-          {tab === 'ws' && (
-            <div className="pane">
-              {/* 主 agent 也在工作区里干活：原件副本、它写的脚本、跑出来的产物都在这儿，可复查 */}
-              <WorkspacePane name={session?.meta.id ?? ''} refreshKey={workspaceTick} />
-            </div>
-          )}
-        </div>
-      </section>
-
-      {editing && session !== null && (
-        <SessionDialog
-          meta={session.meta}
-          onClose={() => setEditing(false)}
-          onSave={(patch) =>
-            void app.guard('meta', async () => {
-              await api.updateSession(patch)
-              setEditing(false)
-              await app.reload()
-            })
-          }
-        />
-      )}
-    </div>
+          {tab === 'knowledge' && state !== null && <KnowledgeView knowledge={state.knowledge} items={state.items} />}
+          {tab === 'evidence' && <EvidenceView rows={rows} versions={versions} />}
+          {/* 文件列表跟着记录一起刷新：agent 每走一步都可能多出一个文件 */}
+          {tab === 'files' && <FilesView name={session?.meta.id ?? ''} tick={log.length} />}
+        </Box>
+      </Box>
+    </Box>
   )
 }
