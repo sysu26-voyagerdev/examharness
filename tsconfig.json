@@ -68,6 +68,9 @@
       "path": "./packages/plugin-construct-geometry"
     },
     {
+      "path": "./packages/plugin-construct-dynamic"
+    },
+    {
       "path": "./packages/plugin-proposals"
     },
     {

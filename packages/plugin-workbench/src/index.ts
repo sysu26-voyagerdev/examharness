@@ -1,3 +1,5 @@
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import { parseJsonObject } from '@examharness/core'
 import type {
@@ -230,9 +232,47 @@ const WORKSPACE_TOOLS: readonly LlmToolSpec[] = [
   },
 ]
 
+/** 把题型模块写到 data/constructors/（只允许写这里：题型目录是系统配置，不是工作区） */
+function writeConstructor(kindName: string, code: string): string {
+  const root = process.cwd()
+  const dir = join(root, 'data', 'constructors')
+  mkdirSync(dir, { recursive: true })
+  const safe = kindName.replace(/[^\w.-]/g, '_').slice(0, 60) || `dynamic-${String(Date.now())}`
+  const file = join(dir, `${safe}.mjs`)
+  writeFileSync(file, code, 'utf8')
+  return file
+}
+
 /** 题位里允许的水平与题型（写错就退回默认，别让坏值进蓝图） */
 const COGNITIVE = new Set(['了解', '理解', '掌握', '灵活运用'])
 const QUESTION_TYPE = new Set(['选择', '填空', '解答'])
+
+const CONSTRUCTOR_TOOL: LlmToolSpec = {
+  name: 'constructor_write',
+  description:
+    '**制作一个新题型**（运行时生效，不用人改代码）：写一个模块到 data/constructors/，框架立刻验收——' +
+    '静态安全检查、契约完整、同种子可复现、不同种子有差异、**检验点能区分对错**（把参数改坏它必须失败）。' +
+    '通过就注册生效，下一步就能按蓝图出这种题；不通过会把问题原样告诉你，改完再交。\n' +
+    '模块格式（ESM，只许做计算，不许文件/网络/子进程）：\n' +
+    '  export const kind = "dynamic/xxx"        // 题型名\n' +
+    '  export const covers = ["知识点"]         // 覆盖哪些知识点（最多 6 个）\n' +
+    '  export function construct(slot, seed) {\n' +
+    '    return { params: {...数字}, stem: "题面", answer: "答案",\n' +
+    '             answerTex: "答案的 LaTeX", solution: ["步骤"], steps: [{text, basis}],\n' +
+    '             checks: [{ expr: "把 at 代进去该等于什么", at: {...}, expect: 0 }] }\n' +
+    '  }\n' +
+    'checks 是**框架用来独立核对的事实**（求值器是框架的）：比如"根代回多项式为 0"、' +
+    '"两点都满足解析式"。写得越具体越好；只写恒等式（如 a-a=0）会被判无效。',
+  parameters: {
+    type: 'object',
+    properties: {
+      kind: { type: 'string' },
+      covers: { type: 'array', items: { type: 'string' } },
+      code: { type: 'string' },
+    },
+    required: ['kind', 'covers', 'code'],
+  },
+}
 
 const BLUEPRINT_TOOLS: readonly LlmToolSpec[] = [
   {
@@ -424,6 +464,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     if (this.ctx.get('doc')?.available() === true) tools.push(...DOC_TOOLS)
     // 组卷是收尾动作；蓝图库让 agent 能"换一份合适的模板再出"
     if (this.ctx.get('session') !== undefined) tools.push(PAPER_TOOL, ...BLUEPRINT_TOOLS)
+    // 运行时制作新题型：写模块 → 框架验收 → 通过即生效
+    if (this.ctx.get('constructDynamic') !== undefined) tools.push(CONSTRUCTOR_TOOL)
     return tools
   }
 
@@ -867,6 +909,34 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         kind: 'tool',
         text: `kb_read：读到 ${String(chunk.text.length)} 字（共 ${String(chunk.total)}${chunk.next === undefined ? '，已到结尾' : `，下一个 offset=${String(chunk.next)}`}）`,
         payload: chunk,
+      }
+    }
+
+    if (tool === 'constructor_write') {
+      const dynamic = this.ctx.get('constructDynamic')
+      if (dynamic === undefined) return { kind: 'tool', text: 'constructor_write：没有接动态题型服务', payload: { error: '未接入' } }
+      const kindName = String(args.kind ?? '')
+      const code = String(args.code ?? '')
+      if (kindName === '' || code.trim() === '') {
+        return { kind: 'tool', text: 'constructor_write：kind 与 code 都不能为空', payload: { error: '参数不全' } }
+      }
+      try {
+        const written = writeConstructor(kindName, code)
+        const report = await dynamic.loadOne(written)
+        if (!report.ok) {
+          return {
+            kind: 'tool',
+            text: `constructor_write：${kindName} **没通过验收**，改完再交：\n${report.problems.map((problem: string) => `  · ${problem}`).join('\n')}`,
+            payload: { ok: false, problems: report.problems, file: written },
+          }
+        }
+        return {
+          kind: 'tool',
+          text: `constructor_write：${kindName} 通过验收并生效（覆盖 ${report.covers.join('、')}）。下一步可以按蓝图出这种题了。`,
+          payload: { ok: true, kind: kindName, covers: report.covers, samples: report.samples, checks: report.checks },
+        }
+      } catch (error) {
+        return { kind: 'tool', text: `constructor_write：写文件失败（${error instanceof Error ? error.message : String(error)}）`, payload: { error: String(error) } }
       }
     }
 

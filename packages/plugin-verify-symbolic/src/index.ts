@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import { evaluateExpression } from '@examharness/core'
 import type { Verdict } from '@examharness/core'
 import z from 'schemastery'
 
@@ -224,6 +225,47 @@ export function apply(ctx: Context, config: SymbolicConfig): void {
     if (!verdict.pass) return verdict
 
     const { kind, params } = item.instance
+
+    // **动态题型**（agent 在运行时写的）走这条路：闸门不认识它，
+    // 但能核对它声明的检验点——"把 at 代进 expr 应当得到 expect"。
+    // 判分仍然不归出题的人管（求值器是框架的，检验点在验收时还被变异检验过）。
+    const checks = item.instance.checks
+    if (checks !== undefined && checks.length > 0) {
+      for (const [index, point] of checks.entries()) {
+        try {
+          const value = evaluateExpression(point.expr, point.at)
+          if (Math.abs(value - point.expect) > config.tolerance) {
+            return {
+              pass: false,
+              gate: name,
+              reason: `第 ${String(index + 1)} 个检验点不成立：${point.expr} 算出 ${String(value)}，期望 ${String(point.expect)}`,
+              fixable: true,
+              hint: '构造参数与题型的数学事实不一致',
+            } satisfies Verdict
+          }
+        } catch (error) {
+          return {
+            pass: false,
+            gate: name,
+            reason: `第 ${String(index + 1)} 个检验点算不出来：${error instanceof Error ? error.message : String(error)}`,
+            fixable: false,
+            hint: '题型声明的检验点写错了（表达式或变量名）',
+          } satisfies Verdict
+        }
+      }
+      return {
+        ...verdict,
+        pass: true,
+        evidence: {
+          ...verdict.evidence,
+          symbolic: {
+            pass: true,
+            detail: `按题型声明的 ${String(checks.length)} 个检验点独立复算通过（动态题型 ${kind}）`,
+          },
+        },
+      }
+    }
+
     const check = CHECKS[kind]
     if (check === undefined) {
       // fail closed：不认识的构造器一律不通过——**新题型必须配套独立校验**

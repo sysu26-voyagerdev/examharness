@@ -27,6 +27,13 @@ export interface Instance {
   params: Readonly<Record<string, number>>
   givens: readonly string[]
   goal: string
+  /**
+   * 题型声明的**检验点**：把 `at` 代入 `expr`，应当得到 `expect`。
+   *
+   * 有了它，闸门不必认识每个题型——它只要会算数就能独立核对
+   * （验收时还会做变异检验：把参数改坏，检验点必须失败，否则判它无效）。
+   */
+  checks?: readonly { expr: string; at: Readonly<Record<string, number>>; expect: number }[]
 }
 
 export interface WitnessStep {

@@ -350,6 +350,33 @@ export interface WorkspaceApi {
   dirOf(name: string): string | undefined
 }
 
+// ── 动态题型（agent 在运行时制作新题型）──────────────────────
+//
+// 题型 = 一个模块（kind / covers / construct），由 agent 写、**由框架验收**：
+// 静态安全扫描（只许做计算）、契约完整、同种子可复现、不同种子有差异、
+// 检验点能算且**能区分对错**（把参数改坏它必须失败）。通过才注册生效。
+// 闸门不认识新题型，但会用**自己的求值器**核对题型声明的检验点——判分不归出题的人管。
+
+export interface ConstructorReport {
+  kind: string
+  file: string
+  covers: readonly string[]
+  ok: boolean
+  samples: number
+  checks: number
+  problems: readonly string[]
+  at: string
+}
+
+export interface DynamicConstructorApi {
+  /** 现在生效的动态题型（含未通过的，报告里留痕） */
+  list(): readonly ConstructorReport[]
+  /** 扫描题型目录：加载 + 验收 */
+  loadAll(): Promise<readonly ConstructorReport[]>
+  /** 加载并验收一个题型模块；通过就注册生效 */
+  loadOne(file: string): Promise<ConstructorReport>
+}
+
 // ── 构造器提案（agent 出活，人签字）──────────────────────────
 //
 // 构造器产出**数学真值**，闸门是**裁判**——这两处不能让 agent 直接改（R1/R2）。
@@ -753,5 +780,6 @@ declare module '@deepseek-ai/cordis' {
     workspace: WorkspaceApi
     doc: DocApi
     proposals: ProposalApi
+    constructDynamic: DynamicConstructorApi
   }
 }

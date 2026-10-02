@@ -26,6 +26,9 @@ importers:
       '@examharness/plugin-construct-algebra':
         specifier: workspace:*
         version: link:packages/plugin-construct-algebra
+      '@examharness/plugin-construct-dynamic':
+        specifier: workspace:*
+        version: link:packages/plugin-construct-dynamic
       '@examharness/plugin-construct-geometry':
         specifier: workspace:*
         version: link:packages/plugin-construct-geometry
@@ -178,6 +181,18 @@ importers:
         version: 3.18.0
 
   packages/plugin-construct-algebra:
+    dependencies:
+      '@deepseek-ai/cordis':
+        specifier: ^4.0.4
+        version: 4.0.4(@deepseek-ai/cordis-plugin-include@1.0.9)(@deepseek-ai/cordis-plugin-loader@1.0.5)
+      '@examharness/core':
+        specifier: workspace:*
+        version: link:../core
+      schemastery:
+        specifier: ^3.18.0
+        version: 3.18.0
+
+  packages/plugin-construct-dynamic:
     dependencies:
       '@deepseek-ai/cordis':
         specifier: ^4.0.4

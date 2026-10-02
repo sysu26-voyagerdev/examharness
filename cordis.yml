@@ -115,6 +115,15 @@
   config:
     maxScale: 4
 
+# 动态题型：agent 在运行时写题型模块（data/constructors/*.mjs），
+# 框架做静态安全扫描 + 验收（含"检验点能不能区分对错"的变异检验），通过才生效
+- id: construct-dynamic
+  name: '@examharness/plugin-construct-dynamic'
+  config:
+    dir: data/constructors
+    samples: 30
+    maxCovers: 6
+
 - id: verify-roundtrip
   name: '@examharness/plugin-verify-roundtrip'
   config:
