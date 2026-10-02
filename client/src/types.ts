@@ -21,6 +21,8 @@ export interface ItemView {
   stemHtml: string
   answerHtml: string
   solutionHtml: readonly string[]
+  /** 选择题的选项（界面必须显示：没有选项的选择题不是题）；correct 只在"看答案"时用 */
+  options: readonly { key: string; html: string; correct: boolean; errorType?: string }[]
   /** 图由服务端按 spec 渲染好；界面只显示 */
   figure: string
   constructor: string
@@ -78,6 +80,8 @@ export interface VersionView {
   attempts: number
   gaps: readonly { slot: string; missing: number; reason: string }[]
   bindings: readonly SlotBindingView[]
+  /** 卷名（卷面标题）：由蓝图带下来，卷面上居中显示 */
+  paperTitle?: string
 }
 
 export interface SlotChangeView {

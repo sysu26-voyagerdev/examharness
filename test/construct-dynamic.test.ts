@@ -310,15 +310,15 @@ export function construct(slot, seed) {
   const b = 2 + (s % 4)
   const y0 = k * x0 + b
   const shapes = [
-    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_0, y_0)$，求 $y_0$。', givens: ['k = ' + k, 'b = ' + b, 'x_0 = ' + x0], goals: ['求 y_0'] },
-    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_0, y_0)$，判断它是否经过点 $(0, ' + (y0 + 1) + ')$。', givens: ['k = ' + k, 'x_0 = ' + x0, 'b = ' + b], goals: ['判断是否经过给定点', '说明理由'] },
-    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_0, y_0)$ 和原点，求 $y_0$。', givens: ['图象经过原点', 'x_0 = ' + x0, 'k = ' + k], goals: ['求 y_0', '求这个一次函数的解析式'] },
+    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_{0}, y_{0})$，求 $y_{0}$。', givens: ['$k = ' + k + '$', '$b = ' + b + '$', '$x_{0} = ' + x0 + '$'], goals: ['求 $y_{0}$'] },
+    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_{0}, y_{0})$，判断它是否经过点 $(0, ' + (y0 + 1) + ')$。', givens: ['$k = ' + k + '$', '$x_{0} = ' + x0 + '$', '$b = ' + b + '$'], goals: ['判断是否经过给定点', '说明理由'] },
+    { stem: '已知一次函数 $y=kx+b$ 的图象经过点 $(x_{0}, y_{0})$ 和原点，求 $y_{0}$。', givens: ['图象经过原点', '$x_{0} = ' + x0 + '$', '$k = ' + k + '$'], goals: ['求 $y_{0}$', '求这个一次函数的解析式'] },
   ]
   const shape = shapes[s % 3]
   return {
     params: { k, x0, b, y0 },
     stem: shape.stem,
-    answer: 'y_0 = ' + y0,
+    answer: '$y_{0} = ' + y0 + '$',
     givens: shape.givens,
     goals: shape.goals,
     checks: [{ expr: 'k*x0 + b - y0', at: { k, x0, b, y0 }, expect: 0 }],

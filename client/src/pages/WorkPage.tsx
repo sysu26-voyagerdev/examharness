@@ -29,7 +29,7 @@ import type { BlueprintInfoView, ItemView, SlotChangeView, VersionView } from '.
 const TABS = [
   { key: 'paper', label: '试卷' },
   { key: 'knowledge', label: '知识点' },
-  { key: 'evidence', label: '依据' },
+  { key: 'evidence', label: '检查' },
   { key: 'files', label: '文件' },
 ] as const
 
@@ -126,7 +126,6 @@ export function WorkPage(): React.JSX.Element {
       <Card sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <CardHeader
           title="工作记录"
-          subheader="你说的、它做的、检查结论，按时间排在一起"
           action={running !== null ? <Chip color="primary" variant="outlined" label="正在做" /> : undefined}
         />
         <Box sx={{ px: 2, pb: 1.5 }}>
@@ -136,15 +135,29 @@ export function WorkPage(): React.JSX.Element {
                 蓝图里还没有题位——先点右上角「蓝图」加几个。
               </Typography>
             ) : (
-              progress.map((slot) => (
-                <Tooltip key={slot.key} title={`${slot.knowledge}：需要 ${String(slot.want)} 道，已有 ${String(slot.have)} 道`}>
-                  <Chip
-                    color={slot.have >= slot.want ? 'success' : 'warning'}
-                    variant={slot.have >= slot.want ? 'outlined' : 'filled'}
-                    label={`${slot.key} ${String(slot.have)}/${String(slot.want)}`}
-                  />
-                </Tooltip>
-              ))
+              <>
+                {/* 一眼看的是"卡在哪儿"，不是 24 个编号：齐了就说齐了，缺了只列缺的 */}
+                <Chip
+                  size="small"
+                  color={missing.length === 0 ? 'success' : 'warning'}
+                  variant={missing.length === 0 ? 'outlined' : 'filled'}
+                  label={
+                    missing.length === 0
+                      ? `题位齐了（${String(progress.length)} 个）`
+                      : `还缺 ${String(missing.length)} 个题位`
+                  }
+                />
+                {missing.slice(0, 6).map((slot) => (
+                  <Tooltip key={slot.key} title={`${slot.knowledge}：需要 ${String(slot.want)} 道，已有 ${String(slot.have)} 道`}>
+                    <Chip size="small" variant="outlined" label={slot.key} />
+                  </Tooltip>
+                ))}
+                {missing.length > 6 && (
+                  <Typography variant="caption" color="text.secondary">
+                    等 {String(missing.length - 6)} 个
+                  </Typography>
+                )}
+              </>
             )}
             <Box sx={{ flex: 1 }} />
             <TextField
@@ -242,23 +255,47 @@ export function WorkPage(): React.JSX.Element {
           </Button>
         </Stack>
         {versions.length > 1 && (
-          <Stack direction="row" spacing={1} sx={{ px: 2, pt: 2, flexWrap: 'wrap' }}>
-            {versions.map((version) => (
+          <Stack direction="row" spacing={1} data-print-hide sx={{ px: 2, pt: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Typography variant="caption" color="text.secondary">
+              看哪一版
+            </Typography>
+            {/* 版本多了不能铺一排 chip（真实截图里铺了 45 个）：只给最近几版 + 一个下拉 */}
+            {versions.slice(-3).map((version) => (
               <Chip
                 key={version.version}
+                size="small"
                 variant={shown?.version === version.version ? 'filled' : 'outlined'}
                 color={shown?.version === version.version ? 'primary' : 'default'}
                 label={`第 ${String(version.version)} 版`}
                 onClick={() => setViewVersion(version.version)}
               />
             ))}
-            {viewingOld && <Chip variant="outlined" label="回到最新" onClick={() => setViewVersion(null)} />}
+            <TextField
+              select
+              size="small"
+              value=""
+              onChange={(event) => setViewVersion(Number(event.target.value))}
+              sx={{ minWidth: 120 }}
+            >
+              <MenuItem value="">全部版本…</MenuItem>
+              {versions
+                .toReversed()
+                .slice(0, 60)
+                .map((version) => (
+                  <MenuItem key={version.version} value={version.version}>
+                    第 {String(version.version)} 版（{String(version.bindings.length)} 题 ·{' '}
+                    {String(version.totalScore)} 分）
+                  </MenuItem>
+                ))}
+            </TextField>
+            {viewingOld && <Chip size="small" variant="outlined" label="回到最新" onClick={() => setViewVersion(null)} />}
           </Stack>
         )}
         <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
           {tab === 'paper' && (
             <PaperView
               version={shown}
+              paperTitle={session?.blueprint.paper.title ?? '试卷'}
               rows={rows}
               changes={shown === undefined ? [] : diffVersions(versions[shown.version - 2], shown)}
               frozen={frozen}

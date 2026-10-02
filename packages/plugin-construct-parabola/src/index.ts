@@ -40,14 +40,14 @@ function minus(value: number): string {
 }
 
 function poly(b: number, c: number): string {
-  const bs = b === 0 ? '' : b > 0 ? ` + ${b}x` : ` − ${-b}x`
-  const cs = c === 0 ? '' : c > 0 ? ` + ${c}` : ` − ${-c}`
+  const bs = b === 0 ? '' : b > 0 ? ` + ${b === 1 ? '' : String(b)}x` : ` − ${-b === 1 ? '' : String(-b)}x`
+  const cs = c === 0 ? '' : c > 0 ? ` + ${String(c)}` : ` − ${String(-c)}`
   return `y = x²${bs}${cs}`
 }
 
 /** 同一个多项式的 LaTeX 写法（正文显示用这个；上面的纯文本留给闸门做数字比对） */
 function polyTex(b: number, c: number): string {
-  const bs = b === 0 ? '' : b > 0 ? ` + ${b}x` : ` - ${-b}x`
+  const bs = b === 0 ? '' : b > 0 ? ` + ${b === 1 ? '' : String(b)}x` : ` - ${-b === 1 ? '' : String(-b)}x`
   const cs = c === 0 ? '' : c > 0 ? ` + ${c}` : ` - ${-c}`
   return `y = x^{2}${bs}${cs}`
 }
@@ -159,13 +159,43 @@ export function createParabolaRoots(config: ConstructConfig): Constructor {
       annotations: [`对称轴 x = ${minus(h)}`],
     }
 
+    // 干扰项**必须与问法一致**：问对称轴就给"对称轴的典型错解"，
+    // 不能拿"AB 的长度"去当干扰项（真实踩过：卷面上问对称轴，三个选项却是 AB = 11/8/1）。
+    const wrongPool: readonly { text: string; errorType: string }[] = wantsAxis
+      ? [
+          { text: `x = ${minus(-h)}`, errorType: '对称轴符号写反' },
+          { text: `x = ${minus(r1)}`, errorType: '拿一个交点当对称轴' },
+          { text: `x = ${minus(r2)}`, errorType: '拿另一个交点当对称轴' },
+          { text: `x = ${minus(-b)}`, errorType: '把一次项系数当对称轴' },
+        ]
+      : wantsVertex
+        ? [
+            { text: `(${minus(h)}, ${minus(-k)})`, errorType: '顶点纵坐标符号写反' },
+            { text: `(${minus(-h)}, ${minus(k)})`, errorType: '顶点横坐标符号写反' },
+            { text: `(${minus(r1)}, ${minus(r2)})`, errorType: '把交点当成顶点' },
+            { text: `(${minus(h)}, ${minus(k + 1)})`, errorType: '计算错' },
+          ]
+        : [
+            { text: `AB = ${String(length + 2)}`, errorType: '计算错' },
+            { text: `AB = ${String(length - 1)}`, errorType: '漏解' },
+            { text: `AB = ${String(Math.abs(r1 - r2) + 3)}`, errorType: '计算错' },
+            { text: `AB = ${String(Math.abs(r1) + Math.abs(r2))}`, errorType: '把两根绝对值相加' },
+          ]
     const options: readonly Option[] | undefined =
       slot.type === '选择'
         ? [
             { key: 'A', text: answer },
-            { key: 'B', text: `AB = ${length + 2}`, errorType: '计算错' },
-            { key: 'C', text: `AB = ${length - 1}`, errorType: '漏解' },
-            { key: 'D', text: `AB = ${r1 + r2}`, errorType: '把中点当交点' },
+            ...wrongPool
+              .filter((entry) => entry.text !== answer)
+              // 长度题的选项不能是负数或 0（真卷子不会给"长为 −6"的选项）
+              .filter((entry) => !/^-?\d+(\.\d+)?$/.test(entry.text) || Number(entry.text) > 0)
+              .filter((entry, index, all) => all.findIndex((other) => other.text === entry.text) === index)
+              .slice(0, 3)
+              .map((entry, index) => ({
+                key: ['B', 'C', 'D'][index] ?? 'D',
+                text: entry.text,
+                errorType: entry.errorType,
+              })),
           ]
         : undefined
 

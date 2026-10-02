@@ -17,6 +17,7 @@ import CardActions from '@mui/material/CardActions'
 import CardContent from '@mui/material/CardContent'
 import CardHeader from '@mui/material/CardHeader'
 import Chip from '@mui/material/Chip'
+import Paper from '@mui/material/Paper'
 import Tooltip from '@mui/material/Tooltip'
 import CircularProgress from '@mui/material/CircularProgress'
 import Collapse from '@mui/material/Collapse'
@@ -61,9 +62,68 @@ function plain(text: string): string {
     .trim()
 }
 
+/**
+ * 把同一类记录收成一条。
+ *
+ * 出卷时会连着入库几十道题：不收敛的话时间线就是一面墙
+ * （真实截图：一屏 20 条"入库：第 X 题"，把真正值得看的话全顶下去）。
+ *
+ * 两件事：
+ *   1. **连着入库**（放进库里的都是同一类动作）→ 收成一条"入库 N 道题（S11-1 → S23-1）"；
+ *   2. 完全重复的（同 kind + 同 tool + 同文本）→ 记次数。
+ */
 function collapseRepeats(entries: readonly LogEntryView[]): readonly LogEntryView[] {
-  const out: LogEntryView[] = []
+  const merged: LogEntryView[] = []
+  let run: LogEntryView[] = []
+  const flush = (): void => {
+    if (run.length === 0) return
+    const first = run[0]
+    const last = run.at(-1)
+    if (run.length === 1 && first !== undefined) {
+      merged.push(first)
+    } else if (first !== undefined && last !== undefined) {
+      merged.push({
+        ...last,
+        text: `入库 ${String(run.length)} 道题：${first.text.replace(/^入库：/, '')} → ${last.text.replace(/^入库：/, '')}`,
+      })
+    }
+    run = []
+  }
   for (const entry of entries) {
+    if (/^入库：/.test(entry.text)) {
+      run.push(entry)
+      continue
+    }
+    flush()
+    merged.push(entry)
+  }
+  flush()
+
+  // 连着写题型（agent 一轮能写十来个）也收成一条：只留"写了几个、覆盖什么"
+  const condensed: LogEntryView[] = []
+  let wrote: LogEntryView[] = []
+  const flushWrote = (): void => {
+    if (wrote.length === 0) return
+    const first = wrote[0]
+    const last = wrote.at(-1)
+    if (wrote.length === 1 && first !== undefined) condensed.push(first)
+    else if (last !== undefined) {
+      condensed.push({ ...last, text: `写了 ${String(wrote.length)} 个题型：${wrote.map((entry) => entry.text.split("（")[0]).join("、")}` })
+    }
+    wrote = []
+  }
+  for (const entry of merged) {
+    if (entry.tool === 'constructor_write') {
+      wrote.push(entry)
+      continue
+    }
+    flushWrote()
+    condensed.push(entry)
+  }
+  flushWrote()
+
+  const out: LogEntryView[] = []
+  for (const entry of condensed) {
     const last = out.at(-1)
     if (last !== undefined && entry.kind !== 'user' && last.kind === entry.kind && last.tool === entry.tool && last.text === entry.text) {
       last.repeat = (last.repeat ?? 1) + 1
@@ -185,11 +245,56 @@ function Row({ entry }: { entry: LogEntryView }): React.JSX.Element {
 
 /* ─────────────── 试卷 ─────────────── */
 
-function statusOf(item: ItemView, binding: SlotBindingView): { text: string; color: 'success' | 'warning' } {
-  if (binding.confirmedBy !== null) return { text: `${binding.confirmedBy} 已确认`, color: 'success' }
+/**
+ * 闸门名说人话。**不许把内部名字摊在老师面前**（roundtrip / scope / symbolic …），
+ * 他要看的是"题面有没有写歪、算式对不对"这件事本身。
+ */
+const GATE_LABEL: Readonly<Record<string, string>> = {
+  scope: '不超纲',
+  symbolic: '算式核对',
+  dedup: '不与旧题重复',
+  originality: '不是抄原题',
+  figure: '图形自洽',
+  roundtrip: '题面忠实',
+  parts: '分量够',
+  options: '选项可判',
+}
+
+export function gateLabel(gate: string): string {
+  return GATE_LABEL[gate] ?? gate
+}
+
+/** 难度按人话显示：0.855 不是给人看的，0.86 或"较易"才是 */
+export function formatDifficulty(range: readonly [number, number] | undefined): string {
+  if (range === undefined) return ''
+  const low = Math.round(range[0] * 100) / 100
+  const high = Math.round(range[1] * 100) / 100
+  return low === high ? low.toFixed(2) : `${low.toFixed(2)}–${high.toFixed(2)}`
+}
+
+function statusOf(item: ItemView, binding: SlotBindingView): { text: string; tone: 'ok' | 'warn'; hint: string } {
+  if (binding.confirmedBy !== null) {
+    return { text: '已确认', tone: 'ok', hint: `${binding.confirmedBy} 已确认这道题` }
+  }
   const failed = Object.entries(item.evidence).filter(([, value]) => !value.pass)
-  if (failed.length > 0 || item.lifecycle === 'needs_review') return { text: '需要确认', color: 'warning' }
-  return { text: '通过检查', color: 'success' }
+  if (failed.length > 0) {
+    return { text: '没通过', tone: 'warn', hint: failed.map(([gate]) => `${gateLabel(gate)}没通过`).join('、') }
+  }
+  if (item.lifecycle === 'needs_review') {
+    return { text: '待确认', tone: 'warn', hint: '有一项检查没验成，等你签字' }
+  }
+  return { text: '已检查', tone: 'ok', hint: '各项检查都过了' }
+}
+
+/**
+ * 缺口的说法**给老师看**：服务端那句是给 agent 看的（带内部题型名与闸门名），
+ * 界面上要把它们换成"哪一项检查没过 + 为什么"。
+ */
+function humanGap(reason: string): string {
+  const stripped = reason
+    .replace(/^\S+\s*被\s*([a-z-]+)\s*拦下：/u, (_all, gate: string) => `${gateLabel(gate)}没过：`)
+    .replace(/构造器不覆盖该题位：.*$/u, '还没有能出这个题位的题型')
+  return stripped.length > 120 ? `${stripped.slice(0, 118)}…` : stripped
 }
 
 function changeMark(change: SlotChangeView | undefined): string {
@@ -197,8 +302,36 @@ function changeMark(change: SlotChangeView | undefined): string {
   return change.change === 'replaced' ? '这一版换过' : change.change === 'added' ? '这一版新增' : '这一版移除'
 }
 
+/** 卷面分组：真卷子是"一、选择题（每题 3 分）二、填空题…"，不是一题一张卡片 */
+function groupByType(rows: readonly { binding: SlotBindingView; item: ItemView }[]): readonly {
+  type: string
+  heading: string
+  rows: readonly { binding: SlotBindingView; item: ItemView }[]
+}[] {
+  const order = ['选择', '填空', '解答']
+  const groups = new Map<string, { binding: SlotBindingView; item: ItemView }[]>()
+  for (const row of rows) {
+    const list = groups.get(row.item.type) ?? []
+    list.push(row)
+    groups.set(row.item.type, list)
+  }
+  const numerals = ['一', '二', '三', '四', '五']
+  return [...groups.entries()]
+    .toSorted((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
+    .map(([type, list], index) => {
+      const per = list[0]?.item.score ?? 0
+      const total = list.reduce((sum, row) => sum + row.item.score, 0)
+      return {
+        type,
+        heading: `${numerals[index] ?? String(index + 1)}、${type}题（每题 ${String(per)} 分，共 ${String(total)} 分）`,
+        rows: list,
+      }
+    })
+}
+
 export function PaperView({
   version,
+  paperTitle,
   rows,
   changes,
   frozen,
@@ -211,6 +344,8 @@ export function PaperView({
   onSyncHeader,
 }: {
   version: VersionView | undefined
+  /** 卷名（来自会话的蓝图） */
+  paperTitle: string
   bankSize: number
   onSyncHeader: (totalScore: number) => void
   rows: readonly { binding: SlotBindingView; item: ItemView }[]
@@ -222,6 +357,8 @@ export function PaperView({
   onConfirm: (itemId: string) => void
   onAssemble: () => void
 }): React.JSX.Element {
+  const [showAnswers, setShowAnswers] = useState(false)
+
   if (version === undefined) {
     return (
       <Box sx={{ p: 4, textAlign: 'center' }}>
@@ -232,37 +369,57 @@ export function PaperView({
           {frozen
             ? '这份卷子已经定稿。'
             : bankSize === 0
-              ? '题库还是空的：先让 agent 出题，题目会先过一遍检查再入库。'
+              ? '题库还是空的：让 agent 出题，它会先过一遍检查再入库。'
               : `题库里已经有 ${String(bankSize)} 道题。按蓝图组卷，把够格的题排成一份卷子。`}
         </Typography>
-        <Button variant="contained" disabled={busy || frozen} onClick={onAssemble}>
+        <Button variant="contained" disableElevation disabled={busy || frozen} onClick={onAssemble}>
           按蓝图出一份
         </Button>
       </Box>
     )
   }
 
+  const groups = groupByType(rows)
+
   return (
-    <Stack spacing={2} sx={{ p: { xs: 1.5, md: 2 } }}>
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-        <Typography variant="h6">第 {version.version} 版</Typography>
-        <Chip label={`满分 ${String(version.totalScore)}`} color="primary" variant="outlined" />
-        <Chip label={`${String(version.bindings.length)} 道题`} variant="outlined" />
-        {viewingOld && <Chip label="在看旧版本" color="warning" />}
+    <Box sx={{ px: { xs: 1, md: 2.5 }, py: 2 }}>
+      {/* 工具条：卷面之外的操作都收在这里，别混进卷子里 */}
+      <Stack
+        direction="row"
+        spacing={1}
+        data-print-hide
+        sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 1.5 }}
+      >
+        <Typography variant="subtitle2">第 {version.version} 版</Typography>
+        <Typography variant="caption" color="text.secondary">
+          {String(version.bindings.length)} 道题 · 满分 {String(version.totalScore)}
+        </Typography>
+        {viewingOld && <Chip label="在看旧版本" color="warning" size="small" />}
+        <Box sx={{ flex: 1 }} />
+        <Button
+          size="small"
+          variant={showAnswers ? 'contained' : 'outlined'}
+          disableElevation
+          onClick={() => setShowAnswers((previous) => !previous)}
+        >
+          {showAnswers ? '只看卷面' : '答案与解析'}
+        </Button>
+        <Button size="small" variant="outlined" onClick={() => window.print()}>
+          打印
+        </Button>
+        <Button size="small" variant="outlined" disabled={busy || frozen} onClick={onAssemble}>
+          再出一版
+        </Button>
       </Stack>
 
       {version.scoreGap > 0 && (
         <Alert
           severity="warning"
           icon={<ReportOutlinedIcon />}
+          data-print-hide
+          sx={{ mb: 1.5 }}
           action={
-            <Button
-              color="inherit"
-              size="small"
-              onClick={() =>
-                void onSyncHeader(version.totalScore)
-              }
-            >
+            <Button color="inherit" size="small" onClick={() => void onSyncHeader(version.totalScore)}>
               卷头改成 {String(version.totalScore)} 分
             </Button>
           }
@@ -272,130 +429,201 @@ export function PaperView({
       )}
 
       {version.gaps.length > 0 && (
-        <Alert severity="warning" icon={<ReportOutlinedIcon />}>
-          有 {version.gaps.length} 个题位没凑齐：{version.gaps.map((gap) => `${gap.slot}（${gap.reason}）`).join('；')}
+        <Alert severity="warning" icon={<ReportOutlinedIcon />} data-print-hide sx={{ mb: 1.5 }}>
+          有 {String(version.gaps.length)} 个题位没凑齐：{version.gaps.map((gap) => `${gap.slot}（${humanGap(gap.reason)}）`).join('；')}
         </Alert>
       )}
 
-      {rows.map(({ binding, item }, index) => (
-        <QuestionCard
-          key={binding.slot}
-          index={index}
-          binding={binding}
-          item={item}
-          mark={changeMark(changes.find((change) => change.slot === binding.slot))}
-          busy={busy}
-          frozen={frozen}
-          onRegenerate={onRegenerate}
-          onConfirm={onConfirm}
-        />
-      ))}
+      {/* 卷面：一张纸的样子——标题居中、按题型分节、题号连着走 */}
+      <Paper
+        elevation={0}
+        sx={{
+          p: { xs: 2.5, md: 5 },
+          border: 1,
+          borderColor: 'divider',
+          borderRadius: 1,
+          bgcolor: 'background.paper',
+          '& svg': { maxWidth: '100%', height: 'auto' },
+        }}
+      >
+        <Box sx={{ textAlign: 'center', mb: 3 }}>
+          <Typography sx={{ fontSize: 20, fontWeight: 700, letterSpacing: '0.04em' }}>
+            {paperTitle}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+            满分 {String(version.totalScore)} 分　共 {String(version.bindings.length)} 题
+          </Typography>
+        </Box>
 
-      <Card variant="outlined">
-        <CardActions>
-          <Button variant="contained" disabled={busy || frozen} onClick={onAssemble}>
-            再出一版
-          </Button>
-          {frozen && <Chip label="已定稿" color="warning" sx={{ ml: 1 }} />}
-        </CardActions>
-      </Card>
-    </Stack>
+        {groups.map((group) => {
+          let running = 0
+          return (
+            <Box key={group.type} sx={{ mb: 3 }}>
+              <Typography sx={{ fontSize: 15.5, fontWeight: 600, mb: 1.5 }}>{group.heading}</Typography>
+              <Stack spacing={2.5}>
+                {group.rows.map(({ binding, item }) => {
+                  running += 1
+                  return (
+                    <QuestionBlock
+                      key={binding.slot}
+                      number={numberAfter(groups, group.type) + running}
+                      binding={binding}
+                      item={item}
+                      mark={changeMark(changes.find((change) => change.slot === binding.slot))}
+                      showAnswer={showAnswers}
+                      busy={busy}
+                      frozen={frozen}
+                      onRegenerate={onRegenerate}
+                      onConfirm={onConfirm}
+                    />
+                  )
+                })}
+              </Stack>
+            </Box>
+          )
+        })}
+      </Paper>
+    </Box>
   )
 }
 
-function QuestionCard({
-  index,
+/** 这一节之前已经排了几道题（题号要连着走，不能每组都从 1 开始） */
+function numberAfter(groups: readonly { type: string; rows: readonly unknown[] }[], type: string): number {
+  let count = 0
+  for (const group of groups) {
+    if (group.type === type) break
+    count += group.rows.length
+  }
+  return count
+}
+
+/** 卷面上的一道题：题号 + 题干 + 选项 + 图；操作按钮只在鼠标悬停时出现 */
+function QuestionBlock({
+  number,
   binding,
   item,
   mark,
+  showAnswer,
   busy,
   frozen,
   onRegenerate,
   onConfirm,
 }: {
-  index: number
+  number: number
   binding: SlotBindingView
   item: ItemView
   mark: string
+  showAnswer: boolean
   busy: boolean
   frozen: boolean
   onRegenerate: (slotKey: string) => void
   onConfirm: (itemId: string) => void
 }): React.JSX.Element {
-  const [open, setOpen] = useState(false)
   const status = statusOf(item, binding)
+  const [detail, setDetail] = useState(false)
 
   return (
-    <Card>
-      <CardHeader
-        avatar={<Avatar sx={{ bgcolor: 'primary.main' }}>{index + 1}</Avatar>}
-        title={`${item.type}　${String(item.score)} 分`}
-        subheader={item.knowledge.join('、')}
-        action={<Chip label={status.text} color={status.color} />}
-      />
-      <CardContent sx={{ pt: 0 }}>
-        <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap' }}>
-          {item.difficulty !== undefined && <Chip size="small" variant="outlined" label={`难度 ${String(item.difficulty[0])}–${String(item.difficulty[1])}`} />}
-          {mark !== '' && <Chip size="small" color="info" label={mark} />}
-          <Tooltip title={`完整编号 ${item.id}`}>
-            <Chip size="small" variant="outlined" label={item.id.slice(-8)} sx={{ fontFamily: 'monospace' }} />
-          </Tooltip>
-        </Stack>
-
-        <Typography variant="body1">
-          {/* 数学写在题面里（$…$，服务端渲染好）：不再单独摆一块公式 */}
-          <MathText html={item.stemHtml} />
+    <Box sx={{ position: 'relative', '&:hover .q-actions': { opacity: 1 } }}>
+      {/* 卷面左侧的题号（真卷子就是这样）：分值跟在题号后 */}
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
+        <Typography component="span" sx={{ fontWeight: 600, minWidth: 26 }}>
+          {number}.
         </Typography>
-        {item.figure !== '' && (
-          <Box
-            sx={{ my: 1.5, textAlign: 'center', '& svg': { maxWidth: '100%', height: 'auto' } }}
-            dangerouslySetInnerHTML={{ __html: item.figure }}
-          />
-        )}
-
-        <Collapse in={open} unmountOnExit>
-          <Box sx={{ mt: 1.5, p: 2, bgcolor: 'action.hover', borderRadius: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>
-              答案
-            </Typography>
-            <Typography variant="body1">
-              <MathText html={item.answerHtml} />
-            </Typography>
-            <Box component="ol" sx={{ pl: 2.5, my: 1.5 }}>
-              {item.solutionHtml.map((step, stepIndex) => (
-                <Box component="li" key={stepIndex} sx={{ mb: 1 }}>
-                  <Typography variant="body2">
-                    <MathText html={step} />
-                  </Typography>
-                </Box>
+        <Box sx={{ flex: 1, minWidth: 0 }}>
+          <Typography component="span" sx={{ fontSize: 15.5, lineHeight: 1.9 }}>
+            <MathText html={item.stemHtml} />
+          </Typography>
+          {item.options.length > 0 && (
+            <Box
+              sx={{
+                mt: 1,
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' },
+                columnGap: 3,
+                rowGap: 0.5,
+              }}
+            >
+              {item.options.map((option) => (
+                <Typography
+                  key={option.key}
+                  sx={{
+                    fontSize: 15,
+                    color: showAnswer && option.correct ? 'success.dark' : 'text.primary',
+                    fontWeight: showAnswer && option.correct ? 600 : 400,
+                  }}
+                >
+                  {option.key}. <MathText html={option.html} />
+                </Typography>
               ))}
             </Box>
-            <Typography variant="caption" color="text.secondary">
-              检查结果：{Object.entries(item.evidence).map(([gate, value]) => `${gate} ${value.pass ? '通过' : '没通过'}`).join('　')}
-              {Object.keys(item.evidence).length === 0 ? '（还没有记录）' : ''}
-            </Typography>
-          </Box>
-        </Collapse>
-      </CardContent>
-      <CardActions>
-        <Button size="small" onClick={() => setOpen((previous) => !previous)}>
-          {open ? '收起答案' : '答案与解析'}
-        </Button>
-        <Box sx={{ flex: 1 }} />
-        <Button size="small" disabled={busy || frozen} onClick={() => onRegenerate(binding.slot)}>
-          换一道
-        </Button>
-        {item.lifecycle === 'needs_review' && binding.confirmedBy === null && (
-          <Button size="small" variant="contained" disabled={busy || frozen} onClick={() => onConfirm(item.id)}>
-            确认这道
+          )}
+          {item.figure !== '' && (
+            <Box
+              sx={{ my: 1.5, textAlign: 'center' }}
+              dangerouslySetInnerHTML={{ __html: item.figure }}
+            />
+          )}
+          {showAnswer && (
+            <Box sx={{ mt: 1.5, pl: 2, borderLeft: 3, borderColor: 'divider' }}>
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                答案　<MathText html={item.answerHtml} />
+              </Typography>
+              <Box component="ol" sx={{ pl: 2.5, my: 1, mb: 0 }}>
+                {item.solutionHtml.map((step, stepIndex) => (
+                  <Box component="li" key={stepIndex}>
+                    <Typography variant="body2" color="text.secondary">
+                      <MathText html={step} />
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+              <Button size="small" sx={{ mt: 0.5, px: 0 }} onClick={() => setDetail((previous) => !previous)}>
+                {detail ? '收起检查结果' : '检查结果'}
+              </Button>
+              {detail && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                  {Object.entries(item.evidence)
+                    .map(([gate, value]) => `${gateLabel(gate)}${value.pass ? ' ✓' : ' ✗'}`)
+                    .join('　')}
+                  {Object.keys(item.evidence).length === 0 ? '（还没有记录）' : ''}
+                </Typography>
+              )}
+            </Box>
+          )}
+        </Box>
+
+        {/* 老师才能看到的操作：藏在悬停里，不占卷面 */}
+        <Stack
+          className="q-actions"
+          direction="row"
+          spacing={0.5}
+          data-print-hide
+          sx={{ opacity: 0, transition: 'opacity .15s', alignItems: 'center', pl: 1 }}
+        >
+          {mark !== '' && <Chip size="small" color="info" variant="outlined" label={mark} />}
+          <Tooltip title={`${status.hint}｜${item.knowledge.join('、')}｜难度 ${formatDifficulty(item.difficulty)}`}>
+            <Box
+              sx={{
+                width: 8,
+                height: 8,
+                borderRadius: '50%',
+                bgcolor: status.tone === 'ok' ? 'success.main' : 'warning.main',
+              }}
+            />
+          </Tooltip>
+          <Button size="small" disabled={busy || frozen} onClick={() => onRegenerate(binding.slot)}>
+            换一道
           </Button>
-        )}
-      </CardActions>
-    </Card>
+          {item.lifecycle === 'needs_review' && binding.confirmedBy === null && (
+            <Button size="small" variant="contained" disableElevation disabled={busy || frozen} onClick={() => onConfirm(item.id)}>
+              确认
+            </Button>
+          )}
+        </Stack>
+      </Stack>
+    </Box>
   )
 }
-
-/* ─────────────── 知识点 ─────────────── */
 
 export function KnowledgeView({ knowledge, items }: { knowledge: KnowledgeView; items: readonly ItemView[] }): React.JSX.Element {
   const used = new Map<string, number>()
@@ -468,7 +696,8 @@ export function EvidenceView({ rows, versions }: { rows: readonly { binding: Slo
                 <Stack key={gate} direction="row" spacing={1.5} sx={{ alignItems: 'flex-start' }}>
                   <Chip size="small" color={value.pass ? 'success' : 'error'} label={value.pass ? '通过' : '没通过'} />
                   <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="body2">{gate}</Typography>
+                    {/* 闸门名说人话：老师不需要认识 roundtrip / symbolic 这些内部名字 */}
+                    <Typography variant="body2">{gateLabel(gate)}</Typography>
                     {value.detail !== undefined && (
                       <Typography variant="caption" color="text.secondary">
                         {value.detail}

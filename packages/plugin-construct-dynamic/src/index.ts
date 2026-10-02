@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { fnv1a } from '@examharness/core'
+import { fnv1a, optionDisplayText } from '@examharness/core'
 import type {
   BlueprintRow,
   CheckPoint,
@@ -154,7 +154,7 @@ function assembleItem(kind: string, slot: BlueprintRow, seed: number, out: Modul
       ...(() => {
         if (out.options !== undefined) return { options: out.options.map((option): Option => ({ key: option.key, text: option.text })) }
         if (out.distractors === undefined) return {}
-        const texts = [out.answer, ...out.distractors.map(String)].slice(0, 4)
+        const texts = [out.answer, ...out.distractors.map(String)].slice(0, 4).map((text) => optionDisplayText(text))
         return { options: shuffleOptions(texts, seed) }
       })(),
       answerText: out.answer,

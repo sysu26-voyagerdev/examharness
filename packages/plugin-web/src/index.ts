@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import { renderMathInText } from '@examharness/core'
+import { normalize, optionDisplayText, renderMathInText } from '@examharness/core'
 import type {
   Blueprint,
   BlueprintPatch,
@@ -107,8 +107,8 @@ export function renderPaperHtml(meta: SessionMeta, items: readonly Item[], figur
   const rows = items
     .map((item, index) => {
       const options = (item.prose.options ?? [])
-        .map((option) => `${option.key}. ${renderMathInText(option.text, 'mathml')}`)
-        .join('　　')
+        .map((option) => `${option.key}. ${renderMathInText(optionDisplayText(option.text), 'mathml')}`)
+        .join('  ')
       const figure = figureOf(item)
       // 题面里本来就用 $…$ 写着数学：直接渲染成**行内 MathML**（Word 与浏览器都认），
       // 不再在题面下面单独摆一块公式——那是重复，看着也乱（用户："这个部分意义不大"）。
@@ -148,7 +148,7 @@ hr{border:0;border-top:1px dashed #bbb;margin:24px 0}
 .a ol{margin:4px 0 0 20px}
 </style></head><body>
 <h1>${meta.title}</h1>
-<div class="meta">${meta.className}　${meta.progress}　满分 ${String(total)} 分</div>
+<div class="meta">${meta.className} ${meta.progress} 满分 ${String(total)} 分</div>
 ${rows}
 <hr>
 <h1>参考答案与解析</h1>
@@ -158,7 +158,7 @@ ${answers}
 
 /** 导出为 Markdown（图以 SVG 内联，便于进 Git 或再加工） */
 export function renderPaperMarkdown(meta: SessionMeta, items: readonly Item[], figureOf: (item: Item) => string): string {
-  const lines: string[] = [`# ${meta.title}`, '', `${meta.className}　${meta.progress}`, '']
+  const lines: string[] = [`# ${meta.title}`, '', `${meta.className} ${meta.progress}`, '']
   items.forEach((item, index) => {
     lines.push(`## ${String(index + 1)}. （${item.slot.type}，${String(item.slot.score)} 分）`, '', item.prose.stem, '')
     for (const option of item.prose.options ?? []) lines.push(`- ${option.key}. ${option.text}`)
@@ -981,6 +981,25 @@ export function apply(ctx: Context, config: WebConfig): void {
   )
 }
 
+/** 选项在卷面上的写法：**四个选项形式要一致**（混搭的名称全去掉，整齐的留着） */
+function optionViews(item: Item): readonly Record<string, unknown>[] {
+  const options = item.prose.options ?? []
+  const labelled = options.map((option) => /^[^=＝]{1,14}[=＝].+$/.test(option.text.trim()))
+  const mixed = labelled.some((value) => value) && !labelled.every((value) => value)
+  return options.map((option) => {
+    const text = mixed ? optionDisplayText(option.text) : option.text
+    const answer = normalize(item.prose.answerText)
+    return Object.assign(
+      {
+        key: option.key,
+        html: renderMathInText(text, 'html'),
+        correct: normalize(option.text) === answer || normalize(optionDisplayText(option.text)) === answer,
+      },
+      option.errorType === undefined ? {} : { errorType: option.errorType },
+    )
+  })
+}
+
 /** 推给界面的最小投影：不要整个 Item 糊过去 */
 function summarizeWith(item: Item, figureSvg: string): Record<string, unknown> {
   return {
@@ -996,6 +1015,9 @@ function summarizeWith(item: Item, figureSvg: string): Record<string, unknown> {
     // 以前还会额外带一份"公式层"（tex.stemMath 等）让界面单独摆一块公式——
     // 那是重复（题面里已经写着数学了），已去掉（用户："这个部分意义不大"）。
     stemHtml: renderMathInText(item.prose.stem, 'html'),
+    // **选项必须发给界面**：选择题在卷面上没有 A/B/C/D 就等于没有题目
+    // （真实踩过：界面上只显示"（  ）"，因为服务端压根没这个字段）。
+    options: optionViews(item),
     answerHtml: renderMathInText(item.prose.answerText, 'html'),
     solutionHtml: item.prose.solution.map((step) => renderMathInText(step, 'html')),
     figure: figureSvg,

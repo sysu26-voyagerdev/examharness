@@ -161,6 +161,23 @@ function contractProblems(built) {
   if (!Array.isArray(built.givens) || built.givens.some((given) => typeof given !== 'string')) {
     problems.push('givens 必须是字符串数组（题面显式给出的条件，一条一个；没有条件就给空数组）')
   }
+  // 题面里的数学要写成**行内 LaTeX**（$x^{2}$），不要留 x^2、x_1 这种写法：
+  // 卷面上那是给学生看的公式，不渲染出来就是一堆记号（真实踩过：卷面印着 "x^2 - 7x + 12 = 0"）。
+  for (const [name, value] of [
+    ['stem', built.stem],
+    ['answer', built.answer],
+    ['solution', Array.isArray(built.solution) ? built.solution.join('\n') : ''],
+  ]) {
+    if (typeof value !== 'string' || value === '') continue
+    const bare = value.replace(/\$[^$]*\$/g, '')
+    if (/[\^_]/.test(bare)) {
+      problems.push(
+        `${name} 里有没写成 LaTeX 的数学记号（^ 或 _）：数学要包在 $…$ 里，` +
+          '例如 "已知方程 $x^{2}-7x+12=0$"、"求 $x_{1}^{2}x_{2}+x_{1}x_{2}^{2}$ 的值"',
+      )
+      break
+    }
+  }
   text('stemTex', built.stemTex)
   text('answerTex', built.answerTex)
   text('goal', built.goal)

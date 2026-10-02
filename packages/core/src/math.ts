@@ -139,6 +139,18 @@ export function mathSegments(text: string): readonly string[] {
   return out
 }
 
+/**
+ * 选项在卷面上的写法：**去掉"标签="前缀**（`BD=32` → `32`，`k=12` → `12`）。
+ * 四个选项要长得一样——真题里不会出现 `A. 24 B. 16 C. 40 D. BD=32` 这种混搭。
+ * 放在 core 是因为**展示与导出都要用**，而且库里早先存的题也得照这个显示。
+ */
+export function optionDisplayText(raw: string): string {
+  const trimmed = raw.trim()
+  const labelled = /^[^=＝]{1,14}[=＝](.+)$/.exec(trimmed)
+  const value = (labelled?.[1] ?? trimmed).trim()
+  return value === '' ? trimmed : value
+}
+
 export function renderMathInText(text: string, mode: MathMode = 'html'): string {
   let out = ''
   let cursor = 0

@@ -48,6 +48,12 @@ export function makeTheme(mode: 'light' | 'dark'): Theme {
         styleOverrides: {
           'math': { fontFamily: SANS, fontSize: '1.05em' },
           'math[display="block"]': { margin: '0.6em 0' },
+          // **打印就是卷子**：顶栏、抽屉、工具条、提示都别印出来，
+          // 纸面上只留标题、题目、图与答题空白。
+          '@media print': {
+            'header, nav, [data-print-hide]': { display: 'none !important' },
+            body: { background: '#fff' },
+          },
         },
       },
       MuiAppBar: {
