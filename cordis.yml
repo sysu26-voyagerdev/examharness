@@ -137,6 +137,17 @@
   config:
     strict: true
 
+- id: verify-parts
+  name: '@examharness/plugin-verify-parts'
+  config:
+    twoPartFrom: 8
+    threePartFrom: 12
+
+- id: verify-options
+  name: '@examharness/plugin-verify-options'
+  config:
+    optionCount: 4
+
 - id: verify-figure
   name: '@examharness/plugin-verify-figure'
   config:

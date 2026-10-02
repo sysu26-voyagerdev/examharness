@@ -140,6 +140,18 @@ function contractProblems(built) {
       problems.push(`${name} 必须是**字符串数组**${hint === undefined ? '' : `（${hint}）`}：你给的是 ${Array.isArray(value) ? '数组里有非字符串' : typeof value}`)
     }
   }
+  // **结构与问法必须声明**（回译要拿它核对、分量闸门要用它数分几问）
+  const goals = Array.isArray(built.goals) ? built.goals.filter((goal) => typeof goal === 'string' && goal.trim() !== '') : []
+  if (built.goals === undefined) {
+    if (typeof built.goal !== 'string' || built.goal.trim() === '') {
+      problems.push('没有声明 goal / goals：说不出"这道题要求什么"，题面就没人核对得了，也数不出分几问')
+    }
+  } else if (!Array.isArray(built.goals) || goals.length !== built.goals.length || goals.length === 0) {
+    problems.push('goals 必须是**非空的字符串数组**（一问一条）')
+  }
+  if (!Array.isArray(built.givens) || built.givens.some((given) => typeof given !== 'string')) {
+    problems.push('givens 必须是字符串数组（题面显式给出的条件，一条一个；没有条件就给空数组）')
+  }
   text('stemTex', built.stemTex)
   text('answerTex', built.answerTex)
   text('goal', built.goal)
@@ -208,6 +220,7 @@ if (problems.length > 0) done({ kind, covers })
 
 const slot = { key: 'Z1', knowledge: covers.slice(0, 1), cognitive: '掌握', type: '解答', difficulty: [0.6, 0.85], score: 10, count: 1 }
 const seen = new Set()
+const shapes_ = []
 let checkCount = 0
 
 for (let index = 0; index < samples && problems.length === 0; index += 1) {
@@ -274,10 +287,28 @@ for (let index = 0; index < samples && problems.length === 0; index += 1) {
   }
   if (problems.length > 0) break
   seen.add(JSON.stringify(built.params))
+  // 结构指纹：条件与问法（去掉数字），用来判"同一句式换数字"
+  shapes_.push(
+    JSON.stringify([built.givens, built.goals ?? [built.goal]]).replace(/\d+(?:\.\d+)?/g, '#'),
+  )
 }
 
 if (problems.length === 0 && seen.size < Math.max(3, Math.floor(samples / 6))) {
   problems.push(`不同种子只造出 ${seen.size} 种题：参数空间太小，出卷会反复撞同一道题`)
+}
+
+// **同一句式换数字不算题型**：把条件和问法里的数字抹掉再指纹，看它到底有几种"结构"。
+// 这条是用户拿着卷子指出来的：真题的解答题换情境、换给定、换问法，
+// 我们的题型却只是"同一个句子换数字"，整张卷子读起来像同一道题。
+if (problems.length === 0) {
+  const shapes = new Set(shapes_)
+  if (shapes.size < 3) {
+    problems.push(
+      `30 个种子只造出 ${shapes.size} 种结构（把条件与问法里的数字抹掉后完全一样）：` +
+        '这是**同一个句式换数字**，不是题型。让 construct 按种子真的分支——' +
+        '换给定的条件组合（已知两点／已知顶点／给表格／给图形…）、换问法（求解析式／求最值／求面积／判断…）',
+    )
+  }
 }
 
 done({ kind, covers, checks: checkCount })

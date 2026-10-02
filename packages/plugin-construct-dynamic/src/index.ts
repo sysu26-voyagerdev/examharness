@@ -96,7 +96,32 @@ interface ModuleOutput {
   steps?: readonly { text: string; basis: string }[]
   checks?: readonly CheckPoint[]
   options?: readonly { key: string; text: string }[]
+  /**
+   * **选择题的三个典型错解**（符号错、漏根、忘开方…）：框架把正确答案与它们
+   * 打乱成 A/B/C/D。选项的正确项文字就是构造给的答案——题型不可能把答案写错，
+   * 干扰项也不会是随手编的（错因库的活）。
+   */
+  distractors?: readonly (string | number)[]
   figure?: FigureSpec
+}
+
+/**
+ * 把"正确答案 + 三个错解"打乱成 A/B/C/D。
+ * **确定性**：同一个种子给出同一个顺序（题目必须可复现，选项也不能每次不一样）；
+ * 洗牌只影响谁在前，正确项永远在里面、文字永远是构造给的那个答案。
+ */
+function shuffleOptions(texts: readonly string[], seed: number): readonly Option[] {
+  const keys = ['A', 'B', 'C', 'D']
+  const pool = [...texts]
+  let state = Math.abs(Math.round(seed)) || 1
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    state = (state * 1103515245 + 12345) & 0x7fffffff
+    const pick = state % (index + 1)
+    const held = pool[index] as string
+    pool[index] = pool[pick] as string
+    pool[pick] = held
+  }
+  return pool.map((text, index) => ({ key: keys[index] ?? String(index + 1), text }))
 }
 
 /** 把题型模块的产出组装成 Item（与内置构造器完全一致的形状） */
@@ -124,7 +149,14 @@ function assembleItem(kind: string, slot: BlueprintRow, seed: number, out: Modul
     },
     prose: {
       stem: out.stem,
-      ...(out.options === undefined ? {} : { options: out.options.map((option): Option => ({ key: option.key, text: option.text })) }),
+      // 选项：题型自己给的就用它；只给 distractors 的（选择题的推荐写法）由框架拼：
+      // 正确答案 + 三个错解，按种子打乱——正确项的文字**必须**就是构造答案
+      ...(() => {
+        if (out.options !== undefined) return { options: out.options.map((option): Option => ({ key: option.key, text: option.text })) }
+        if (out.distractors === undefined) return {}
+        const texts = [out.answer, ...out.distractors.map(String)].slice(0, 4)
+        return { options: shuffleOptions(texts, seed) }
+      })(),
       answerText: out.answer,
       solution,
       tex: {

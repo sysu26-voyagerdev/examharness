@@ -30,54 +30,130 @@ const LEARNED = ['一元一次不等式', '整式运算', '整式与因式分解
 const fibers: Fiber[] = []
 let workdir = ''
 
-/** 一个"agent 会写出来"的题型：一元一次不等式（ax + b > c，整数解） */
+/**
+ * 一个"agent 会写出来"的题型：一元一次不等式。
+ * 注意它**按种子在三种结构里分支**（换给定、换问法）——验收现在会量这一点：
+ * 只会"同一句式换数字"的模块会被判"这不是题型"。
+ */
 const GOOD_MODULE = `
 export const kind = 'dynamic/linear-inequality'
 export const covers = ['一元一次不等式']
 
+const small = (n) => Math.abs(Math.round(n))
+
 export function construct(slot, seed) {
-  // 简单确定性伪随机
-  let state = seed >>> 0
-  const next = () => {
-    state = (state * 1664525 + 1013904223) >>> 0
-    return state / 0x100000000
-  }
-  const a = 2 + Math.floor(next() * 5)
-  const x = -6 + Math.floor(next() * 13)
-  const b = -9 + Math.floor(next() * 19)
+  const s = small(seed)
+  const branch = s % 3
+  if (branch === 0) return solve(s)
+  if (branch === 1) return integerSolution(s)
+  return fromSolutionSet(s)
+}
+
+/** 结构一：解不等式 */
+function solve(s) {
+  const a = 2 + (s % 5)
+  const x = -6 + (s % 13)
+  const b = -9 + (s % 19)
   const c = a * x + b
-  const params = { a, b, c, x }
   return {
-    params,
+    params: { a, b, c, x },
     stem: '解不等式：' + a + 'x + ' + b + ' > ' + c + '。',
+    stemTex: a + 'x+' + b + '>' + c,
     answer: 'x > ' + x,
     answerTex: 'x > ' + x,
+    goal: '解这个不等式',
+    goals: ['解这个不等式'],
+    givens: ['不等式 ' + a + 'x + ' + b + ' > ' + c],
     solution: ['移项得 ' + a + 'x > ' + (c - b), '两边同除以 ' + a + ' 得 x > ' + x],
+    solutionTex: [a + 'x>' + (c - b), 'x>' + x],
     steps: [
       { text: '移项：' + a + 'x > ' + (c - b), basis: '不等式性质' },
       { text: '两边同除以正数 ' + a + '，不等号方向不变：x > ' + x, basis: '不等式性质' },
     ],
-    // 检验点：把解 x 代进去，左边必须正好等于右边（边界成立），
-    // 且真正大于 c 的最小整数就是 x（用 x-1 应当不满足）
     checks: [
       { expr: 'a*x + b', at: { a, b, x }, expect: c },
       { expr: '(a*(x-1) + b) - c', at: { a, b, x, c }, expect: -a },
     ],
   }
 }
+
+/** 结构二：带整数解的要求（两问） */
+function integerSolution(s) {
+  const a = 2 + (s % 4)
+  const x = -(5 + (s % 9))
+  const b = 1 + (s % 11)
+  const c = a * x + b
+  return {
+    params: { a, b, c, x },
+    stem: '已知关于 x 的不等式 ' + a + 'x + ' + b + ' > ' + c + '。（1）解这个不等式；（2）求它的最小整数解。',
+    stemTex: a + 'x+' + b + '>' + c,
+    answer: '（1）x > ' + x + '；（2）最小整数解是 ' + (x + 1),
+    answerTex: 'x>' + x + ',\\ x_{\\min}=' + (x + 1),
+    goal: '解不等式 求最小整数解',
+    goals: ['解这个不等式', '求最小整数解'],
+    givens: ['不等式 ' + a + 'x + ' + b + ' > ' + c, 'x 取整数'],
+    solution: ['解得 x > ' + x, '大于 ' + x + ' 的最小整数是 ' + (x + 1)],
+    solutionTex: ['x>' + x, 'x_{\\min}=' + (x + 1)],
+    steps: [
+      { text: '解不等式得 x > ' + x, basis: '不等式性质' },
+      { text: '在解集里取最小整数', basis: '整数解的意义' },
+    ],
+    checks: [
+      { expr: 'a*x + b', at: { a, b, x }, expect: c },
+      { expr: '(a*(x-1) + b) - c', at: { a, b, x, c }, expect: -a },
+    ],
+  }
+}
+
+/** 结构三：已知解集反求参数 */
+function fromSolutionSet(s) {
+  const a = 2 + (s % 5)
+  const x = 1 + (s % 8)
+  const c = a * x
+  return {
+    params: { a, c, x },
+    stem: '已知关于 x 的不等式 ' + a + 'x - c > 0 的解集是 x > ' + x + '，求 c 的值与这个解集的最小整数。',
+    stemTex: a + 'x-c>0',
+    answer: 'c = ' + c + '，最小整数是 ' + x,
+    answerTex: 'c=' + c + ',\\ x=' + x,
+    goal: '求 c 求最小整数',
+    goals: ['求 c 的值', '求解集里的最小整数'],
+    givens: ['不等式 ' + a + 'x - c > 0', '解集是 x > ' + x],
+    solution: ['解不等式得 x > c/' + a + '，与 x > ' + x + ' 比较得 c = ' + c, '最小整数是 ' + x],
+    solutionTex: ['x>\\frac{c}{' + a + '}', 'c=' + c],
+    steps: [
+      { text: '解不等式，把解集用 c 表示', basis: '不等式性质' },
+      { text: '与已知解集比较，求出 c', basis: '解集的唯一性' },
+    ],
+    checks: [
+      { expr: 'a*x - c', at: { a, x, c }, expect: 0 },
+      { expr: 'c - a*x', at: { a, x, c }, expect: 0 },
+    ],
+  }
+}
 `
 
-/** 作弊模块一：检验点永远成立（把参数怎么改都通过） */
+/** 作弊模块一：检验点永远成立（把参数怎么改都通过）——结构看着挺像，但没在核对任何东西 */
 const FAKE_CHECK_MODULE = `
 export const kind = 'dynamic/fake-check'
 export const covers = ['一元一次不等式']
 export function construct(slot, seed) {
-  const a = 2 + (seed % 5)
-  const x = seed % 7
+  const branch = Math.abs(Math.round(seed)) % 3
+  const a = 2 + (Math.abs(Math.round(seed)) % 5)
+  const x = Math.abs(Math.round(seed)) % 7
+  const shapes = [
+    { givens: ['不等式 ' + a + 'x > ' + a * x], goals: ['解这个不等式'] },
+    { givens: ['不等式 ' + a + 'x > ' + a * x, 'x 是整数'], goals: ['解这个不等式', '求最小整数解'] },
+    { givens: ['解集是 x > ' + x], goals: ['求参数'] },
+  ]
+  const shape = shapes[branch]
   return {
     params: { a, x },
     stem: '随便一道题 ' + seed,
     answer: 'x = ' + x,
+    givens: shape.givens,
+    goals: shape.goals,
+    // 恒等式：把参数怎么改都成立 → 变异检验会判"没有在检验任何东西"
     checks: [{ expr: 'a - a', at: { a, x }, expect: 0 }],
   }
 }
@@ -100,7 +176,14 @@ export const kind = 'dynamic/no-check'
 export const covers = ['一元一次不等式']
 export function construct(slot, seed) {
   const x = seed % 9
-  return { params: { x }, stem: '解 x - ' + x + ' = 0', answer: 'x = ' + x }
+  return {
+    params: { x },
+    stem: '解 x - ' + x + ' = 0',
+    answer: 'x = ' + x,
+    goal: '解这个方程',
+    goals: ['解这个方程'],
+    givens: ['方程 x - ' + x + ' = 0'],
+  }
 }
 `
 
@@ -119,23 +202,52 @@ export function construct(slot, seed) {
 }
 `
 
-/** 会写字段的模块：goal / givens / stemTex 都要原样进 Item */
+/** 会写字段的模块：goals / givens / stemTex 都要原样进 Item（并且有真的结构分支） */
 const DECLARED_MODULE = `
 export const kind = 'dynamic/declared'
 export const covers = ['配方']
 export function construct(slot, seed) {
-  const x = 2 + (seed % 3)
-  const k = 2 + (seed % 2)
+  const s = Math.abs(Math.round(seed))
+  const branch = s % 3
+  const x = 2 + (s % 3)
+  const k = 2 + (s % 2)
   const c = k * x + 3
+  if (branch === 0) {
+    return {
+      params: { x, k, c },
+      stem: '已知 ' + k + 'x + 3 > ' + c + '，求 x 的取值范围。',
+      stemTex: k + 'x+3>' + c,
+      answer: 'x > ' + x,
+      answerTex: 'x > ' + x,
+      goal: '求 x 的取值范围',
+      goals: ['求 x 的取值范围'],
+      givens: [k + 'x + 3 > ' + c],
+      checks: [{ expr: 'k*x + 3 - c', at: { k, x, c }, expect: 0 }],
+    }
+  }
+  if (branch === 1) {
+    return {
+      params: { x, k, c },
+      stem: '已知 ' + k + 'x + 3 > ' + c + ' 的解集是 x > ' + x + '，求 k。',
+      stemTex: k + 'x+3>' + c,
+      answer: 'k = ' + k,
+      answerTex: 'k=' + k,
+      goal: '求 k',
+      goals: ['求 k 的值'],
+      givens: ['不等式 ' + k + 'x + 3 > ' + c, '解集是 x > ' + x],
+      checks: [{ expr: 'k*x + 3 - c', at: { k, x, c }, expect: 0 }],
+    }
+  }
   return {
     params: { x, k, c },
-    stem: '已知 ' + k + 'x + 3 > ' + c + '，求 x 的取值范围。',
-    stemTex: k + 'x + 3 > ' + c,
-    answer: 'x > ' + x,
-    answerTex: 'x > ' + x,
-    goal: '求 x 的取值范围',
-    givens: [k + 'x + 3 > ' + c],
-    checks: [{ expr: 'k*x + 3', at: { k, x, c }, expect: c }],
+    stem: '已知 ' + k + 'x + 3 > ' + c + '，求最小整数解。',
+    stemTex: k + 'x+3>' + c,
+    answer: 'x > ' + x + '，最小整数是 ' + (x + 1),
+    answerTex: 'x>' + x,
+    goal: '求最小整数解',
+    goals: ['求最小整数解'],
+    givens: ['不等式 ' + k + 'x + 3 > ' + c, 'x 取整数'],
+    checks: [{ expr: 'k*x + 3 - c', at: { k, x, c }, expect: 0 }],
   }
 }
 `
@@ -150,6 +262,9 @@ export function construct(slot, seed) {
     params: { x, y: 2 * x },
     stem: '求 ' + x + ' 的两倍',
     answer: 'y=' + (2 * x),
+    goal: '求两倍',
+    goals: ['求这个数的两倍'],
+    givens: ['一个数 ' + x],
     checks: [{ expr: 'y - 2*x', at: { x, y: 2 * x }, expect: 0 }],
   }
 }
@@ -160,11 +275,20 @@ const rewriteModule = (tag: string): string => `
 export const kind = 'dynamic/rewrite'
 export const covers = ['最值']
 export function construct(slot, seed) {
-  const x = 1 + (seed % 5)
+  const s = Math.abs(Math.round(seed))
+  const x = 1 + (s % 5)
+  const shapes = [
+    { givens: ['一个数 ' + x], goals: ['求它的两倍'] },
+    { givens: ['一个数 ' + x, '再减去 1'], goals: ['求两倍', '求减 1 后的结果'] },
+    { givens: ['一个数的两倍是 ' + 2 * x], goals: ['求这个数'] },
+  ]
+  const shape = shapes[s % 3]
   return {
     params: { x, y: 2 * x },
     stem: '${tag}：求 ' + x + ' 的两倍',
     answer: '${tag}=' + (2 * x),
+    givens: shape.givens,
+    goals: shape.goals,
     checks: [{ expr: 'y - 2*x', at: { x, y: 2 * x }, expect: 0 }],
   }
 }
@@ -297,13 +421,15 @@ describe('agent 在运行时制作新题型', () => {
         score: 10,
         count: 1,
       },
-      7,
+      // 种子 9 落在第一种结构（模块按 seed % 3 分支）——测的是字段有没有原样进 Item
+      9,
     )
     expect(item.instance.goal).toBe('求 x 的取值范围')
+    expect(item.instance.goals).toEqual(['求 x 的取值范围'])
     const params = item.instance.params as { x: number; k: number; c: number }
     expect(item.instance.givens).toEqual([`${String(params.k)}x + 3 > ${String(params.c)}`])
     // 曾经这里把 answerTex 当成题面公式：卷面上会把**答案**印在题干位置
-    expect(item.prose.tex?.stem).toBe(`${String(params.k)}x + 3 > ${String(params.c)}`)
+    expect(item.prose.tex?.stem).toBe(`${String(params.k)}x+3>${String(params.c)}`)
     expect(item.prose.tex?.answer).toBe(`x > ${String(params.x)}`)
     expect(item.prose.tex?.stem).not.toBe(item.prose.tex?.answer)
   })

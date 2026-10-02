@@ -85,6 +85,20 @@ export class ConstructService extends Service implements ConstructApi {
     return factory(slot, seed)
   }
 
+  /** 题位能用哪些构造器（按注册顺序；组装时挨个试，小题过不了分量闸门就换下一个） */
+  candidates(slot: BlueprintRow): readonly string[] {
+    return [...this.covers]
+      .filter(([, keys]) => slot.knowledge.some((key) => keys.includes(key)))
+      .map(([kind]) => kind)
+  }
+
+  /** 用指定的构造器构造（kind 不在注册表里就抛错，不做静默降级） */
+  generateWith(slot: BlueprintRow, seed: number, kind: string): Item {
+    const factory = this.factories.get(kind)
+    if (factory === undefined) throw new Error(`没有叫 ${kind} 的构造器`)
+    return factory(slot, seed)
+  }
+
   /**
    * 按题位选构造器：找第一个**声明覆盖了该题位知识点**的 kind。
    * 覆盖不到就不构造（不静默降级）——蓝图里写系统出不了的题位，就必须如实报缺口。

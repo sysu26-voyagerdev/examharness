@@ -38,6 +38,12 @@
       "path": "./packages/plugin-verify-figure"
     },
     {
+      "path": "./packages/plugin-verify-parts"
+    },
+    {
+      "path": "./packages/plugin-verify-options"
+    },
+    {
       "path": "./packages/plugin-llm"
     },
     {

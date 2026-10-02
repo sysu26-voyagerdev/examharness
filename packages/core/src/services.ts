@@ -63,6 +63,16 @@ export interface ConstructApi {
   /** 每个构造器覆盖哪些知识点 */
   coverage?(): Readonly<Record<string, readonly string[]>>
   kinds(): readonly string[]
+  /**
+   * 这个题位**能用哪些构造器**（按注册顺序）。
+   *
+   * 为什么不"挑一个"就算了：同一个知识点下可能有多个题型——一个是入门小题，
+   * 一个是多问综合题。题位是 9 分解答题时，小题过不了分量闸门，
+   * 组装时应该**接着试下一个**，而不是让整个题位报缺口。
+   */
+  candidates?(slot: BlueprintRow): readonly string[]
+  /** 用指定的构造器构造（题位 + 种子 → 一道题） */
+  generateWith?(slot: BlueprintRow, seed: number, kind: string): Item
   generate(slot: BlueprintRow, seed: number): Item
 }
 

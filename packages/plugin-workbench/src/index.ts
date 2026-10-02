@@ -111,10 +111,17 @@ const TOOLS: readonly LlmToolSpec[] = [
   },
   {
     name: "construct_item",
-    description: "按题位构造一道候选题（按构造为真）。返回 candidateId，此时还没入库。",
+    description:
+      "按题位构造一道候选题（按构造为真）。返回 candidateId，此时还没入库。" +
+      "同一个题位可能有好几个题型（入门小题、多问综合题…）：默认用第一个，也可以用 kind 指定；" +
+      "gap_report 会告诉你这个题位有哪些题型、各自为什么没出成题。",
     parameters: {
       type: "object",
-      properties: { slotKey: { type: "string" }, seed: { type: "number" } },
+      properties: {
+        slotKey: { type: "string" },
+        seed: { type: "number" },
+        kind: { type: "string", description: "指定用哪个题型（不填就用这个题位的第一个）" },
+      },
       required: ["slotKey", "seed"],
     },
   },
@@ -854,8 +861,24 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           payload: { error: "未知题位" },
         };
       }
+      const slotSpec = { ...row, key: `${slotKey}-1`, count: 1 };
+      const kinds = this.ctx.construct.candidates?.(slotSpec) ?? [];
+      const wanted = typeof args.kind === "string" && args.kind !== "" ? args.kind : undefined;
+      if (wanted !== undefined && kinds.length > 0 && !kinds.includes(wanted)) {
+        return {
+          kind: "tool",
+          text:
+            `construct_item：题位 ${slotKey}（${row.knowledge.join("、")}）用不了题型 ${wanted}；` +
+            `能用的题型：${kinds.join("、")}`,
+          payload: { error: "题型与题位不匹配", kinds },
+        };
+      }
       try {
-        const item = this.ctx.construct.generate({ ...row, key: `${slotKey}-1`, count: 1 }, seed);
+        const byKind = this.ctx.construct.generateWith?.bind(this.ctx.construct);
+        const item =
+          wanted === undefined || byKind === undefined
+            ? this.ctx.construct.generate(slotSpec, seed)
+            : byKind(slotSpec, seed, wanted);
         this.counter += 1;
         const candidateId = `cand-${this.counter}`;
         this.candidates.set(candidateId, { id: candidateId, slot: row, item });
@@ -1141,12 +1164,19 @@ export class WorkbenchService extends Service implements WorkbenchApi {
                   | undefined
                 >
               )[statKey];
+        // 这个题位能用哪些题型：缺口的原因常常是"题型本身不合格"，
+        // agent 要改的是题型——把清单给它，它才知道该重交哪一个
+        const kinds =
+          row === undefined
+            ? []
+            : (this.ctx.construct.candidates?.({ ...row, key: gap.slot, count: 1 }) ?? []);
         return {
           slot: gap.slot,
           knowledge: row?.knowledge ?? [],
           type: row?.type ?? "",
           score: row?.score ?? 0,
           reason: gap.reason,
+          kinds,
           domains: evidence?.positionDomainCounts ?? {},
           supportPapers: evidence?.supportPapers ?? 0,
         };
@@ -1162,6 +1192,9 @@ export class WorkbenchService extends Service implements WorkbenchApi {
             .map(
               (row) =>
                 `  · ${row.slot}｜${row.knowledge.join("、")}｜${row.type}｜${String(row.score)} 分｜原因：${row.reason}\n` +
+                (row.kinds.length === 0
+                  ? "     这个题位还没有任何题型能出（先用 constructor_write 写一个）\n"
+                  : `     这个题位能用的题型：${row.kinds.join("、")}\n`) +
                 `     真题里这个题位常考：${Object.entries(row.domains)
                   .slice(0, 3)
                   .map(([domain, count]) => `${domain}${String(count)}`)
@@ -1746,12 +1779,19 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     '**老师要的规格库里没有时**：不要反问他"要哪一种"。直接 blueprint_list 看库里有什么 →',
     "   照他的要求 blueprint_create 一份**草稿**（题位尽量贴近他的说法）→ blueprint_use 换上 → 按新题位出题。",
     '   构造器覆盖不到的题位照实写在草稿里并说明"这些题位我出不了"，让老师在界面上改——**草稿是他的起点，不是问他问题**。',
-    "**缺口可以自己补**（这是你的本事，不是等我或者等人改代码）：",
-    "   1) gap_report 看还缺哪些题位、每个题位缺什么（知识点/题型/分值/真题里怎么考）；",
-    "   2) 对每个缺口先 material_search（例如「相似三角形」「规律 猜想」）看真题怎么考、题面长什么样；",
-    "   3) 用 constructor_write 写一个题型模块：真值由参数算出，checks 写清**要被核对的数学事实**；",
-    "      验收不通过就按它给的问题改，直到通过（检验点必须能区分对错，恒等式会被判无效）；",
-    "   4) 再 assemble_paper 组卷，看缺口是否减少；还有缺口就回到第 1 步。",
+    "**题型要像真题，不要像模板**（这是这套系统的命门）：",
+    "   真题里的解答题是**多问、带情境**的（统计图、测量、方案、销售…），不是一句话换数字。所以：",
+    "   0) 写题型**之前**先看真题：material_search / corpus_search 找这个知识点在真卷里怎么问、",
+    '      带什么情境、分几问（例如搜「二次函数 面积」「相似 测量」「统计 平均数 方差」）；',
+    "      抽出来的问法与情境是**素材**——照它们的路子设计，但数字与答案必须来自你自己的构造。",
+    "   1) gap_report 看还缺哪些题位、每个题位缺什么（知识点/题型/分值/真题里怎么考、有哪些题型可用）；",
+    "   2) constructor_write 写题型模块。**一个题型要覆盖多种结构**：按种子换给定的条件组合、",
+    "      换问法（求解析式／求顶点／求面积／判断结论…），不要「一个句式换数字」——",
+    "      验收会数：30 个种子只造出 1 种结构（抹掉数字后一样）的模块会被判「这不是题型」；",
+    "   3) **分量要对**：8 分以上的解答题至少 2 问、12 分以上至少 3 问（用 goals 声明每一问）；",
+    "      选择题必须给四个选项（给 3 个 distractors 典型错解，正确项由框架用构造答案生成）；",
+    "   4) 验收不通过就按它给的问题改，直到通过（检验点必须能区分对错，恒等式会被判无效）；",
+    "   5) 再 assemble_paper 组卷，看缺口是否减少；还有缺口就回到第 1 步。",
     '   **做不到的如实说**：证明题（全等、切线）这类没有"可代入核对的答案"，不要硬凑一个假题型。',
     "**写脚本是本事，不是偷懒**：资料版式怪、要批处理、要核对数值，就 ws_write 写个 python 脚本再 ws_run 跑；",
     "   跑完**自己检查**（抽查几处、对一下总数、和原文核对），别把没验过的结果交上来。",
