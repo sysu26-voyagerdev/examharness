@@ -33,6 +33,19 @@ const blueprint = JSON.parse(readFileSync(join(ROOT, 'seed/blueprint.json'), 'ut
 function driver(slotKey: string, seed: number) {
   return (messages: readonly LlmMessage[]): LlmReply => {
     const last = messages.at(-1)
+    const system = messages.find((message) => message.role === 'system')?.content ?? ''
+    // 旁路调用：执笔者（submit_item 会自动写一遍题面）
+    if (system.includes('你是命题组的执笔者')) {
+      const brief = JSON.parse(last?.content ?? '{}') as { 答案?: string; 问几问?: string[] }
+      return {
+        content: JSON.stringify({
+          stem: `已知抛物线与 x 轴交于两点。${(brief.问几问 ?? []).map((goal, index) => `（${String(index + 1)}）${goal}`).join('；')}`,
+          answerText: brief.答案 ?? '',
+          solution: ['由构造得到的结论'],
+        }),
+        toolCalls: [],
+      }
+    }
     if (last?.role === 'user') {
       return {
         content: '先构造候选题。',

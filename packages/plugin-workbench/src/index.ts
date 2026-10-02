@@ -121,9 +121,9 @@ const TOOLS: readonly LlmToolSpec[] = [
   {
     name: "serialize_item",
     description:
-      "让执笔者把候选题的结构写成给学生看的题面（序列化）。题面随后会过回译校验：" +
-      '写漏条件会被拦下；题型模块没声明 goal / givens 时，核对不了的项会落到"待复核"。' +
-      "**题面本来就有**（构造器给的是确定性模板）：不是非写不可，只有想让它更像卷子时才用。",
+      "让执笔者把候选题的结构写成给学生看的题面（提交时框架会自动写一次；" +
+      "想先看一眼、或对写出来的题面不满意时，用它重写）。题面随后会过回译校验：" +
+      "分问数、条件条数、答案、题面里出现的每个数字都要与构造对得上。",
     parameters: {
       type: "object",
       properties: { candidateId: { type: "string" } },
@@ -133,7 +133,8 @@ const TOOLS: readonly LlmToolSpec[] = [
   {
     name: "submit_item",
     description:
-      "提交候选题：会跑完整闸门链，通过才入库。不通过会返回哪道闸门、为什么、能不能靠重做修好。",
+      "提交候选题：先让执笔者写题面，再跑完整闸门链，通过才入库。" +
+      "不通过会返回哪道闸门、为什么、能不能靠重做修好。",
     parameters: {
       type: "object",
       properties: { candidateId: { type: "string" } },
@@ -584,6 +585,52 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   }
 
   /**
+   * 让**执笔者**（模型）把构造好的结构写成给学生看的题面。
+   *
+   * 分工是这套设计的关键：**结构由题型给**（条件、问法、答案、检验点——数学是真的），
+   * **文字由模型写**（可以有情境、可以有多种讲法——但只能使用构造给的数字）。
+   * 写歪了由回译闸门拦下：目标、条件条数、答案、题面里的每个数字都要对得上。
+   *
+   * 返回写好的 Item；失败时返回一句给模型看的错误说明。
+   */
+  private async serialize(item: Item): Promise<Item | string> {
+    const params = Object.values(item.instance.params);
+    const brief = {
+      题型: item.slot.type,
+      知识点: item.slot.knowledge,
+      条件: item.instance.givens,
+      问几问: (item.instance.goals ?? [item.instance.goal]).filter((goal) => goal !== ""),
+      答案: item.witness.answer,
+      解题步骤: item.prose.solution,
+      // 题面里**只允许出现这些数字**（含情境里的数）——它们来自构造
+      可以使用的数字: [...new Set(params)].map(String).join("、"),
+    };
+    const reply = await this.ctx.llm.chat([
+      { role: "system", content: SERIALIZER_PROMPT },
+      { role: "user", content: JSON.stringify(brief) },
+    ]);
+    const parsed = parseJsonObject(reply.content);
+    const stem = typeof parsed?.stem === "string" ? parsed.stem : undefined;
+    const answerText = typeof parsed?.answerText === "string" ? parsed.answerText : undefined;
+    if (stem === undefined || answerText === undefined || stem === "") {
+      return "执笔者没有按要求返回 stem/answerText";
+    }
+    const solution = Array.isArray(parsed?.solution) ? parsed.solution.map(String) : item.prose.solution;
+    return {
+      ...item,
+      prose: {
+        stem,
+        // 选项与 LaTeX 都是**构造给出的**：不许这次调用随手改（错因库/公式的活）
+        ...(item.prose.options === undefined ? {} : { options: item.prose.options }),
+        ...(item.prose.tex === undefined ? {} : { tex: item.prose.tex }),
+        answerText,
+        solution,
+        serializer: { model: this.ctx.llm.model, version: 1 },
+      },
+    };
+  }
+
+  /**
    * 工具结果进模型上下文前的处理：**超长就截断**，并把"剩下的在哪"写进去。
    * 不这么做，一本教材的一次抽取就能把上下文撑爆——而且模型还不知道自己看得不全。
    */
@@ -841,47 +888,15 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           payload: { error: "未知候选" },
         };
       }
-      const brief = {
-        题型: candidate.item.slot.type,
-        知识点: candidate.item.slot.knowledge,
-        条件: candidate.item.instance.givens,
-        目标: candidate.item.instance.goal,
-        答案: candidate.item.witness.answer,
-      };
-      const reply = await this.ctx.llm.chat([
-        { role: "system", content: SERIALIZER_PROMPT },
-        { role: "user", content: JSON.stringify(brief) },
-      ]);
-      const parsed = parseJsonObject(reply.content);
-      const stem = typeof parsed?.stem === "string" ? parsed.stem : undefined;
-      const answerText = typeof parsed?.answerText === "string" ? parsed.answerText : undefined;
-      if (stem === undefined || answerText === undefined || stem === "") {
-        return {
-          kind: "tool",
-          text: "serialize_item：执笔者没有按要求返回 stem/answerText",
-          payload: { error: "序列化失败：需要 JSON 里的 stem 与 answerText" },
-        };
+      const written = await this.serialize(candidate.item);
+      if (typeof written === "string") {
+        return { kind: "tool", text: `serialize_item：${written}`, payload: { error: written } };
       }
-      const solution = Array.isArray(parsed?.solution)
-        ? parsed.solution.map(String)
-        : candidate.item.prose.solution;
-      // 干扰项保留构造器给的那份（错因库的活，不交给这次调用随手编）
-      const options = candidate.item.prose.options;
-      const item: Item = {
-        ...candidate.item,
-        prose: {
-          stem,
-          ...(options === undefined ? {} : { options }),
-          answerText,
-          solution,
-          serializer: { model: this.ctx.llm.model, version: 1 },
-        },
-      };
-      this.candidates.set(candidateId, { ...candidate, item });
+      this.candidates.set(candidateId, { ...candidate, item: written });
       return {
         kind: "tool",
-        text: `serialize_item：题面已写（${stem.length} 字，序列化者 ${this.ctx.llm.model}）`,
-        payload: { ok: true, candidateId, stem },
+        text: `serialize_item：题面已写（${String(written.prose.stem.length)} 字，执笔者 ${this.ctx.llm.model}）\n${written.prose.stem}`,
+        payload: { ok: true, candidateId, stem: written.prose.stem },
       };
     }
 
@@ -895,11 +910,24 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           payload: { error: "未知候选" },
         };
       }
-      const result = await this.ctx.bank.submit(candidate.item);
+      // **题面由执笔者写，不靠题型的模板**：模板题面只有一个句式，卷子会千篇一律
+      // （真实对比：真题的解答题带情境、问法多样，我们的 24 道题里同一句式反复出现）。
+      // 所以提交时若还是模板序列化，先写一遍题面；写完过回译（目标/条件/答案/数字都要对得上）。
+      let item = candidate.item;
+      // 没有模型时照旧用题型的模板题面（诚实：这是兜底，不是"写好了"）
+      if (item.prose.serializer.model === "template" && this.ctx.llm.configured) {
+        const written = await this.serialize(item);
+        if (typeof written === "string") {
+          return { kind: "tool", text: `submit_item：题面没写成（${written}）`, payload: { error: written } };
+        }
+        item = written;
+        this.candidates.set(candidateId, { ...candidate, item });
+      }
+      const result = await this.ctx.bank.submit(item);
       if (result.ok) {
         return {
           kind: "gate",
-          text: `submit_item：${candidateId} 通过全部闸门并入库（${result.id}）`,
+          text: `submit_item：${candidateId} 通过全部闸门并入库（${result.id}）\n题面：${item.prose.stem}`,
           // 通过时把证据一并回给模型：它能看到"凭什么通过"，而不是只看到 ok
           payload: {
             ok: true,
@@ -1676,13 +1704,18 @@ export class WorkbenchService extends Service implements WorkbenchApi {
 
 /** 执笔者提示词：只把结构写成通顺题面，**不许改数学** */
 const SERIALIZER_PROMPT = [
-  "你是命题组的执笔者。给你一道**已经构造好**的题的结构，把它写成给学生看的题面。",
+  "你是命题组的执笔者。给你一道**已经构造好**的题的结构（条件、问几问、答案、解题步骤、可以使用的数字），",
+  "把它写成给学生看的题面——像一份真的卷子，可以写得有情境、有交代，不必照着字段直译。",
   '只输出 JSON：{"stem":"题干","answerText":"答案","solution":["步骤1","步骤2"]}',
   "硬规矩：",
-  "1. 只把给你的条件与目标写成通顺的题面，**不得新增、删改、四舍五入任何条件或数值**；",
-  "2. 你不负责算答案：answerText 直接使用给你的答案；",
-  "3. 步骤要写成学生看得懂的解题过程，但数值必须与给你的数据一致；",
-  "4. 不要输出 JSON 以外的任何内容。",
+  "1. **不得新增、删改、四舍五入任何条件或数值**；题面里出现的数字**只能来自「可以使用的数字」**，",
+  "   包括情境里的数据（写「进了 200 件」就得有 200 这个数）；否则等于替这道题另编了一道；",
+  "2. 可以写情境（一次测量、一次统计、一次采购、一块场地…），但要**与条件相容、合乎常识**：",
+  "   长度不能是负数、件数不能是小数、情境里用到的量必须是条件或问法真的涉及的；",
+  "3. 该分问就分问：给的「问几问」有几条，题面就分成几问（（1）（2）（3））；",
+  "4. 你不负责算答案：answerText 直接用给你的答案；solution 的数值必须与给你的数据一致；",
+  "5. 数学式子写成 LaTeX，用 $…$ 包起来（例如 $y=-2(x-1)^{2}+8$）；",
+  "6. 不要输出 JSON 以外的任何内容。",
 ].join("\n");
 
 /** 取数字参数（模型有时给字符串），缺省时用 fallback */
@@ -1731,9 +1764,10 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     "",
     "硬规矩：",
     "1. 数学真值由构造与符号计算保证，你不要自己算答案，也不要改题面里的数值。",
-    "2. 候选题的**题面已经由题型写好了**（模板序列化，确定性的）：先 construct_item、再 submit_item 就行。",
-    '   serialize_item 只在"你要把题面改得更像给学生看的卷子"时用；用了它，题面要过回译校验',
-    '   （核对目标、条件条数、答案）——题型模块里声明了 goal / givens 才核对得上，没声明就只能落"待复核"。',
+    "2. 出题分两层：**结构由题型给**（givens、goals 分几问、答案、检验点），**题面由执笔者写**。",
+    "   流程是 construct_item → submit_item：提交时框架会自动写一遍题面（想先看一版就用 serialize_item）。",
+    "   题面会过回译校验：分问数、条件条数、答案、**题面里出现的每个数字**都必须与构造对得上——",
+    '   想让情境里出现"40 元""200 件"这类数，就得把它们放进题型的 params，不许执笔者自己编。',
     "   闸门由框架挂载，你无法跳过，也不必重复验证。",
     "3. 被拦下时读清楚是哪道闸门、能不能靠重做修好：能就换种子重来，不能就换题位设计。",
     "4. 每题位凑齐为止；凑不齐就说明原因，不要用不合规的题凑数。",

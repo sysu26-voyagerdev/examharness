@@ -40,8 +40,10 @@ const call = (id: string, name: string, args: unknown) => ({ id, name, arguments
 interface BrainOptions {
   /** 回译结果：faithful 会照构造实例回答，其余是"模型写歪了" */
   parse: (stem: string) => Record<string, unknown> | null
-  /** 主循环里是否先写题面（false = 用模板题面） */
+  /** 主循环里是否先写题面（false = 提交时自动写；这里只影响"先写一版"） */
   serialize: boolean
+  /** 让假执笔者在题面里塞一句私货（用来测"数字必须来自构造"） */
+  stemSuffix?: string
 }
 
 function brain(options: BrainOptions) {
@@ -50,12 +52,15 @@ function brain(options: BrainOptions) {
     const system = messages.find((message) => message.role === 'system')?.content ?? ''
     const last = messages.at(-1)?.content ?? ''
 
-    // 旁路调用：执笔者
-    if (system.includes('执笔者')) {
-      const brief = JSON.parse(last) as { 目标: string; 答案: string }
+    // 旁路调用：执笔者（认**提示词的开头**，别只认"执笔者"三个字——
+    // 主循环的系统提示里现在也写着"题面由执笔者写"，按关键词分会误判）
+    if (system.includes('你是命题组的执笔者')) {
+      const brief = JSON.parse(last) as { 问几问?: string[]; 目标?: string; 答案: string }
+      const goals = brief.问几问 ?? [brief.目标 ?? '']
+      const asks = goals.map((goal, index) => `（${String(index + 1)}）${goal}`).join('；')
       return {
         content: JSON.stringify({
-          stem: `已知抛物线与 x 轴交于两点，求${brief.目标}。`,
+          stem: `已知抛物线与 x 轴交于两点。${options.stemSuffix ?? ''}${asks}`,
           answerText: brief.答案,
           solution: ['由构造得到的结论'],
         }),
@@ -152,9 +157,10 @@ describe('回译闸门', () => {
       brain({
         serialize: true,
         parse: () => ({
-          goal: expected.instance.goal,
+          goals: expected.instance.goals ?? [expected.instance.goal],
           givensCount: expected.instance.givens.length,
           answer: expected.witness.answer,
+          numbers: [],
         }),
       }),
     )
@@ -172,9 +178,10 @@ describe('回译闸门', () => {
       brain({
         serialize: true,
         parse: () => ({
-          goal: expected.instance.goal,
+          goals: expected.instance.goals ?? [expected.instance.goal],
           givensCount: expected.instance.givens.length - 1,
           answer: expected.witness.answer,
+          numbers: [],
         }),
       }),
     )
@@ -207,7 +214,7 @@ describe('回译闸门', () => {
     const ctx = await boot(
       brain({
         serialize: false,
-        parse: () => ({ goal: '随便什么目标', givensCount: 0, answer: expected.witness.answer }),
+        parse: () => ({ goals: ['随便什么目标'], givensCount: 0, answer: expected.witness.answer, numbers: [] }),
       }),
     )
     const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
@@ -250,5 +257,28 @@ describe('回译闸门', () => {
 
     expect(result.ok).toBe(false)
     expect(JSON.stringify(result.verdict)).toContain('777')
+  })
+  it('执笔者在题面里写了构造没有的数字（情境数据自己编）→ 拦下并说清怎么办', async () => {
+    const expected = await expectedItem()
+    const ctx = await boot(
+      brain({
+        serialize: false,
+        stemSuffix: '某商店购进 200 件这种商品，每件定价 40 元。',
+        parse: () => ({
+          goals: expected.instance.goals ?? [expected.instance.goal],
+          givensCount: expected.instance.givens.length,
+          answer: expected.witness.answer,
+          numbers: ['200', '40'],
+        }),
+      }),
+    )
+    const run = await ctx.workbench.run({ goal: '出题', blueprint })
+
+    expect(run.stored).toHaveLength(0)
+    expect(ctx.bank.all()).toHaveLength(0)
+    const gate = run.transcript.find((event) => event.kind === 'gate')
+    expect(gate?.text).toContain('verify-roundtrip')
+    expect(gate?.text).toContain('200')
+    expect(gate?.text).toContain('构造参数里没有的数字')
   })
 })

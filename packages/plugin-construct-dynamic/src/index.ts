@@ -82,6 +82,11 @@ interface ModuleOutput {
   stemTex?: string
   /** 题目**要求什么**（回译闸门拿它核对题面有没有写歪；写成几个短句、空格分开） */
   goal?: string
+  /**
+   * 题目**分几问**，一问一条（首选写法）。
+   * 分问数是"分量"的可核对形式：8 分以上的解答题不该只有一个问题（见 verify-parts）。
+   */
+  goals?: readonly string[]
   /** 题面**显式给出的条件**，一条一个（回译闸门按条数核对） */
   givens?: readonly string[]
   answer: string
@@ -107,7 +112,8 @@ function assembleItem(kind: string, slot: BlueprintRow, seed: number, out: Modul
       givens: out.givens === undefined ? [] : out.givens.map(String),
       // 没声明 goal 就是**没声明**：绝不拿题面前 40 字冒充"目标"——
       // 那会让回译闸门拿一个假对照物去核对（真实的坑：解析失败怪题面写歪）。
-      goal: out.goal ?? '',
+      goal: out.goal ?? (out.goals ?? []).join(' '),
+      ...(out.goals === undefined ? {} : { goals: out.goals.map(String) }),
       ...(out.checks === undefined ? {} : { checks: out.checks }),
     },
     witness: {

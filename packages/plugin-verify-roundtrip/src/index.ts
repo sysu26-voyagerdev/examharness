@@ -32,28 +32,42 @@ export interface RoundTripConfig {
 
 const PARSER_PROMPT = [
   '你是题面解析器。给你一段初中数学题的题干，把它还原成结构，只输出 JSON：',
-  '{"goal": "题目要求什么", "givensCount": 条件的条数, "answer": "你解出的答案"}',
+  '{"goals": ["题面要求做的每一件事，一问一条"], "givensCount": 条件的条数,',
+  ' "answer": "你解出的答案", "numbers": [题面里出现的每一个数字]}',
   '要求：',
   '1. 只依据题面字面信息，不要脑补任何未写出的条件；',
   '2. givensCount 数的是**题面显式给出的条件**条数；',
-  '3. answer 用与题面一致的记法（例如 "AB = 8" 或 "x = −2.5"）；',
-  '4. 不要输出 JSON 以外的任何内容。',
+  '3. goals 要**逐问**写：题面分（1）（2）（3）就写三条；一问到底就写一条；',
+  '4. answer 用与题面一致的记法（例如 "AB = 8" 或 "x = −2.5"）；',
+  '5. numbers 写**所有**数字（含情境里的、条件里的、单位前的），不要漏；分问标号（1）（2）不算；',
+  '6. 不要输出 JSON 以外的任何内容。',
 ].join('\n')
 
 interface ParsedStem {
-  goal: string
+  goals: readonly string[]
   givensCount: number
   answer: string
+  numbers: readonly string[]
 }
 
 function readParsed(value: Record<string, unknown> | undefined): ParsedStem | undefined {
   if (value === undefined) return undefined
-  const goal = value.goal
   const count = value.givensCount
   const answer = value.answer
-  if (typeof goal !== 'string' || typeof answer !== 'string') return undefined
+  const stated = value.numbers
+  // goals 允许写成字符串（兼容旧提示词的 goal 字段），但优先数组
+  const goals = Array.isArray(value.goals)
+    ? value.goals.filter((item): item is string => typeof item === 'string')
+    : typeof value.goals === 'string'
+      ? [value.goals]
+      : typeof value.goal === 'string'
+        ? [value.goal]
+        : undefined
+  if (answer === undefined || typeof answer !== 'string') return undefined
   if (typeof count !== 'number' || !Number.isFinite(count)) return undefined
-  return { goal, givensCount: count, answer }
+  if (goals === undefined || goals.length === 0) return undefined
+  if (!Array.isArray(stated) || stated.some((item) => typeof item !== 'string')) return undefined
+  return { goals, givensCount: count, answer, numbers: stated }
 }
 
 /** 目标是否讲的是同一件事：用实例目标里的关键词做包含判定 */
@@ -62,6 +76,32 @@ function goalMatches(instanceGoal: string, parsedGoal: string): boolean {
   if (tokens.length === 0) return false
   const normalized = normalize(parsedGoal)
   return tokens.some((token) => normalized.includes(normalize(token)))
+}
+
+/** 构造侧声明的"问几问"：优先用分条的 goals，退回单条 goal */
+function declaredGoalsOf(item: Item): readonly string[] {
+  const goals = item.instance.goals
+  if (goals !== undefined && goals.length > 0) return goals.filter((goal) => goal.trim() !== '')
+  return item.instance.goal === '' ? [] : [item.instance.goal]
+}
+
+/** 太小的整数多半是"第1个""两条边"这类结构词，不是题目数据 */
+const STRUCTURAL_NUMBERS = new Set(['0', '1', '2', '90', '180', '360'])
+
+/**
+ * 题面里出现的、构造参数里没有的数字。
+ * 分问标号与幂次先剥掉（见 withoutStructure），结构性数字跳过。
+ */
+function strayNumbers(item: Item, numbers_: readonly string[]): readonly string[] {
+  const allowed = new Set(numbers(JSON.stringify(item.instance.params)))
+  const stray: string[] = []
+  for (const raw of numbers_) {
+    for (const value of numbers(withoutStructure(raw))) {
+      if (STRUCTURAL_NUMBERS.has(value) || allowed.has(value)) continue
+      if (!stray.includes(value)) stray.push(value)
+    }
+  }
+  return stray
 }
 
 /**
@@ -182,16 +222,32 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
     // 如实标 needsReview，交给老师看一眼（R4）。题型模块声明 goal / givens 之后，
     // 这两项才会真的被核对。
     const unverifiable: string[] = []
-    if (item.instance.goal === '') unverifiable.push('目标')
-    else if (!goalMatches(item.instance.goal, parsed.goal)) {
-      problems.push(`目标不一致（题面要求「${parsed.goal}」，构造目标是「${item.instance.goal}」）`)
+    const declaredGoals = declaredGoalsOf(item)
+    if (declaredGoals.length === 0) unverifiable.push('目标')
+    else if (declaredGoals.length !== parsed.goals.length) {
+      problems.push(`分问数不一致（题面 ${String(parsed.goals.length)} 问，构造 ${String(declaredGoals.length)} 问：${declaredGoals.join('／')}）`)
+    } else {
+      // 逐问核对：每一条声明的目标都要能在回译出来的问法里找到对应的一条
+      for (const goal of declaredGoals) {
+        if (!parsed.goals.some((parsedGoal) => goalMatches(goal, parsedGoal))) {
+          problems.push(`目标不一致（题面里找不到「${goal}」，回译得到的是「${parsed.goals.join('／')}」）`)
+          break
+        }
+      }
     }
     if (item.instance.givens.length === 0 && parsed.givensCount > 0) unverifiable.push('条件条数')
     else if (parsed.givensCount !== item.instance.givens.length) {
-      problems.push(`条件条数不一致（题面 ${parsed.givensCount} 条，构造 ${item.instance.givens.length} 条）`)
+      problems.push(`条件条数不一致（题面 ${String(parsed.givensCount)} 条，构造 ${String(item.instance.givens.length)} 条）`)
     }
     if (normalize(parsed.answer) !== normalize(item.witness.answer)) {
       problems.push(`答案不一致（回译得到「${parsed.answer}」，构造答案是「${item.witness.answer}」）`)
+    }
+    // **题面里出现的数字必须来自构造**：允许模型写情境，但不许它自己编数据。
+    // 情境里的"每件 40 元、进了 200 件"这种数，必须是题型放进 params 的构造参数；
+    // 否则就是"文字里另造了一道题"，而那正是真值被模型改写的老路（R1）。
+    const stray = strayNumbers(item, parsed.numbers)
+    if (stray.length > 0) {
+      problems.push(`题面里出现了构造参数里没有的数字（${stray.join('、')}）`)
     }
 
     if (problems.length > 0) {
@@ -200,7 +256,10 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
         gate: name,
         reason: `回译不一致：${problems.join('；')}`,
         fixable: true,
-        hint: '题面没有忠实表达构造出来的结构，重写题面（不要改数学）',
+        hint:
+          stray.length > 0
+            ? '题面（含情境）里的数字只能来自构造：要写"进了 200 件"这类情境数据，就得让题型把它们放进 params'
+            : '题面没有忠实表达构造出来的结构，重写题面（不要改数学）',
       }
     }
 
@@ -212,7 +271,7 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
           ...verdict.evidence,
           roundtrip: {
             pass: true,
-            detail: `答案「${parsed.answer}」对得上；构造实例没声明${unverifiable.join('与')}，这两项没验成，落待复核`,
+            detail: `答案「${parsed.answer}」对得上、题面数字都来自构造；但构造实例没声明${unverifiable.join('与')}，这项没验成，落待复核`,
           },
         },
       }
@@ -225,7 +284,7 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
         ...verdict.evidence,
         roundtrip: {
           pass: true,
-          detail: `回译一致：目标、条件 ${parsed.givensCount} 条、答案「${parsed.answer}」`,
+          detail: `回译一致：${String(declaredGoals.length)} 问、条件 ${String(parsed.givensCount)} 条、答案「${parsed.answer}」、题面数字都来自构造`,
         },
       },
     }
