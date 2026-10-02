@@ -8,9 +8,22 @@
  *
  * 用法：node --max-old-space-size=256 scripts/verify-constructor.mjs <模块路径> [样题数]
  * 输出：一行 JSON 报告 { ok, kind, covers, samples, checks, problems:[...] }
+ *
+ * 另外往 stderr 写**面包屑**（每行 `#phase:xxx`）：进程被内存上限或超时杀掉时，
+ * 报告根本来不及输出，但面包屑已经写下去了——主进程据此能说清"崩在哪一步"，
+ * 而不是只留一句"验收进程崩了"。agent 拿到的是可改的信息，不是一句"失败了"。
  */
 
 import { pathToFileURL } from 'node:url'
+
+/** 走到哪一步了（stderr，父进程解析；这里失败不影响验收本身） */
+const phase = (name) => {
+  try {
+    process.stderr.write(`#phase:${name}\n`)
+  } catch {
+    /* 诊断信息，写不出去就算了 */
+  }
+}
 
 const file = process.argv[2]
 const samples = Number(process.argv[3] ?? '30')
@@ -131,12 +144,14 @@ if (file === undefined) {
 const startedAt = Date.now()
 
 let module
+phase('import')
 try {
   module = await import(pathToFileURL(file).href)
 } catch (error) {
-  problems.push(`加载失败：${error instanceof Error ? error.message : String(error)}`)
+  problems.push(`模块顶层代码出错（它在 import 那一刻就在执行）：${error instanceof Error ? error.message : String(error)}`)
   done()
 }
+phase('import-done')
 
 if (heapMb() > 96) problems.push(`模块顶层就占了 ${heapMb()} MB 堆（上限 96 MB）：顶层不许做重活`)
 
@@ -156,6 +171,7 @@ let checkCount = 0
 for (let index = 0; index < samples && problems.length === 0; index += 1) {
   const seed = 1000 + index * 7
   const sampleStart = Date.now()
+  phase(`sample:${String(index + 1)}`)
   let built
   try {
     built = module.construct(slot, seed)

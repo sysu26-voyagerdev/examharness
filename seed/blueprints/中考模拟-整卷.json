@@ -18,21 +18,7 @@
         0.85,
         0.98
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 61,
-        "positionDomainCounts": {
-          "数与式": 54,
-          "图形的变化": 5,
-          "随机事件的概率": 1,
-          "图形的性质": 1
-        },
-        "mappedKnowledge": [
-          "实数与二次根式"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S2",
@@ -46,22 +32,7 @@
         0.85,
         0.98
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 74,
-        "positionDomainCounts": {
-          "数与式": 30,
-          "图形的变化": 21,
-          "图形的性质": 16,
-          "抽样与数据分析": 3,
-          "方程与不等式": 1
-        },
-        "mappedKnowledge": [
-          "整式与因式分解"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S3",
@@ -75,22 +46,7 @@
         0.85,
         0.98
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 76,
-        "positionDomainCounts": {
-          "数与式": 38,
-          "图形的性质": 26,
-          "图形的变化": 6,
-          "随机事件的概率": 3,
-          "抽样与数据分析": 2
-        },
-        "mappedKnowledge": [
-          "四边形与特殊平行四边形"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S4",
@@ -104,22 +60,7 @@
         0.7,
         0.9
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 73,
-        "positionDomainCounts": {
-          "图形的性质": 28,
-          "数与式": 15,
-          "方程与不等式": 11,
-          "图形的变化": 6,
-          "图形与坐标": 4
-        },
-        "mappedKnowledge": [
-          "圆的性质"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S5",
@@ -133,22 +74,7 @@
         0.7,
         0.9
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 74,
-        "positionDomainCounts": {
-          "图形的性质": 30,
-          "数与式": 20,
-          "方程与不等式": 7,
-          "图形与坐标": 5,
-          "抽样与数据分析": 5
-        },
-        "mappedKnowledge": [
-          "锐角三角函数"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S6",
@@ -162,22 +88,7 @@
         0.7,
         0.9
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 70,
-        "positionDomainCounts": {
-          "图形的性质": 19,
-          "方程与不等式": 15,
-          "抽样与数据分析": 12,
-          "随机事件的概率": 7,
-          "函数": 7
-        },
-        "mappedKnowledge": [
-          "一元二次方程"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S7",
@@ -191,22 +102,7 @@
         0.55,
         0.8
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 72,
-        "positionDomainCounts": {
-          "图形的性质": 36,
-          "数与式": 8,
-          "方程与不等式": 8,
-          "函数": 7,
-          "随机事件的概率": 7
-        },
-        "mappedKnowledge": [
-          "相似三角形"
-        ],
-        "note": "可构造：相似比与线段计算，答案可代入核对"
-      }
+      "score": 3
     },
     {
       "key": "S8",
@@ -220,22 +116,7 @@
         0.55,
         0.8
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 69,
-        "positionDomainCounts": {
-          "函数": 19,
-          "图形的性质": 19,
-          "方程与不等式": 10,
-          "图形与坐标": 7,
-          "数与式": 6
-        },
-        "mappedKnowledge": [
-          "反比例函数"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S9",
@@ -249,22 +130,7 @@
         0.35,
         0.6
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 54,
-        "positionDomainCounts": {
-          "图形的性质": 24,
-          "方程与不等式": 9,
-          "函数": 6,
-          "图形与坐标": 5,
-          "数与式": 3
-        },
-        "mappedKnowledge": [
-          "对称轴"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S10",
@@ -278,22 +144,7 @@
         0.35,
         0.6
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 61,
-        "positionDomainCounts": {
-          "图形的性质": 25,
-          "函数": 20,
-          "图形与坐标": 8,
-          "方程与不等式": 4,
-          "数与式": 2
-        },
-        "mappedKnowledge": [
-          "顶点式"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S11",
@@ -307,22 +158,7 @@
         0.75,
         0.92
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 78,
-        "positionDomainCounts": {
-          "数与式": 60,
-          "抽样与数据分析": 6,
-          "图形的性质": 4,
-          "随机事件的概率": 3,
-          "函数": 3
-        },
-        "mappedKnowledge": [
-          "统计与概率"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S12",
@@ -336,22 +172,7 @@
         0.75,
         0.92
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 74,
-        "positionDomainCounts": {
-          "数与式": 33,
-          "方程与不等式": 12,
-          "图形的性质": 9,
-          "函数": 6,
-          "图形与坐标": 5
-        },
-        "mappedKnowledge": [
-          "与坐标轴交点"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S13",
@@ -365,22 +186,7 @@
         0.55,
         0.8
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 71,
-        "positionDomainCounts": {
-          "方程与不等式": 18,
-          "图形的性质": 16,
-          "数与式": 11,
-          "随机事件的概率": 8,
-          "函数": 7
-        },
-        "mappedKnowledge": [
-          "一元二次方程"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S14",
@@ -394,22 +200,7 @@
         0.55,
         0.8
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 74,
-        "positionDomainCounts": {
-          "图形的性质": 33,
-          "随机事件的概率": 8,
-          "图形与坐标": 7,
-          "方程与不等式": 7,
-          "图形的变化": 6
-        },
-        "mappedKnowledge": [
-          "三角形与全等"
-        ],
-        "note": "证明题：没有可代入核对的答案，**不该硬造题型**"
-      }
+      "score": 3
     },
     {
       "key": "S15",
@@ -423,22 +214,7 @@
         0.35,
         0.6
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 64,
-        "positionDomainCounts": {
-          "图形的性质": 33,
-          "函数": 7,
-          "方程与不等式": 7,
-          "图形与坐标": 6,
-          "图形的变化": 4
-        },
-        "mappedKnowledge": [
-          "圆的性质"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 3
     },
     {
       "key": "S16",
@@ -452,22 +228,7 @@
         0.35,
         0.6
       ],
-      "score": 3,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 52,
-        "positionDomainCounts": {
-          "图形的性质": 32,
-          "图形与坐标": 5,
-          "图形的变化": 4,
-          "方程与不等式": 4,
-          "函数": 3
-        },
-        "mappedKnowledge": [
-          "规律与代数推理"
-        ],
-        "note": "可构造：数列/图形规律，答案可用通项公式核对"
-      }
+      "score": 3
     },
     {
       "key": "S17",
@@ -481,22 +242,7 @@
         0.75,
         0.9
       ],
-      "score": 9,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 108,
-        "positionDomainCounts": {
-          "数与式": 57,
-          "方程与不等式": 17,
-          "图形的性质": 15,
-          "抽样与数据分析": 10,
-          "函数": 5
-        },
-        "mappedKnowledge": [
-          "实数与二次根式"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 9
     },
     {
       "key": "S18",
@@ -510,22 +256,7 @@
         0.6,
         0.82
       ],
-      "score": 9,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 104,
-        "positionDomainCounts": {
-          "图形的性质": 25,
-          "抽样与数据分析": 21,
-          "方程与不等式": 20,
-          "数与式": 14,
-          "图形与坐标": 10
-        },
-        "mappedKnowledge": [
-          "统计与概率"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 9
     },
     {
       "key": "S19",
@@ -539,22 +270,7 @@
         0.6,
         0.82
       ],
-      "score": 9,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 82,
-        "positionDomainCounts": {
-          "图形的性质": 28,
-          "抽样与数据分析": 27,
-          "数与式": 9,
-          "函数": 5,
-          "方程与不等式": 4
-        },
-        "mappedKnowledge": [
-          "整式与因式分解"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 9
     },
     {
       "key": "S20",
@@ -568,22 +284,7 @@
         0.6,
         0.82
       ],
-      "score": 9,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 72,
-        "positionDomainCounts": {
-          "图形的性质": 29,
-          "抽样与数据分析": 15,
-          "函数": 8,
-          "图形的变化": 5,
-          "随机事件的概率": 4
-        },
-        "mappedKnowledge": [
-          "一次函数"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 9
     },
     {
       "key": "S21",
@@ -597,22 +298,7 @@
         0.45,
         0.7
       ],
-      "score": 9,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 72,
-        "positionDomainCounts": {
-          "图形的性质": 32,
-          "函数": 15,
-          "抽样与数据分析": 9,
-          "综合与实践": 4,
-          "图形与坐标": 4
-        },
-        "mappedKnowledge": [
-          "四边形与证明"
-        ],
-        "note": "证明题：同上"
-      }
+      "score": 9
     },
     {
       "key": "S22",
@@ -626,22 +312,7 @@
         0.45,
         0.7
       ],
-      "score": 9,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 69,
-        "positionDomainCounts": {
-          "图形的性质": 35,
-          "函数": 12,
-          "图形与坐标": 7,
-          "抽样与数据分析": 7,
-          "数与式": 2
-        },
-        "mappedKnowledge": [
-          "对称轴"
-        ],
-        "note": "knowledge 用构造器能认的具体知识点；出不了的领域保留课标领域词"
-      }
+      "score": 9
     },
     {
       "key": "S23",
@@ -655,22 +326,7 @@
         0.3,
         0.55
       ],
-      "score": 9,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 60,
-        "positionDomainCounts": {
-          "图形的性质": 26,
-          "函数": 18,
-          "图形与坐标": 8,
-          "综合与实践": 3,
-          "方程与不等式": 2
-        },
-        "mappedKnowledge": [
-          "二次函数综合"
-        ],
-        "note": "可构造：抛物线与直线交点、面积，答案可代入核对"
-      }
+      "score": 9
     },
     {
       "key": "S24",
@@ -684,38 +340,12 @@
         0.15,
         0.4
       ],
-      "score": 9,
-      "_evidence": {
-        "basis": "依据真题统计：该题位在 120 分制真题里最常考的课标领域",
-        "supportPapers": 48,
-        "positionDomainCounts": {
-          "图形的性质": 21,
-          "图形与坐标": 12,
-          "函数": 9,
-          "方程与不等式": 2,
-          "图形的变化": 2
-        },
-        "mappedKnowledge": [
-          "圆与切线"
-        ],
-        "note": "证明题：同上"
-      }
+      "score": 9
     }
   ],
   "constraints": {
     "forbidKnowledge": [
       "动点问题"
     ]
-  },
-  "meta": {
-    "source": "data/zhenti/suggested-blueprint.json（scripts/zhenti_stats.py 生成）",
-    "basis": {
-      "paperCount": 183,
-      "sameScorePapers": 81,
-      "structureSupport": 15,
-      "structure": "选择10题 + 填空6题 + 解答8题",
-      "structureSamples": 15
-    },
-    "mapping": "课标领域 → 构造器能认的知识点（DOMAIN_TO_KNOWLEDGE）"
   }
 }

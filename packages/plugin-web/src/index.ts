@@ -225,12 +225,27 @@ function send(res: ServerResponse, status: number, body: unknown): void {
 /**
  * 现状简报：**框架比模型更清楚现在的状况**，所以直接告诉它，别让它每轮用五到八次工具去查。
  * 只放事实（题位、缺口、资料、题库规模），不放建议——怎么干是它的活。
+ *
+ * **"齐不齐"只认一件事：这个题位出不出得来。** 以前这里数的是题库里落在这个题位上的题，
+ * 于是出现过"简报说题位已齐、一 assemble 却缺 S23"的自相矛盾——题库里有题不等于还能再出一道
+ * （组卷是**按构造器现造**，不是从题库里挑）。所以这里按组卷的方式**试造一道**：
+ * 造不出来就是出不了，并且把构造器给的原话带上——它就是 agent 要改的东西。
  */
-function slotProgressOf(ctx: Context, blueprint: Blueprint): { key: string; knowledge: string; want: number; have: number }[] {
-  const all = ctx.bank.all()
+function slotProgressOf(ctx: Context, blueprint: Blueprint): { key: string; knowledge: string; want: number; canBuild: boolean; reason: string }[] {
   return blueprint.blueprint.map((row) => {
-    const have = all.filter((item) => item.slot.key === row.key || item.slot.key.startsWith(`${row.key}-`)).length
-    return { key: row.key, knowledge: row.knowledge.join('、'), want: row.count, have }
+    const key = `${row.key}-1`
+    try {
+      ctx.construct.generate({ ...row, key, count: 1 }, 1)
+      return { key: row.key, knowledge: row.knowledge.join('、'), want: row.count, canBuild: true, reason: '' }
+    } catch (error) {
+      return {
+        key: row.key,
+        knowledge: row.knowledge.join('、'),
+        want: row.count,
+        canBuild: false,
+        reason: error instanceof Error ? error.message : String(error),
+      }
+    }
   })
 }
 
@@ -245,15 +260,32 @@ function seedAllKb(ctx: Context, workspaceName: string): number | undefined {
 
 function briefOf(ctx: Context, blueprint: Blueprint): string {
   const progress = slotProgressOf(ctx, blueprint)
-  const missing = progress.filter((slot) => slot.have < slot.want)
   const latest = ctx.session.latest()
   const batches = ctx.kb.list()
+  // 缺口只认**上次组卷报出来的**：那是唯一"真的试着出了卷"的地方（带闸门给的原因）。
+  // 蓝图改过之后它就不算数了——那时如实说"重新组一次才知道"。
+  const expectedKeys = new Set(blueprint.blueprint.map((row) => row.key))
+  const assembledKeys = new Set((latest?.bindings ?? []).map((binding) => binding.slot.replace(/-\d+$/, '')))
+  const stale = latest !== undefined && [...expectedKeys].some((key) => !assembledKeys.has(key) && !(latest.gaps ?? []).some((gap) => gap.slot.startsWith(key)))
+  const gaps = stale ? [] : (latest?.gaps ?? [])
   const lines = [
     `卷子：${blueprint.paper.title}（${blueprint.paper.className}，卷头 ${String(blueprint.paper.totalScore)} 分 / ${String(blueprint.paper.minutes)} 分钟）`,
-    `题位（需要 / 已有）：`,
-    ...progress.map((slot) => `  · ${slot.key} ${slot.knowledge}：需 ${String(slot.want)}，已有 ${String(slot.have)}${slot.have >= slot.want ? '（齐）' : '（缺）'}`),
-    missing.length === 0 ? '题位状态：已齐' : `题位状态：还缺 ${missing.map((slot) => `${slot.key}（缺 ${String(slot.want - slot.have)}）`).join('、')}`,
-    `卷子版本：${latest === undefined ? '还没组过卷' : `最新第 ${String(latest.version)} 版、${String(latest.bindings.length)} 道题、${String(latest.totalScore)} 分`}`,
+    `题位（需要 / 有没有构造器）：`,
+    ...progress.map(
+      (slot) =>
+        `  · ${slot.key} ${slot.knowledge}：需 ${String(slot.want)}，${slot.canBuild ? '有构造器' : `**没有构造器**（${slot.reason}）`}`,
+    ),
+    latest === undefined
+      ? '题位状态：还没组过卷，先 assemble_paper 才知道缺什么。'
+      : stale
+        ? `题位状态：蓝图改过了（上次组卷第 ${String(latest.version)} 版对不上现在这份），先 assemble_paper 重新组一次。`
+        : gaps.length === 0
+          ? `题位状态：已齐（第 ${String(latest.version)} 版、${String(latest.bindings.length)} 道题、${String(latest.totalScore)} 分）`
+          : [
+              `题位状态：还缺 ${gaps.map((gap) => gap.slot.replace(/-\d+$/, '')).join('、')}`,
+              `上次组卷（第 ${String(latest.version)} 版、${String(latest.bindings.length)} 道题、${String(latest.totalScore)} 分）报出的缺口：`,
+              ...gaps.map((gap) => `  · ${gap.slot}（缺 ${String(gap.missing)}）：${gap.reason}`),
+            ].join('\n'),
     `题库：${String(ctx.bank.all().length)} 道`,
     `本卷禁用：${blueprint.constraints.forbidKnowledge.join('、') || '无'}`,
     batches.length === 0

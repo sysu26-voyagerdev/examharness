@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Context, type Fiber } from '@deepseek-ai/cordis'
-import type { Blueprint, BlueprintRow, LlmMessage, LlmReply } from '@examharness/core'
+import type { Blueprint, BlueprintRow, Item, LlmMessage, LlmReply } from '@examharness/core'
 import * as bankPlugin from '@examharness/plugin-bank'
 import * as constructPlugin from '@examharness/plugin-construct-parabola'
 import * as figurePlugin from '@examharness/plugin-figure'
@@ -198,5 +198,57 @@ describe('回译闸门', () => {
     expect(ctx.bank.all()[0]?.prose.serializer.model).toBe('template')
     // 没过回译：证据里就没有 roundtrip 这一项（而不是"过了但没验"）
     expect(ctx.bank.all()[0]?.evidence.roundtrip).toBeUndefined()
+  })
+
+  it('构造实例没声明目标/条件 → 这两项没验成，如实落"待复核"（不假装通过）', async () => {
+    // 动态题型模块可以只给题面、不声明 goal / givens。这时回译**没有对照物**：
+    // 既不该判题面写错（冤枉），也不该当成验过了（假验证）——落 needs_review，等人签字。
+    const expected = await expectedItem()
+    const ctx = await boot(
+      brain({
+        serialize: false,
+        parse: () => ({ goal: '随便什么目标', givensCount: 0, answer: expected.witness.answer }),
+      }),
+    )
+    const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
+    const bare: Item = {
+      ...base,
+      instance: { ...base.instance, goal: '', givens: [] },
+      prose: { ...base.prose, serializer: { model: 'fake-writer', version: 1 } },
+    }
+    const result = await ctx.bank.submit(bare)
+
+    expect(result.ok).toBe(true)
+    const stored = ctx.bank.all()[0]
+    expect(stored?.lifecycle).toBe('needs_review')
+    expect(stored?.evidence.roundtrip?.detail).toContain('没声明')
+    expect(stored?.evidence.roundtrip?.detail).toContain('待复核')
+  })
+
+  it('分问标号与幂次不算题目数据（写对的中考解答题题面不该被数字检查误伤）', async () => {
+    const ctx = await boot(brain({ serialize: false, parse: () => null }), false)
+    const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
+    const fragment = base.prose.tex?.stem ?? ''
+    const item: Item = {
+      ...base,
+      prose: { ...base.prose, tex: { ...base.prose.tex, stem: `（1）${fragment}；（2）求顶点坐标；（3）求面积` } },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok ? 'ok' : JSON.stringify(result.verdict)).toBe('ok')
+  })
+
+  it('题面公式里凭空多出的数字要拦下（公式必须照着构造写）', async () => {
+    const ctx = await boot(brain({ serialize: false, parse: () => null }), false)
+    const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
+    const fragment = base.prose.tex?.stem ?? ''
+    const item: Item = {
+      ...base,
+      prose: { ...base.prose, tex: { ...base.prose.tex, stem: `${fragment} + 777` } },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok).toBe(false)
+    expect(JSON.stringify(result.verdict)).toContain('777')
   })
 })

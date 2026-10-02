@@ -65,6 +65,15 @@ function goalMatches(instanceGoal: string, parsedGoal: string): boolean {
 }
 
 /**
+ * 去掉**结构性数字**：分问标号（（1）（2）（3）、(1)、①）与幂次（x^{2} 里的 2）。
+ * 它们不是题目数据，查它们只会把写对的题面判成错的——
+ * 这一条是踩出来的：中考解答题的分问标号一定会出现，动态题型的题面公式里也一定有幂次。
+ */
+function withoutStructure(text: string): string {
+  return text.replace(/[（(]\s*\d+\s*[)）]/g, '').replace(/\^\s*\{?\s*\d+\s*\}?/g, '')
+}
+
+/**
  * LaTeX 这一层也要卡：公式写歪了（下标写错、括号漏了）不该等到老师看见，
  * 而且**公式里的数字必须与构造实例一致**——否则就是"构造是对的、写出来是另一道题"。
  */
@@ -94,7 +103,7 @@ function checkTexLayer(item: Item): Verdict | undefined {
   // 所以只对题面做这条检查——多查一步会把正确的推导当成错的。
   if (tex.stem !== undefined) {
     const allowed = new Set(numbers(JSON.stringify(item.instance.params)))
-    for (const value of numbers(tex.stem)) {
+    for (const value of numbers(withoutStructure(tex.stem))) {
       // 结构性数字不是题目数据：查它们只会误伤——
       // 0/1（「= 0」「系数 1」）、角度常量（「∠A = 90°」「内角和 180°」「360°」）
       if (value === '0' || value === '1' || value === '90' || value === '180' || value === '360') continue
@@ -163,10 +172,17 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
     }
 
     const problems: string[] = []
-    if (!goalMatches(item.instance.goal, parsed.goal)) {
+    // **没声明就核对不了**：构造实例里没有"目标/条件"，回译就没有对照物。
+    // 这时既不能假装通过（那是假验证），也不该判题面写错（那是冤枉）——
+    // 如实标 needsReview，交给老师看一眼（R4）。题型模块声明 goal / givens 之后，
+    // 这两项才会真的被核对。
+    const unverifiable: string[] = []
+    if (item.instance.goal === '') unverifiable.push('目标')
+    else if (!goalMatches(item.instance.goal, parsed.goal)) {
       problems.push(`目标不一致（题面要求「${parsed.goal}」，构造目标是「${item.instance.goal}」）`)
     }
-    if (parsed.givensCount !== item.instance.givens.length) {
+    if (item.instance.givens.length === 0 && parsed.givensCount > 0) unverifiable.push('条件条数')
+    else if (parsed.givensCount !== item.instance.givens.length) {
       problems.push(`条件条数不一致（题面 ${parsed.givensCount} 条，构造 ${item.instance.givens.length} 条）`)
     }
     if (normalize(parsed.answer) !== normalize(item.witness.answer)) {
@@ -180,6 +196,20 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
         reason: `回译不一致：${problems.join('；')}`,
         fixable: true,
         hint: '题面没有忠实表达构造出来的结构，重写题面（不要改数学）',
+      }
+    }
+
+    if (unverifiable.length > 0) {
+      return {
+        pass: true,
+        needsReview: true,
+        evidence: {
+          ...verdict.evidence,
+          roundtrip: {
+            pass: true,
+            detail: `答案「${parsed.answer}」对得上；构造实例没声明${unverifiable.join('与')}，这两项没验成，落待复核`,
+          },
+        },
       }
     }
 

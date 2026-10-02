@@ -20,18 +20,21 @@ import z from 'schemastery'
  * **让 agent 在运行时制作新题型**（不再由人一个个硬编码）。
  *
  * 形状：
- *   - agent 写一个题型模块（`data/constructors/<kind>.mjs`），导出
+ *   - agent 写一个题型模块（`constructors/<kind>.mjs`），导出
  *     `kind` / `covers`（覆盖哪些知识点）/ `construct(slot, seed)`；
  *   - 构造结果里必须带 `checks`：**检验点**，形如 `{ expr, at, expect }`——
  *     "把 at 代进 expr 应当得到 expect"。它声明的是**要被核对的数学事实**；
  *   - 加载时框架先做**静态安全扫描**（不许子进程 / 文件 / 网络 / eval），
- *     再跑**验收**：契约完整、同种子可复现、不同种子有差异、检验点能算且**能区分对错**
+ *     再把模块交给**独立子进程**验收（`scripts/verify-constructor.mjs`，带内存上限与超时）：
+ *     契约完整、同种子可复现、不同种子有差异、检验点能算且**能区分对错**
  *     （把参数改坏它必须失败）、边界不崩、构造速度可接受；
+ *   - **只有子进程验收通过，主进程才 import 它**（顺序不能反：顶层代码 import 就执行）；
  *   - 通过才注册生效。闸门那边不认识新 kind，但会用**自己的求值器**核对检验点——
  *     判分仍然不归出题的人管（R2）。
  *
- * **诚实边界**：这是"降低风险"，不是沙箱。模块是纯计算（静态扫描拦掉危险调用），
- * 但它毕竟在本进程里跑；所以只允许 agent 写计算，不允许它碰系统。
+ * **诚实边界**：这是"降低风险"，不是沙箱。静态扫描拦掉危险调用，验收在子进程里跑，
+ * 但**验收通过之后 construct 仍在主进程里执行**（只允许 agent 写计算，不允许它碰系统；
+ * 要真正隔离得把构造也放进 worker，见 roadmap）。所以：**诚实地说，它不是沙箱。**
  */
 
 export const name = 'construct-dynamic'
@@ -75,6 +78,12 @@ interface ModuleShape {
 interface ModuleOutput {
   params: Record<string, number>
   stem: string
+  /** 题面的 LaTeX（公式层；没写就用 stem 原文） */
+  stemTex?: string
+  /** 题目**要求什么**（回译闸门拿它核对题面有没有写歪；写成几个短句、空格分开） */
+  goal?: string
+  /** 题面**显式给出的条件**，一条一个（回译闸门按条数核对） */
+  givens?: readonly string[]
   answer: string
   answerTex?: string
   solution?: readonly string[]
@@ -95,8 +104,10 @@ function assembleItem(kind: string, slot: BlueprintRow, seed: number, out: Modul
     instance: {
       kind,
       params: out.params,
-      givens: [],
-      goal: out.stem.slice(0, 40),
+      givens: out.givens === undefined ? [] : out.givens.map(String),
+      // 没声明 goal 就是**没声明**：绝不拿题面前 40 字冒充"目标"——
+      // 那会让回译闸门拿一个假对照物去核对（真实的坑：解析失败怪题面写歪）。
+      goal: out.goal ?? '',
       ...(out.checks === undefined ? {} : { checks: out.checks }),
     },
     witness: {
@@ -111,7 +122,10 @@ function assembleItem(kind: string, slot: BlueprintRow, seed: number, out: Modul
       answerText: out.answer,
       solution,
       tex: {
-        stem: out.answerTex ?? out.stem,
+        // 题面公式**只有题型声明了才算数**：以前这里误写成 `answerTex ?? stem`，
+        // 于是"题面公式"里放的其实是**答案**——卷面上会把答案印在题干位置。
+        // 没声明就不放（题面本身已经有内容了，导出会照常渲染它）。
+        ...(out.stemTex === undefined ? {} : { stem: out.stemTex }),
         answer: out.answerTex ?? out.answer,
         solution: out.solutionTex ?? solution,
       },
@@ -216,30 +230,13 @@ export class DynamicConstructorService extends Service implements DynamicConstru
       return report(false, [], 0, 0, [`模块里有不允许的调用：${banned.join('、')}（题型只许做计算）`])
     }
 
-    let module: ModuleShape
-    try {
-      module = (await import(pathToFileURL(file).href)) as ModuleShape
-    } catch (error) {
-      return report(false, [], 0, 0, [`加载失败：${error instanceof Error ? error.message : String(error)}`])
-    }
-
-    if (typeof module.kind !== 'string' || typeof module.construct !== 'function') {
-      return report(false, [], 0, 0, ['模块必须导出 kind（字符串）与 construct（函数）'])
-    }
-    // 注册与报告都认模块声明的 kind（文件名只是它的存放位置）
-    kind = module.kind
-    const covers = Array.isArray(module.covers) ? module.covers.map(String) : []
-    if (covers.length === 0) return report(false, [], 0, 0, ['没有声明 covers：不知道这个题型覆盖哪些知识点'])
-    if (covers.length > this.config.maxCovers) {
-      return report(false, covers, 0, 0, [`covers 最多 ${String(this.config.maxCovers)} 个：覆盖太多等于"什么都能出"，不是题型`])
-    }
-
-    // **验收在独立进程里跑**：模块的顶层代码在 import 时就会执行，
-    // 一个 while 循环就能把宿主进程的内存吃光（真实踩过：服务被 agent 的模块搞 OOM）。
-    // 子进程带内存上限与超时，崩了只崩它自己；主进程只认它的报告。
+    // **验收必须在主进程 import 之前**：模块的顶层代码在 import 那一刻就会执行，
+    // 一个 `for (let i = -4; i <= -1; i = i - 1)` 就能把主进程的内存吃光
+    // （真实踩过两次：一次崩了服务，一次崩了测试进程——所以顺序不能反）。
+    // 主进程要的 kind / covers 也由子进程的报告带回来，避免"为了读个名字先 import"。
     const script = resolve(this.root, this.config.verifyScript)
     if (!existsSync(script)) {
-      return report(false, covers, 0, 0, [`找不到验收脚本：${this.config.verifyScript}`])
+      return report(false, [], 0, 0, [`找不到验收脚本：${this.config.verifyScript}`])
     }
     const verified = spawnSync(
       process.execPath,
@@ -258,46 +255,101 @@ export class DynamicConstructorService extends Service implements DynamicConstru
 
     if (parsed === undefined) {
       const timedOut = verified.error !== undefined && (verified.error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
-      return report(
-        false,
-        covers,
-        0,
-        0,
-        [
-          timedOut
-            ? `验收超时（${String(this.config.verifyTimeoutMs)} ms）：模块里有代价过高的计算（顶层或 construct 里陷进循环了）`
-            : `验收进程没有给出报告（多半是它自己崩了 / 内存爆了）：${(verified.stderr ?? '').trim().slice(0, 200) || '没有输出'}`,
-        ],
-      )
+      const stderr = verified.stderr ?? ''
+      if (timedOut) {
+        return report(false, [], 0, 0, [
+          `验收超时（${String(this.config.verifyTimeoutMs)} ms）：${whereText(lastPhase(stderr))}停不下来——` +
+            '循环要有终止条件（计数器在变小、判断却在等它变大，就会一直转下去），或者计算量太大',
+        ])
+      }
+      return report(false, [], 0, 0, [`验收进程崩了：${whereText(lastPhase(stderr))}${crashReason(stderr)}${crashHint(stderr)}`])
     }
 
     const problems = [...(parsed.problems ?? [])]
+    // 报告与注册都认模块自己声明的 kind（文件名只是它的存放位置）
+    const reportedKind = typeof parsed.kind === 'string' && parsed.kind !== '' ? parsed.kind : kind
+    kind = reportedKind
+    const covers = (parsed.covers ?? []).map(String)
     // 顶层占内存过多的模块直接拒（import 进主进程就晚了：内存收不回来）
     if ((parsed.heapMb ?? 0) > this.config.maxHeapMb) {
       problems.push(`模块占堆 ${String(parsed.heapMb)} MB（上限 ${String(this.config.maxHeapMb)} MB）：顶层或构造里在造大对象`)
     }
     if (parsed.ok !== true || problems.length > 0) {
-      return report(false, parsed.covers ?? covers, parsed.samples ?? 0, parsed.checks ?? 0, problems)
+      return report(false, covers, parsed.samples ?? 0, parsed.checks ?? 0, problems)
+    }
+    if (covers.length === 0) return report(false, [], 0, 0, ['没有声明 covers：不知道这个题型覆盖哪些知识点'])
+    if (covers.length > this.config.maxCovers) {
+      return report(false, covers, 0, 0, [`covers 最多 ${String(this.config.maxCovers)} 个：覆盖太多等于"什么都能出"，不是题型`])
     }
 
-    // 通过验收才 import 注册（此时它已经在受限进程里证明过自己不会拖垮系统）
+    // 通过验收才 import 注册：这一步仍然在主进程里（子进程已经证明它不拖垮系统，
+    // 但严格说这不是沙箱——见文件开头的"诚实边界"）
     let moduleOk: ModuleShape
     try {
       moduleOk = (await import(pathToFileURL(file).href)) as ModuleShape
     } catch (error) {
       return report(false, covers, 0, 0, [`通过验收后却加载不了：${error instanceof Error ? error.message : String(error)}`])
     }
+    if (typeof moduleOk.construct !== 'function') {
+      return report(false, covers, 0, 0, ['模块必须导出 construct（函数）'])
+    }
     const constructOk = moduleOk.construct as (slot: BlueprintRow, seed: number) => ModuleOutput
-    const finalKind = typeof moduleOk.kind === 'string' && moduleOk.kind !== '' ? moduleOk.kind : kind
+    const finalKind = typeof moduleOk.kind === 'string' && moduleOk.kind !== '' ? moduleOk.kind : reportedKind
     const wrapped: Constructor = (slot: BlueprintRow, seed: number) => assembleItem(finalKind, slot, seed, constructOk(slot, seed))
-    ctx_of(this).construct.register(finalKind, wrapped, parsed.covers ?? covers)
-    return report(true, parsed.covers ?? covers, parsed.samples ?? 0, parsed.checks ?? 0, [])
+    ctx_of(this).construct.register(finalKind, wrapped, covers)
+    return report(true, covers, parsed.samples ?? 0, parsed.checks ?? 0, [])
   }
 }
 
 /** 拿服务持有的 ctx（Cordis 的 Service 上就是 this.ctx） */
 function ctx_of(service: DynamicConstructorService): Context {
   return (service as unknown as { ctx: Context }).ctx
+}
+
+/**
+ * 验收子进程崩了就来不及输出报告，只有 stderr 上的面包屑（`#phase:xxx`）留了下来。
+ * 靠它说清"崩在哪一步"——**这是给 agent 看的**：它要拿这句话去改代码，
+ * 一句"验收失败"对它是没用的，一句"顶层 import 那一刻内存爆了"才是有用的。
+ */
+function lastPhase(stderr: string): string | undefined {
+  const marks = [...stderr.matchAll(/^#phase:(.+)$/gm)]
+  return marks.at(-1)?.[1]?.trim()
+}
+
+/** 把面包屑翻成人话：顶层 / 第几条构造 */
+function whereText(phase: string | undefined): string {
+  if (phase === undefined) return '还没走进模块就'
+  if (phase === 'import') return '**模块顶层代码**在 import 那一刻'
+  if (phase === 'import-done') return '加载完成、还没开始构造时'
+  const sample = /^sample:(\d+)$/.exec(phase)
+  if (sample !== null) return `第 ${sample[1]} 条构造时`
+  return `阶段 ${phase} 里`
+}
+
+/** 崩的原因（挑出真正有用的那行，而不是把 GC 日志前 200 字甩出去） */
+function crashReason(stderr: string): string {
+  if (/heap out of memory|Ineffective mark-compacts|Allocation failed/i.test(stderr)) return '内存爆了（JavaScript heap out of memory）'
+  if (/Maximum call stack size exceeded/i.test(stderr)) return '调用栈溢出（多半是递归没有出口）'
+  const line = stderr
+    .split('\n')
+    .map((text) => text.trim())
+    .findLast(
+      (text) =>
+        text !== '' &&
+        !text.startsWith('#phase:') &&
+        !text.startsWith('at ') &&
+        !text.startsWith('-----') &&
+        !text.startsWith('<---') &&
+        !/^\d+:/.test(text),
+    )
+  return line === undefined ? '被杀了，但没留下错误信息' : `：${line.slice(0, 200)}`
+}
+
+/** 内存爆了要说清下一步怎么改，否则 agent 只会换个写法再撞一次 */
+function crashHint(stderr: string): string {
+  if (!/heap out of memory|Ineffective mark-compacts|Allocation failed/i.test(stderr)) return ''
+  return '。检查循环的终止条件（例如 `for (let i = -4; i <= -1; i = i - 1)`：i 一直在变小，条件却等它变大，就永远不停），' +
+    '以及顶层不要造大数组——顶层代码在 import 时就会跑'
 }
 
 export const inject = ['construct']

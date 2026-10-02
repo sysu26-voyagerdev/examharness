@@ -104,6 +104,42 @@ export function construct(slot, seed) {
 }
 `
 
+/** 作弊模块四：顶层就在死循环（真踩过：agent 写的 `for (let i = -4; i <= -1; i = i - 1)`） */
+const TOP_LEVEL_HANG_MODULE = `
+export const kind = 'dynamic/hang'
+export const covers = ['一元一次不等式']
+const CASES = []
+for (let r1 = -4; r1 <= -1; r1 = r1 - 1) {
+  for (let r2 = 1; r2 <= 6; r2 = r2 + 1) {
+    if (((r1 + r2) % 2) === 0 && (r2 + r1) !== 0) CASES.push({ r1: r1, r2: r2 })
+  }
+}
+export function construct(slot, seed) {
+  return { params: { seed }, stem: 'x', answer: 'x', checks: [{ expr: 'seed - seed', at: { seed }, expect: 0 }] }
+}
+`
+
+/** 会写字段的模块：goal / givens / stemTex 都要原样进 Item */
+const DECLARED_MODULE = `
+export const kind = 'dynamic/declared'
+export const covers = ['配方']
+export function construct(slot, seed) {
+  const x = 2 + (seed % 3)
+  const k = 2 + (seed % 2)
+  const c = k * x + 3
+  return {
+    params: { x, k, c },
+    stem: '已知 ' + k + 'x + 3 > ' + c + '，求 x 的取值范围。',
+    stemTex: k + 'x + 3 > ' + c,
+    answer: 'x > ' + x,
+    answerTex: 'x > ' + x,
+    goal: '求 x 的取值范围',
+    givens: [k + 'x + 3 > ' + c],
+    checks: [{ expr: 'k*x + 3', at: { k, x, c }, expect: c }],
+  }
+}
+`
+
 async function boot(): Promise<Context> {
   const ctx = new Context()
   ctx.baseUrl = pathToFileURL(ROOT).href
@@ -196,5 +232,49 @@ describe('agent 在运行时制作新题型', () => {
     const mine = reports.find((report) => report.kind === 'dynamic/no-check')
     expect(mine?.ok).toBe(false)
     expect(mine?.problems.join(' ')).toContain('checks')
+  })
+
+  it('顶层死循环 → 只崩掉验收子进程，报告说清崩在哪一步', async () => {
+    writeModule('hang', TOP_LEVEL_HANG_MODULE)
+    const ctx = await boot()
+    const reports = await ctx.constructDynamic.loadAll()
+    const mine = reports.find((report) => report.file.endsWith('hang.mjs'))
+    expect(mine?.ok).toBe(false)
+    const problems = mine?.problems.join(' ') ?? ''
+    // 说清是**顶层**崩的、崩在什么原因上——agent 要拿这句话去改代码
+    expect(problems).toContain('顶层')
+    expect(problems).toContain('内存')
+    expect(ctx.construct.kinds()).not.toContain('dynamic/hang')
+    // 宿主进程还活着，而且没有偷偷注册
+    expect(ctx.construct.kinds()).toContain('parabola/roots')
+  })
+
+  it('模块声明的结构（goal / givens / 题面公式）原样进 Item——题面公式不许串成答案', async () => {
+    writeModule('declared', DECLARED_MODULE)
+    const ctx = await boot()
+    const reports = await ctx.constructDynamic.loadAll()
+    expect(reports.find((report) => report.kind === 'dynamic/declared')?.ok).toBe(true)
+
+    // 用一个**只有这个模块覆盖**的知识点：题位选构造器是"第一个覆盖它的"，
+    // 用别的知识点会选到仓库里已有的题型，测的就不是这个模块了
+    const item = ctx.construct.generate(
+      {
+        key: 'Z9',
+        knowledge: ['配方'],
+        cognitive: '掌握',
+        type: '解答',
+        difficulty: [0.6, 0.85],
+        score: 10,
+        count: 1,
+      },
+      7,
+    )
+    expect(item.instance.goal).toBe('求 x 的取值范围')
+    const params = item.instance.params as { x: number; k: number; c: number }
+    expect(item.instance.givens).toEqual([`${String(params.k)}x + 3 > ${String(params.c)}`])
+    // 曾经这里把 answerTex 当成题面公式：卷面上会把**答案**印在题干位置
+    expect(item.prose.tex?.stem).toBe(`${String(params.k)}x + 3 > ${String(params.c)}`)
+    expect(item.prose.tex?.answer).toBe(`x > ${String(params.x)}`)
+    expect(item.prose.tex?.stem).not.toBe(item.prose.tex?.answer)
   })
 })

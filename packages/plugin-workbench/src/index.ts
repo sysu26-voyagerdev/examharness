@@ -117,7 +117,9 @@ const TOOLS: readonly LlmToolSpec[] = [
   {
     name: 'serialize_item',
     description:
-      '让执笔者把候选题的结构写成给学生看的题面（序列化）。题面随后会过回译校验：写漏条件会被拦下。',
+      '让执笔者把候选题的结构写成给学生看的题面（序列化）。题面随后会过回译校验：' +
+      '写漏条件会被拦下；题型模块没声明 goal / givens 时，核对不了的项会落到"待复核"。' +
+      '**题面本来就有**（构造器给的是确定性模板）：不是非写不可，只有想让它更像卷子时才用。',
     parameters: {
       type: 'object',
       properties: { candidateId: { type: 'string' } },
@@ -259,17 +261,24 @@ const GAP_TOOL: LlmToolSpec = {
 const CONSTRUCTOR_TOOL: LlmToolSpec = {
   name: 'constructor_write',
   description:
-    '**制作一个新题型**（运行时生效，不用人改代码）：写一个模块到 data/constructors/，框架立刻验收——' +
+    '**制作一个新题型**（运行时生效，不用人改代码）：写一个模块到 constructors/，框架立刻验收——' +
     '静态安全检查、契约完整、同种子可复现、不同种子有差异、**检验点能区分对错**（把参数改坏它必须失败）。' +
     '通过就注册生效，下一步就能按蓝图出这种题；不通过会把问题原样告诉你，改完再交。\n' +
+    '两条铁律：**顶层代码要轻**（它在 import 那一刻就会执行：别在上面造大数组、别放循环）；' +
+    '**循环一定要有终止条件**（`for (let i = -4; i <= -1; i = i - 1)` 会一直转下去，验收进程会被内存上限杀掉）。\n' +
     '模块格式（ESM，只许做计算，不许文件/网络/子进程）：\n' +
     '  export const kind = "dynamic/xxx"        // 题型名\n' +
     '  export const covers = ["知识点"]         // 覆盖哪些知识点（最多 6 个）\n' +
     '  export function construct(slot, seed) {\n' +
     '    return { params: {...数字}, stem: "题面", answer: "答案",\n' +
-    '             answerTex: "答案的 LaTeX", solution: ["步骤"], steps: [{text, basis}],\n' +
+    '             stemTex: "题面的 LaTeX", answerTex: "答案的 LaTeX",\n' +
+    '             goal: "题目要求什么（几个短句，空格分开）",\n' +
+    '             givens: ["题面显式给出的条件，一条一个"],\n' +
+    '             solution: ["步骤"], steps: [{text, basis}],\n' +
     '             checks: [{ expr: "把 at 代进去该等于什么", at: {...}, expect: 0 }] }\n' +
     '  }\n' +
+    '**goal 与 givens 要写**：题面被模型重写后，回译闸门就是拿它们核对"有没有写漏、写歪"的；\n' +
+    '不写这两项，那份题面就只能落到"待复核"。\n' +
     'checks 是**框架用来独立核对的事实**（求值器是框架的）：比如"根代回多项式为 0"、' +
     '"两点都满足解析式"。写得越具体越好；只写恒等式（如 a-a=0）会被判无效。',
   parameters: {
@@ -1411,7 +1420,9 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     '',
     '硬规矩：',
     '1. 数学真值由构造与符号计算保证，你不要自己算答案，也不要改题面里的数值。',
-    '2. 每道候选题先用 serialize_item 写题面（写漏条件会被回译闸门拦下），再用 submit_item 提交；',
+    '2. 候选题的**题面已经由题型写好了**（模板序列化，确定性的）：先 construct_item、再 submit_item 就行。',
+    '   serialize_item 只在"你要把题面改得更像给学生看的卷子"时用；用了它，题面要过回译校验',
+    '   （核对目标、条件条数、答案）——题型模块里声明了 goal / givens 才核对得上，没声明就只能落"待复核"。',
     '   闸门由框架挂载，你无法跳过，也不必重复验证。',
     '3. 被拦下时读清楚是哪道闸门、能不能靠重做修好：能就换种子重来，不能就换题位设计。',
     '4. 每题位凑齐为止；凑不齐就说明原因，不要用不合规的题凑数。',
