@@ -62,6 +62,13 @@ function pickInt(random: () => number, low: number, high: number): number {
   return low + Math.floor(random() * (high - low + 1))
 }
 
+/** 不含平方因数的整数（根号里只留这些，化简才是"化到底"） */
+const SQUARE_FREE = [2, 3, 5, 6, 7, 10, 11, 13] as const
+
+function pickFrom<T>(random: () => number, values: readonly T[]): T {
+  return values[Math.floor(random() * values.length)] as T
+}
+
 /** 组装一个题目（六个构造器共用）：答案、证据、题面、LaTeX 都在这里定形 */
 function buildItem(input: {
   slot: BlueprintRow
@@ -128,7 +135,10 @@ function createRadicalSimplify(config: AlgebraConfig): Constructor {
   return (slot, seed) => {
     const random = rng(seed)
     const square = pickInt(random, 2, Math.min(config.maxValue, 9))
-    const free = pickInt(random, 2, 7)
+    // **根号里必须是"无平方因数"的数**：free 若含平方因数（4、8、9…），化简就没做完
+    // （√28 该化成 2√7；square²×4 会给出 2√4）。真实踩过：符号闸门判
+    // "根号里还留着平方因数 4"，整卷那道选择题出不来。
+    const free = pickFrom(random, SQUARE_FREE)
     const outside = square
     const radicand = square * square * free
     return buildItem({

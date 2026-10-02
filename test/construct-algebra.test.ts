@@ -120,6 +120,20 @@ describe('新构造器：代数与统计', () => {
     expect(ids.size).toBeGreaterThan(30)
   })
 
+  it('根式题：60 个种子都必须"化到底"（根号里不许留平方因数）', async () => {
+    // 真实踩过：free 取到 4 时，square²×4 的化简结果里还留着平方因数，
+    // 符号闸门判"根号里还留着平方因数 4"，整卷那道选择题就出不来。
+    const ctx = await boot()
+    const slot = slotFor('实数与二次根式', 'R1')
+    const items = Array.from({ length: 60 }, (_, index) => ctx.construct.generate(slot, index + 1))
+    const verdicts = await Promise.all(
+      items.map((item) => ctx.waterfall('item:verify', item, () => ({ pass: true }))),
+    )
+    for (const [index, verdict] of verdicts.entries()) {
+      expect(verdict.pass ? 'ok' : `种子 ${String(index + 1)}：${JSON.stringify(verdict)}`).toBe('ok')
+    }
+  })
+
   it('对抗性检查：把参数改坏，闸门必须拦下（证明验证是独立的）', async () => {
     const ctx = await boot()
     const cases: readonly { knowledge: string; kind: string; tamper: (params: Record<string, number>) => void }[] = [
