@@ -42,8 +42,12 @@ preview/index.html   界面布局草图（纯静态示意，仅作参考，不�
 
 ```bash
 pnpm install
+pnpm venv           # 可选：给 agent 建虚拟环境（处理 PDF/表格要用；慢，装一次就够）
 pnpm start          # 构建全部 + 起服务，界面在 http://<本机IP>:8787/
 ```
+
+模型密钥两条路：界面上「设置 → API 密钥」填（存 `data/credentials.json`，0600，**只写不读**），
+或起服务前设环境变量 `EXAMHARNESS_API_KEY`（环境变量优先且界面上只读）。
 
 界面分四页（地址栏 hash 直达）：
 
@@ -51,7 +55,7 @@ pnpm start          # 构建全部 + 起服务，界面在 http://<本机IP>:878
 |---|---|---|
 | 工作台 | `#/work` | 会话 + 工作记录 + 卷子/知识网络/证据，让命题组干活 |
 | 会话 | `#/sessions` | 分组、新建（班级/进度/蓝图/知识库）、切换、改约定 |
-| 知识库 | `#/knowledge` | 上传资料（原料）→ 让 agent 整理成语料，可分片预览 |
+| 知识库 | `#/knowledge` | 上传资料（原料）→ 让 agent 整理成语料：过程实时可见，能插话、能叫停 |
 | 设置 | `#/settings` | 模型/联网/语料目录/默认值/查重阈值，改完立刻生效 |
 
 开发前端时：`pnpm dev:client`（vite 5173，`/api` 代理到 8787），另开一个终端 `node bin.js`。
