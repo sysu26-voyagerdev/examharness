@@ -11,7 +11,7 @@ function mulberry(seed) {
   };
 }
 function pick(rnd, arr) { return arr[Math.floor(rnd() * arr.length)]; }
-function three(ans, cands) {
+function threeG(ans, cands) {
   const out = [];
   for (let i = 0; i < cands.length; i++) {
     const c = cands[i];
@@ -49,7 +49,7 @@ export function construct(slot, seed) {
       goal: "求反比例函数的比例系数k",
       givens: ["反比例函数的表达式是y=k/x", "它的图象经过点(" + x + "，" + r + ")"],
       solution: [
-        "把点(" + x + "，" + r + ")代入y=k/x，得k=xy。",
+        "点(" + x + "，" + r + ")在y=k/x的图象上，所以k=xy。",
         "k=" + x + "×" + r + "=" + k + "。"
       ],
       steps: [
@@ -59,7 +59,7 @@ export function construct(slot, seed) {
       checks: [
         { expr: "k - x0*y0", at: { k: k, x0: x, y0: r }, expect: 0 }
       ],
-      distractors: three(k, [x + r, r, x, k + x, r * r])
+      distractors: threeNum(k, [x + r, r, x, k + x, r * r, k - r])
     };
   }
 
@@ -67,7 +67,7 @@ export function construct(slot, seed) {
     const x0 = pick(rnd, [2, 3, 4, 5, 6]);
     const y0 = pick(rnd, [2, 3, 4, 5, 6]);
     const k = x0 * y0;
-    const x1 = pick(rnd, [3, 4, 5, 6, 8, 10, 12]);
+    const x1 = pick(rnd, [3, 4, 5, 6, 8, 10, 12, 15]);
     const y1 = k / x1;
     if (!Number.isInteger(y1)) {
       return construct(slot, seed + 1);
@@ -92,7 +92,7 @@ export function construct(slot, seed) {
         { expr: "k - x0*y0", at: { k: k, x0: x0, y0: y0 }, expect: 0 },
         { expr: "y1*x1 - k", at: { y1: y1, x1: x1, k: k }, expect: 0 }
       ],
-      distractors: threeNum(y1, [k, x1, y0, y1 + x1, k / x0])
+      distractors: threeNum(y1, [k, x1, y0, y1 + x1, k - x1])
     };
   }
 
@@ -106,7 +106,7 @@ export function construct(slot, seed) {
     }
     return {
       params: { m: m, n: n, k: k, y1: y1, y2: y2 },
-      stem: "反比例函数y=k/x的图象经过第一、三象限，点A(" + m + "，y₁)、B(" + n + "，y₂)都在它的图象上，且k=" + k + "，则y₁与y₂的大小关系是（　）",
+      stem: "反比例函数y=k/x的图象经过第一、三象限，且k=" + k + "。点A(" + m + "，y₁)、B(" + n + "，y₂)都在它的图象上，则y₁与y₂的大小关系是（　）",
       answer: "y₁>y₂",
       stemTex: "y=\\frac{" + k + "}{x},\\ A(" + m + ",y_1),B(" + n + ",y_2)",
       answerTex: "y_1>y_2",
@@ -124,9 +124,9 @@ export function construct(slot, seed) {
       checks: [
         { expr: "m*y1 - k", at: { m: m, y1: y1, k: k }, expect: 0 },
         { expr: "n*y2 - k", at: { n: n, y2: y2, k: k }, expect: 0 },
-        { expr: "y1*n - y2*m", at: { y1: y1, n: n, y2: y2, m: m }, expect: 0 }
+        { expr: "y1*m - y2*n", at: { y1: y1, m: m, y2: y2, n: n }, expect: 0 }
       ],
-      distractors: three("y₁>y₂", ["y₁<y₂", "y₁=y₂", "y₁≥y₂"])
+      distractors: threeG("y₁>y₂", ["y₁<y₂", "y₁=y₂", "y₁≥y₂"])
     };
   }
 
@@ -142,12 +142,12 @@ export function construct(slot, seed) {
     goal: "求k的值",
     givens: ["点P在反比例函数y=k/x（k>0）的图象上", "过点P向x轴、y轴作垂线，与坐标轴围成矩形", "矩形的面积为" + k],
     solution: [
-      "设点P的坐标为(" + w + "，" + h + ")，则矩形的两边长分别为|x|与|y|，面积=|xy|=|k|。",
+      "设点P的坐标为(" + w + "，" + h + ")，矩形的两边长分别为|x|与|y|，面积=|xy|=|k|。",
       "因为k>0，所以k=面积=" + k + "。"
     ],
     steps: [
       { text: "矩形面积=|k|", basis: "反比例函数中k的几何意义" },
-      { text: "k=" + k, basis: "k>0时k=|k|" }
+      { text: "k=" + k, basis: "k>0时|k|=k" }
     ],
     checks: [
       { expr: "k - px*py", at: { k: k, px: w, py: h }, expect: 0 },

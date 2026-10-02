@@ -86,25 +86,28 @@ function readParsed(value: Record<string, unknown> | undefined): ParsedStem | un
  * 都是一回事。**判据是内容，不是字面**：闸门该抓的是"问的变了、数值变了、条件漏了"，
  * 不是"多了个字母 O"。真实踩过：agent 被逼着把题型改成迎合闸门的字面，越改越离谱。
  */
+/** 一段文字的字符二元组（"求圆心到" → 求圆/圆心/心到） */
+function bigrams(text: string): string[] {
+  return text.length < 2 ? [text] : Array.from({ length: text.length - 1 }, (_, index) => text.slice(index, index + 2))
+}
+
 function similarText(left: string, right: string): number {
   const a = normalize(left)
   const b = normalize(right)
   if (a === '' || b === '') return 0
   if (a === b || a.includes(b) || b.includes(a)) return 1
-  const bigrams = (text: string): string[] =>
-    text.length < 2 ? [text] : Array.from({ length: text.length - 1 }, (_, index) => text.slice(index, index + 2))
-  const left_ = bigrams(a)
-  const right_ = bigrams(b)
-  const pool = [...right_]
+  const leftGrams = bigrams(a)
+  const rightGrams = bigrams(b)
+  const pool = [...rightGrams]
   let shared = 0
-  for (const gram of left_) {
+  for (const gram of leftGrams) {
     const at = pool.indexOf(gram)
     if (at >= 0) {
       shared += 1
       pool.splice(at, 1)
     }
   }
-  return (2 * shared) / (left_.length + right_.length)
+  return (2 * shared) / (leftGrams.length + rightGrams.length)
 }
 
 /** 目标是否讲的是同一件事（阈值放宽到 0.6：允许措辞与标注差异） */

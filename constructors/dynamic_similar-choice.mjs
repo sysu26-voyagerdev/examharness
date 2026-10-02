@@ -28,7 +28,8 @@ export function construct(slot, seed) {
 
   if (which === 0) {
     const m = pick(rnd, [3, 4, 5, 6, 7, 8, 9]);
-    const n = pick(rnd, [2, 3, 4, 5, 6, 7]);
+    let n = pick(rnd, [2, 3, 4, 5, 6, 7]);
+    while (n === m) { n = pick(rnd, [2, 3, 4, 5, 6, 7]); }
     const k = pick(rnd, [2, 3]);
     const DE = k * m, EF = k * n;
     return {
@@ -41,7 +42,8 @@ export function construct(slot, seed) {
       givens: ["△ABC∽△DEF", "AB=" + m, "BC=" + n, "DE=" + DE],
       solution: [
         "相似三角形对应边成比例，AB/DE=BC/EF。",
-        m + "/" + DE + "=1/" + k + "，所以BC/EF=1/" + k + "，EF=" + k + "×" + n + "=" + EF + "。"
+        "AB/DE=" + m + "/" + DE + "=1/" + k + "，所以BC/EF=1/" + k + "。",
+        "EF=" + k + "×" + n + "=" + EF + "。"
       ],
       steps: [
         { text: "相似比=" + m + "/" + DE + "=1/" + k, basis: "相似三角形对应边成比例" },
@@ -51,7 +53,7 @@ export function construct(slot, seed) {
         { expr: "AB*EF - DE*BC", at: { AB: m, EF: EF, DE: DE, BC: n }, expect: 0 },
         { expr: "DE - ratio*AB", at: { DE: DE, ratio: k, AB: m }, expect: 0 }
       ],
-      distractors: three(EF, [n, DE, m, k * n + n, n + m])
+      distractors: three(EF, [n, DE, m, k * n + n, n + m, k * m + m, EF + 1, EF - 1, k * n + m])
     };
   }
 
@@ -81,7 +83,7 @@ export function construct(slot, seed) {
       checks: [
         { expr: "areaBig*ratioNum*ratioNum - areaSmall*ratioDen*ratioDen", at: { areaBig: S2, ratioNum: m, areaSmall: S, ratioDen: n }, expect: 0 }
       ],
-      distractors: three(S2, [S * n / m, S * n * n / m, S * m / n, S + n, S * n])
+      distractors: three(S2, [S * n / m, S * m / n, S * n * n / m, S2 + m, S2 - m, S * n, S2 * m, S + n * n, S2 + 1, S2 - 1])
     };
   }
 
@@ -110,7 +112,7 @@ export function construct(slot, seed) {
       checks: [
         { expr: "perBig*ratioNum - perSmall*ratioDen", at: { perBig: C2, ratioNum: m, perSmall: C, ratioDen: n }, expect: 0 }
       ],
-      distractors: three(C2, [C + n, C * m / n, C, C * n * n / m, C + m])
+      distractors: three(C2, [C + n, C * m / n, C, C * n * n / m, C + m, C * n, C2 - m, C2 + 1, C2 - 1])
     };
   }
 
@@ -118,8 +120,9 @@ export function construct(slot, seed) {
   const b = pick(rnd, [3, 4, 5, 6, 7]);
   const t = pick(rnd, [2, 3, 4, 5]);
   const AD = a, DB = b, AE = a * t, EC = b * t;
+  const AB = AD + DB, AC = AE + EC;
   return {
-    params: { AD: AD, DB: DB, AE: AE, EC: EC },
+    params: { AD: AD, DB: DB, AE: AE, EC: EC, AB: AB, AC: AC },
     stem: "在△ABC中，点D在AB上，点E在AC上，DE∥BC。若AD=" + AD + "，DB=" + DB + "，AE=" + AE + "，则EC的长是（　）",
     answer: "EC=" + EC,
     stemTex: "DE\\parallel BC,\\ AD=" + AD + ",\\ DB=" + DB + ",\\ AE=" + AE,
@@ -128,18 +131,18 @@ export function construct(slot, seed) {
     givens: ["在△ABC中，点D在AB上，点E在AC上", "DE∥BC", "AD=" + AD, "DB=" + DB, "AE=" + AE],
     solution: [
       "DE∥BC，所以△ADE∽△ABC，AD/AB=AE/AC。",
-      "AB=AD+DB=" + (AD + DB) + "，AD/AB=" + AD + "/" + (AD + DB) + "=" + t + "/" + (t + b / a * 1) + "。",
-      "由AD/AB=AE/AC得：" + AD + "/" + (AD + DB) + "=" + AE + "/AC，解得AC=" + (AE + EC) + "。",
-      "EC=AC-AE=" + (AE + EC) + "-" + AE + "=" + EC + "。"
+      "AB=AD+DB=" + AB + "，所以" + AD + "/" + AB + "=" + AE + "/AC，解得AC=" + AC + "。",
+      "EC=AC-AE=" + AC + "-" + AE + "=" + EC + "。"
     ],
     steps: [
-      { text: "△ADE∽△ABC", basis: "平行于三角形一边的直线与其他两边相交，所构成的三角形与原三角形相似" },
-      { text: "AD/AB=AE/AC", basis: "相似三角形对应边成比例" },
+      { text: "△ADE∽△ABC", basis: "平行于三角形一边的直线和其他两边相交，所构成的三角形与原三角形相似" },
+      { text: "AD/AB=AE/AC，得AC=" + AC, basis: "相似三角形对应边成比例" },
       { text: "EC=" + EC, basis: "EC=AC-AE" }
     ],
     checks: [
-      { expr: "AD*(AE+EC) - AE*(AD+DB)", at: { AD: AD, AE: AE, EC: EC, DB: DB }, expect: 0 }
+      { expr: "AD*AC - AE*AB", at: { AD: AD, AC: AC, AE: AE, AB: AB }, expect: 0 },
+      { expr: "AB - AD - DB", at: { AB: AB, AD: AD, DB: DB }, expect: 0 }
     ],
-    distractors: three(EC, [DB, b * a / a * t - 0, b, AE, DB + t, b * a])
+    distractors: three(EC, [DB, b, AE, AD, DB + t, AE + DB, a * t, EC + 1, EC - 1])
   };
 }
