@@ -17,14 +17,9 @@ export function SessionsPage(): React.JSX.Element {
   const defaults = sessions?.defaults ?? { className: '', progress: '', blueprintPath: '' }
 
   const [creating, setCreating] = useState(false)
-  const [draft, setDraft] = useState({
-    title: '',
-    className: defaults.className,
-    progress: defaults.progress,
-    blueprintPath: defaults.blueprintPath,
-    groupId: '',
-    kbId: '',
-  })
+  // 初值来自服务端给的 defaults，但**打开表单那一刻再取一次**：
+  // 首屏可能先于 /api/sessions 到达，用挂载时的空值会让人以为默认值是空的
+  const [draft, setDraft] = useState({ title: '', ...defaults, groupId: '', kbId: '' })
   const [groupName, setGroupName] = useState('')
   const [renaming, setRenaming] = useState('')
   const [renameTo, setRenameTo] = useState('')
@@ -116,7 +111,14 @@ export function SessionsPage(): React.JSX.Element {
             {list.length} 个会话　{groups.length} 个分组
           </span>
           <span className="r">
-            <button className="pri" disabled={busy !== ''} onClick={() => setCreating((value) => !value)}>
+            <button
+              className="pri"
+              disabled={busy !== ''}
+              onClick={() => {
+                if (!creating) setDraft({ title: '', ...defaults, groupId: '', kbId: '' })
+                setCreating(!creating)
+              }}
+            >
               新建会话
             </button>
           </span>
