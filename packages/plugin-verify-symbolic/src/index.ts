@@ -147,6 +147,53 @@ const CHECKS: Readonly<Record<string, Check>> = {
     if (Math.abs(x * y - k) > eps) return `k 不对：${String(x)} × ${String(y)} ≠ ${String(k)}`
     return undefined
   },
+  // 直角三角形：勾股定理必须成立（三边自洽），且都是正数
+  'geometry/right-triangle': (params, _eps) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const a = num(params, 'a')
+    const b = num(params, 'b')
+    const c = num(params, 'c')
+    if (a === undefined || b === undefined || c === undefined) return '缺参数 a/b/c'
+    if (a <= 0 || b <= 0 || c <= 0) return '三条边必须为正'
+    if (a * a + b * b !== c * c) return `勾股定理不成立：${String(a)}² + ${String(b)}² ≠ ${String(c)}²`
+    return undefined
+  },
+  // 矩形：周长与面积必须由长宽算出
+  'geometry/rectangle': (params, _eps) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const width = num(params, 'width')
+    const height = num(params, 'height')
+    const perimeter = num(params, 'perimeter')
+    const area = num(params, 'area')
+    if (width === undefined || height === undefined || perimeter === undefined || area === undefined) {
+      return '缺参数 width/height/perimeter/area'
+    }
+    if (width <= 0 || height <= 0) return '边长必须为正'
+    if (2 * (width + height) !== perimeter) return `周长不对：2(${String(width)} + ${String(height)}) ≠ ${String(perimeter)}`
+    if (width * height !== area) return `面积不对：${String(width)} × ${String(height)} ≠ ${String(area)}`
+    return undefined
+  },
+  // 圆·垂径：半径、弦心距、半弦长必须构成直角三角形，弦长 = 2×半弦长，且弦心距不为 0
+  'geometry/circle-chord': (params, _eps) => {
+    const bad = allFinite(params)
+    if (bad !== undefined) return bad
+    const radius = num(params, 'radius')
+    const distance = num(params, 'distance')
+    const half = num(params, 'half')
+    const chord = num(params, 'chord')
+    if (radius === undefined || distance === undefined || half === undefined || chord === undefined) {
+      return '缺参数 radius/distance/half/chord'
+    }
+    if (radius <= 0 || distance <= 0) return '半径与弦心距必须为正'
+    if (distance >= radius) return '弦心距必须小于半径（否则弦不存在）'
+    if (distance * distance + half * half !== radius * radius) {
+      return `垂径定理的直角三角形不成立：${String(distance)}² + ${String(half)}² ≠ ${String(radius)}²`
+    }
+    if (2 * half !== chord) return `弦长不对：2 × ${String(half)} ≠ ${String(chord)}`
+    return undefined
+  },
   // 统计：总和、平均数必须自洽，且众数确实是出现最多的那个数
   'stats/mean': (params, eps) => {
     const bad = allFinite(params)

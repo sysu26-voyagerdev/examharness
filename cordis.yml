@@ -53,6 +53,11 @@
       - 一元二次方程
       - 反比例函数
       - 统计与概率
+      - 三角形与全等
+      - 相似三角形
+      - 锐角三角函数
+      - 四边形与特殊平行四边形
+      - 圆的性质
 
 # 语料库：真实题库/教材整理件（corpus/ 不进 Git）。缺目录也不影响启动。
 - id: corpus
@@ -103,6 +108,12 @@
   name: '@examharness/plugin-construct-algebra'
   config:
     maxValue: 12
+
+# 几何构造器：直角三角形 / 矩形 / 圆·垂径（图与断言一起出）
+- id: construct-geometry
+  name: '@examharness/plugin-construct-geometry'
+  config:
+    maxScale: 4
 
 - id: verify-roundtrip
   name: '@examharness/plugin-verify-roundtrip'

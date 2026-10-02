@@ -95,8 +95,9 @@ function checkTexLayer(item: Item): Verdict | undefined {
   if (tex.stem !== undefined) {
     const allowed = new Set(numbers(JSON.stringify(item.instance.params)))
     for (const value of numbers(tex.stem)) {
-      // 0 与 1 是结构性数字（「= 0」「系数 1」），不是题目数据：查它们只会误伤
-      if (value === '0' || value === '1') continue
+      // 结构性数字不是题目数据：查它们只会误伤——
+      // 0/1（「= 0」「系数 1」）、角度常量（「∠A = 90°」「内角和 180°」「360°」）
+      if (value === '0' || value === '1' || value === '90' || value === '180' || value === '360') continue
       if (!allowed.has(value)) {
         return {
           pass: false,

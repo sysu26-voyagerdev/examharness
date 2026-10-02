@@ -38,6 +38,7 @@
     "@examharness/core": "workspace:*",
     "@examharness/plugin-bank": "workspace:*",
     "@examharness/plugin-construct-algebra": "workspace:*",
+    "@examharness/plugin-construct-geometry": "workspace:*",
     "@examharness/plugin-construct-parabola": "workspace:*",
     "@examharness/plugin-corpus": "workspace:*",
     "@examharness/plugin-doc": "workspace:*",

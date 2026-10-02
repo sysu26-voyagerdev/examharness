@@ -90,7 +90,28 @@ export interface FunctionGraphSpec {
   annotations?: readonly string[]
 }
 
-export type FigureSpec = FunctionGraphSpec
+/**
+ * 平面几何图：点、线段、圆、长度标注、直角标记。
+ *
+ * 规矩与函数图一致（ADR-0009）：**图由坐标算出来**，不解析任何字符串；
+ * 标注的长度必须等于两点距离（断言会核），直角标记只画在真正的直角上——
+ * **图不能撒谎**：不按比例时也不得暗示错误的相等关系。
+ */
+export interface PlaneGeometrySpec {
+  kind: 'plane-geometry'
+  /** 点：名字 + 坐标（世界坐标，渲染器自己缩放） */
+  points: readonly { label: string; x: number; y: number }[]
+  /** 线段：两端点名 */
+  segments: readonly { from: string; to: string; dashed?: boolean }[]
+  /** 圆：圆心点名 + 半径 */
+  circles?: readonly { center: string; radius: number }[]
+  /** 直角标记：顶点 + 两条边上的另一点（渲染前会按坐标核验确实是 90°） */
+  rightAngles?: readonly { vertex: string; armA: string; armB: string }[]
+  /** 长度标注：写在线段中点附近（值由构造器给出，断言核验 = 两点距离） */
+  labels?: readonly { of: string; text: string }[]
+}
+
+export type FigureSpec = FunctionGraphSpec | PlaneGeometrySpec
 
 /** 渲染产物：SVG + 断言结果。断言不过就不许入库（见 verify-figure 闸门） */
 export interface FigureArtifact {

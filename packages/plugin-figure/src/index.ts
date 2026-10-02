@@ -1,5 +1,12 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { FigureApi, FigureArtifact, FigureSpec, FunctionGraphSpec, Item } from '@examharness/core'
+import type {
+  FigureApi,
+  FigureArtifact,
+  FigureSpec,
+  FunctionGraphSpec,
+  Item,
+  PlaneGeometrySpec,
+} from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -152,6 +159,128 @@ function renderFunctionGraph(spec: FunctionGraphSpec, config: FigureConfig): Fig
   return { svg, assertions }
 }
 
+/* ────────────── 平面几何：按坐标画，标注与直角都从坐标核验 ────────────── */
+
+function geometryScale(spec: PlaneGeometrySpec, width: number, height: number): (point: { x: number; y: number }) => { x: number; y: number } {
+  const xs = spec.points.map((point) => point.x)
+  const ys = spec.points.map((point) => point.y)
+  const radius = Math.max(0, ...(spec.circles ?? []).map((circle) => circle.radius))
+  const lowX = Math.min(...xs) - radius
+  const highX = Math.max(...xs) + radius
+  const lowY = Math.min(...ys) - radius
+  const highY = Math.max(...ys) + radius
+  const spanX = highX - lowX || 1
+  const spanY = highY - lowY || 1
+  const scale = Math.min((width - PAD * 2) / spanX, (height - PAD * 2) / spanY)
+  const offsetX = (width - spanX * scale) / 2
+  const offsetY = (height - spanY * scale) / 2
+  return (point) => ({
+    x: offsetX + (point.x - lowX) * scale,
+    y: height - offsetY - (point.y - lowY) * scale,
+  })
+}
+
+function findPoint(spec: PlaneGeometrySpec, label: string): { label: string; x: number; y: number } {
+  const found = spec.points.find((point) => point.label === label)
+  if (found === undefined) throw new Error(`几何图里没有点 ${label}`)
+  return found
+}
+
+/** 两条边的夹角（度）：直角标记只画在真的是直角的地方 */
+function angleAt(spec: PlaneGeometrySpec, vertex: string, armA: string, armB: string): number {
+  const v = findPoint(spec, vertex)
+  const a = findPoint(spec, armA)
+  const b = findPoint(spec, armB)
+  const v1 = { x: a.x - v.x, y: a.y - v.y }
+  const v2 = { x: b.x - v.x, y: b.y - v.y }
+  const dot = v1.x * v2.x + v1.y * v2.y
+  const mag = Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y)
+  if (mag === 0) return 0
+  return (Math.acos(Math.max(-1, Math.min(1, dot / mag))) * 180) / Math.PI
+}
+
+function renderGeometry(spec: PlaneGeometrySpec, width: number, height: number, minGap: number): FigureArtifact {
+  const to = geometryScale(spec, width, height)
+  const parts: string[] = []
+  const assertions: Record<string, boolean> = {}
+
+  // 圆
+  for (const circle of spec.circles ?? []) {
+    const center = to(findPoint(spec, circle.center))
+    const edge = to({ x: findPoint(spec, circle.center).x + circle.radius, y: findPoint(spec, circle.center).y })
+    parts.push(`<circle cx="${center.x.toFixed(1)}" cy="${center.y.toFixed(1)}" r="${Math.abs(edge.x - center.x).toFixed(1)}" fill="none" stroke="var(--ink,#222)" stroke-width="1.2"/>`)
+  }
+
+  // 线段（虚线用于辅助线）
+  for (const segment of spec.segments) {
+    const from = to(findPoint(spec, segment.from))
+    const target = to(findPoint(spec, segment.to))
+    parts.push(
+      `<line x1="${from.x.toFixed(1)}" y1="${from.y.toFixed(1)}" x2="${target.x.toFixed(1)}" y2="${target.y.toFixed(1)}" stroke="var(--ink,#222)" stroke-width="1.2"${segment.dashed === true ? ' stroke-dasharray="4 3"' : ''}/>`,
+    )
+  }
+
+  // 直角标记：**先核验再画**（不是直角就不画，并把断言记成 false）
+  for (const mark of spec.rightAngles ?? []) {
+    const angle = angleAt(spec, mark.vertex, mark.armA, mark.armB)
+    assertions[`直角 ${mark.vertex}（实际 ${angle.toFixed(1)}°）`] = Math.abs(angle - 90) < 0.5
+    if (Math.abs(angle - 90) >= 0.5) continue
+    const v = to(findPoint(spec, mark.vertex))
+    const a = to(findPoint(spec, mark.armA))
+    const b = to(findPoint(spec, mark.armB))
+    const size = 9
+    const unit = (from: { x: number; y: number }, toPoint: { x: number; y: number }): { x: number; y: number } => {
+      const dx = toPoint.x - from.x
+      const dy = toPoint.y - from.y
+      const length = Math.hypot(dx, dy) || 1
+      return { x: (dx / length) * size, y: (dy / length) * size }
+    }
+    const ua = unit(v, a)
+    const ub = unit(v, b)
+    parts.push(
+      `<path d="M ${(v.x + ua.x).toFixed(1)} ${(v.y + ua.y).toFixed(1)} L ${(v.x + ua.x + ub.x).toFixed(1)} ${(v.y + ua.y + ub.y).toFixed(1)} L ${(v.x + ub.x).toFixed(1)} ${(v.y + ub.y).toFixed(1)}" fill="none" stroke="var(--ink,#222)" stroke-width="1"/>`,
+    )
+  }
+
+  // 顶点与名字
+  for (const point of spec.points) {
+    const screen = to(point)
+    parts.push(`<circle cx="${screen.x.toFixed(1)}" cy="${screen.y.toFixed(1)}" r="2" fill="var(--ink,#222)"/>`)
+    parts.push(
+      `<text x="${(screen.x + 6).toFixed(1)}" y="${(screen.y - 6).toFixed(1)}" font-size="12" fill="var(--ink,#222)">${point.label}</text>`,
+    )
+  }
+
+  // 长度标注：值必须等于两点距离（对不上就把断言记成 false，图也照画但要能看出来）
+  for (const label of spec.labels ?? []) {
+    const [fromLabel, toLabel] = label.of.split('-')
+    const from = findPoint(spec, fromLabel ?? '')
+    const target = findPoint(spec, toLabel ?? '')
+    const distance = Math.hypot(target.x - from.x, target.y - from.y)
+    const stated = Number(label.text.replace(/[^\d.]/g, ''))
+    assertions[`标注 ${label.of} = ${label.text}（实际 ${distance.toFixed(2)}）`] = Number.isFinite(stated) && Math.abs(stated - distance) < 0.01
+    const middle = to({ x: (from.x + target.x) / 2, y: (from.y + target.y) / 2 })
+    parts.push(
+      `<text x="${(middle.x + 5).toFixed(1)}" y="${(middle.y - 5).toFixed(1)}" font-size="12" fill="var(--ink,#222)">${label.text}</text>`,
+    )
+  }
+
+  // 可读性：任意两点在屏幕上不能挤在一起
+  const screens = spec.points.map((point) => to(point))
+  let tooClose = false
+  for (let i = 0; i < screens.length; i += 1) {
+    for (let j = i + 1; j < screens.length; j += 1) {
+      const a = screens[i]
+      const b = screens[j]
+      if (a !== undefined && b !== undefined && Math.hypot(a.x - b.x, a.y - b.y) < minGap) tooClose = true
+    }
+  }
+  assertions['点不重叠'] = !tooClose
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${String(width)} ${String(height)}" width="${String(width)}" height="${String(height)}">${parts.join('')}</svg>`
+  return { svg, assertions }
+}
+
 export class FigureService extends Service implements FigureApi {
   static Config = Config
 
@@ -163,7 +292,10 @@ export class FigureService extends Service implements FigureApi {
   }
 
   render(spec: FigureSpec): FigureArtifact {
-    if (spec.kind !== 'function-graph') throw new Error(`没有 ${spec.kind} 的渲染器`)
+    if (spec.kind === 'plane-geometry') {
+      return renderGeometry(spec, this.config.width, this.config.height, this.config.minPointGapPx)
+    }
+    // 走到这里只剩函数图（联合类型已被上面的分支收窄）
     return renderFunctionGraph(spec, this.config)
   }
 

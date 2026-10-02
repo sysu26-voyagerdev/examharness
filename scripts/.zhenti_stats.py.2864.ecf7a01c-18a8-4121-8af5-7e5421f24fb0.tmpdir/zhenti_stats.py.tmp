@@ -1251,19 +1251,20 @@ def build_report(records: list[dict], struct_meta: dict) -> str:
         sig_counter[(r["totalScore"], sig)].append(r)
 
     def per_summary(rs: list[dict]) -> str:
+        """每个大题里“每题多少分”的众数。用 大题总分 ÷ 题数 反推，比看标题更可靠。"""
         out = []
         for t in ("选择", "填空", "解答"):
-            c = collections.Counter(
-                g["perScore"]
-                for r in rs
-                for g in r["sections"]
-                if g["type"] == t and isinstance(g.get("perScore"), (int, float))
-            )
+            c = collections.Counter()
+            for r in rs:
+                for g in r["sections"]:
+                    if g["type"] != t or not g.get("scoreSum") or not g["count"]:
+                        continue
+                    c[round(g["scoreSum"] / g["count"], 2)] += 1
             if c:
                 per, n = c.most_common(1)[0]
                 out.append(f"{t}{per:g}分({n})")
             else:
-                out.append(f"{t}分值未知")
+                out.append(f"{t}未知")
         return "；".join(out)
 
     A("| # | 满分 | 结构（题型 × 题数） | 样本数 | 占该制式 | 每小题分值众数（支持卷数） | 平均总题数 |")
