@@ -34,7 +34,7 @@ export interface ProposalsConfig {
 }
 
 function safeId(kind: string): string {
-  return kind.replace(/[^\w.\-]/g, '_').slice(0, 80) || `proposal-${String(Date.now())}`
+  return kind.replace(/[^\w.-]/g, '_').slice(0, 80) || `proposal-${String(Date.now())}`
 }
 
 export class ProposalService extends Service implements ProposalApi {

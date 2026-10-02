@@ -82,12 +82,15 @@ afterEach(async () => {
 describe('新构造器：代数与统计', () => {
   it('六个题型都能构造，并且真的过闸门入库', async () => {
     const ctx = await boot()
-    for (const [index, entry] of CASES.entries()) {
-      const slot = slotFor(entry.knowledge, `A${String(index + 1)}`)
-      const item = ctx.construct.generate(slot, 1000 + index)
+    const submitted = await Promise.all(
+      CASES.map(async (entry, index) => {
+        const slot = slotFor(entry.knowledge, `A${String(index + 1)}`)
+        const item = ctx.construct.generate(slot, 1000 + index)
+        return { entry, item, result: await ctx.bank.submit(item) }
+      }),
+    )
+    for (const { entry, item, result } of submitted) {
       expect(item.provenance.constructor.startsWith(entry.kind)).toBe(true)
-
-      const result = await ctx.bank.submit(item)
       // 没通过就把原因打出来（否则只看到 false，不知道哪道闸门拦的）
       expect(result.ok ? 'ok' : JSON.stringify(result.verdict)).toBe('ok')
       expect(item.prose.stem.length).toBeGreaterThan(6)
@@ -124,17 +127,20 @@ describe('新构造器：代数与统计', () => {
       { knowledge: '统计与概率', kind: 'stats/mean', tamper: (p) => { p.mean = (p.mean ?? 0) + 1 } },
     ]
 
-    for (const [index, entry] of cases.entries()) {
-      const ctx2 = await boot()
-      const slot = slotFor(entry.knowledge, `C${String(index + 1)}`)
-      const good = ctx2.construct.generate(slot, 2000 + index)
-      const broken: Item = structuredClone(good)
-      entry.tamper(broken.instance.params as Record<string, number>)
-      const result = await ctx2.bank.submit(broken)
-      expect(result.ok).toBe(false)
-      expect(ctx2.bank.all()).toHaveLength(0)
-      await Promise.all(fibers.splice(0).map((fiber) => fiber.dispose()))
+    // 先并发提交，再逐个断言（同一个 ctx：篡改后的题会先被 symbolic 拦下，走不到查重）
+    const results = await Promise.all(
+      cases.map(async (entry, index) => {
+        const slot = slotFor(entry.knowledge, `C${String(index + 1)}`)
+        const good = ctx.construct.generate(slot, 2000 + index)
+        const broken: Item = structuredClone(good)
+        entry.tamper(broken.instance.params as Record<string, number>)
+        return { kind: entry.kind, result: await ctx.bank.submit(broken) }
+      }),
+    )
+    for (const entry of results) {
+      expect(entry.result.ok ? `没拦住（${entry.kind}）` : 'ok').toBe('ok')
     }
-    expect(ctx).toBeDefined()
+    // 一条都不该入库
+    expect(ctx.bank.all()).toHaveLength(0)
   })
 })

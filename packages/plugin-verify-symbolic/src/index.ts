@@ -27,9 +27,7 @@ export interface SymbolicConfig {
  *
  * 返回 undefined = 通过；返回字符串 = 不通过的原因。
  */
-type Check = (params: Readonly<Record<string, number>>) => string | undefined
-
-const EPS = 1e-9
+type Check = (params: Readonly<Record<string, number>>, eps: number) => string | undefined
 
 function num(params: Readonly<Record<string, number>>, key: string): number | undefined {
   const value = params[key]
@@ -46,7 +44,7 @@ function allFinite(params: Readonly<Record<string, number>>): string | undefined
 
 const CHECKS: Readonly<Record<string, Check>> = {
   // 抛物线：把两个根代回 a(x−r1)(x−r2)，必须为 0
-  'parabola/roots': (params) => {
+  'parabola/roots': (params, _eps) => {
     const bad = allFinite(params)
     if (bad !== undefined) return bad
     const a = num(params, 'a')
@@ -58,7 +56,7 @@ const CHECKS: Readonly<Record<string, Check>> = {
     return undefined
   },
   // 顶点式：顶点横坐标代入后应取到极值（导数在 h 处为 0 的离散检验）
-  'parabola/vertex': (params) => {
+  'parabola/vertex': (params, _eps) => {
     const bad = allFinite(params)
     if (bad !== undefined) return bad
     const a = num(params, 'a')
@@ -68,7 +66,7 @@ const CHECKS: Readonly<Record<string, Check>> = {
     return undefined
   },
   // 二次根式化简：√(radicand) = outside√free ⟺ outside² × free = radicand，且 free 无平方因子
-  'radical/simplify': (params) => {
+  'radical/simplify': (params, _eps) => {
     const bad = allFinite(params)
     if (bad !== undefined) return bad
     const square = num(params, 'square')
@@ -89,7 +87,7 @@ const CHECKS: Readonly<Record<string, Check>> = {
     return undefined
   },
   // 因式分解：(x+a)(x+b) 展开必须等于题面多项式 x²+sum·x+product
-  'factor/quadratic': (params) => {
+  'factor/quadratic': (params, _eps) => {
     const bad = allFinite(params)
     if (bad !== undefined) return bad
     const a = num(params, 'a')
@@ -103,7 +101,7 @@ const CHECKS: Readonly<Record<string, Check>> = {
     return undefined
   },
   // 一元二次方程：两根代入 x²+bx+c 必须为 0，且系数与根满足韦达定理
-  'equation/quadratic': (params) => {
+  'equation/quadratic': (params, eps) => {
     const bad = allFinite(params)
     if (bad !== undefined) return bad
     const r1 = num(params, 'r1')
@@ -113,15 +111,15 @@ const CHECKS: Readonly<Record<string, Check>> = {
     if (r1 === undefined || r2 === undefined || b === undefined || c === undefined) return '缺参数 r1/r2/b/c'
     for (const root of [r1, r2]) {
       const value = root * root + b * root + c
-      if (Math.abs(value) > EPS) return `代入验证失败：f(${String(root)}) = ${String(value)}`
+      if (Math.abs(value) > eps) return `代入验证失败：f(${String(root)}) = ${String(value)}`
     }
-    if (Math.abs(-(r1 + r2) - b) > EPS) return '韦达定理不符：两根之和与 b 不一致'
-    if (Math.abs(r1 * r2 - c) > EPS) return '韦达定理不符：两根之积与 c 不一致'
+    if (Math.abs(-(r1 + r2) - b) > eps) return '韦达定理不符：两根之和与 b 不一致'
+    if (Math.abs(r1 * r2 - c) > eps) return '韦达定理不符：两根之积与 c 不一致'
     if (r1 === r2) return '两根重合，题目退化'
     return undefined
   },
   // 一次函数过两点：两点都必须满足 y = kx + b，且 k ≠ 0、两点不重合
-  'linear/two-points': (params) => {
+  'linear/two-points': (params, eps) => {
     const bad = allFinite(params)
     if (bad !== undefined) return bad
     const k = num(params, 'k')
@@ -133,12 +131,12 @@ const CHECKS: Readonly<Record<string, Check>> = {
     if ([k, b, x1, y1, x2, y2].some((value) => value === undefined)) return '缺参数 k/b/x1/y1/x2/y2'
     if (k === 0) return 'k 为 0 就不是一次函数'
     if (x1 === x2) return '两点横坐标相同，确定不了函数'
-    if (Math.abs((k as number) * (x1 as number) + (b as number) - (y1 as number)) > EPS) return `A 点不满足解析式：${String(y1)} ≠ k·${String(x1)}+b`
-    if (Math.abs((k as number) * (x2 as number) + (b as number) - (y2 as number)) > EPS) return `B 点不满足解析式：${String(y2)} ≠ k·${String(x2)}+b`
+    if (Math.abs((k as number) * (x1 as number) + (b as number) - (y1 as number)) > eps) return `A 点不满足解析式：${String(y1)} ≠ k·${String(x1)}+b`
+    if (Math.abs((k as number) * (x2 as number) + (b as number) - (y2 as number)) > eps) return `B 点不满足解析式：${String(y2)} ≠ k·${String(x2)}+b`
     return undefined
   },
   // 反比例函数过点：k = x·y，且 x ≠ 0
-  'inverse/point': (params) => {
+  'inverse/point': (params, eps) => {
     const bad = allFinite(params)
     if (bad !== undefined) return bad
     const x = num(params, 'x')
@@ -146,11 +144,11 @@ const CHECKS: Readonly<Record<string, Check>> = {
     const k = num(params, 'k')
     if (x === undefined || y === undefined || k === undefined) return '缺参数 x/y/k'
     if (x === 0) return 'x 不能为 0（反比例函数定义域）'
-    if (Math.abs(x * y - k) > EPS) return `k 不对：${String(x)} × ${String(y)} ≠ ${String(k)}`
+    if (Math.abs(x * y - k) > eps) return `k 不对：${String(x)} × ${String(y)} ≠ ${String(k)}`
     return undefined
   },
   // 统计：总和、平均数必须自洽，且众数确实是出现最多的那个数
-  'stats/mean': (params) => {
+  'stats/mean': (params, eps) => {
     const bad = allFinite(params)
     if (bad !== undefined) return bad
     const count = num(params, 'count')
@@ -165,7 +163,7 @@ const CHECKS: Readonly<Record<string, Check>> = {
     if (samples.length !== count) return `数据个数不符：给了 ${String(samples.length)} 个，声称 ${String(count)} 个`
     const recomputed = samples.reduce((total, value) => total + value, 0)
     if (recomputed !== sum) return `总和不对：实际 ${String(recomputed)}，声称 ${String(sum)}`
-    if (Math.abs(sum / count - mean) > EPS) return `平均数不对：${String(sum)} ÷ ${String(count)} ≠ ${String(mean)}`
+    if (Math.abs(sum / count - mean) > eps) return `平均数不对：${String(sum)} ÷ ${String(count)} ≠ ${String(mean)}`
     const hits = samples.filter((value) => value === mode).length
     const worst = Math.max(...samples.map((value) => samples.filter((entry) => entry === value).length))
     if (hits !== worst) return `众数不对：${String(mode)} 出现 ${String(hits)} 次，但有数出现 ${String(worst)} 次`
@@ -191,7 +189,7 @@ export function apply(ctx: Context, config: SymbolicConfig): void {
       } satisfies Verdict
     }
 
-    const failure = check(params)
+    const failure = check(params, config.tolerance)
     if (failure !== undefined) {
       return {
         pass: false,

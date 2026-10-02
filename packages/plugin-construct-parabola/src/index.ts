@@ -19,7 +19,7 @@ export const Config = z.object({
 })
 
 /** 本构造器覆盖的题位知识点 */
-const COVERED = new Set(['与坐标轴交点', '对称轴', '顶点式'])
+const COVERED = ['与坐标轴交点', '对称轴', '顶点式'] as const
 
 export interface ConstructConfig {
   rootRange: number[]
@@ -70,7 +70,7 @@ export class ConstructService extends Service implements ConstructApi {
 
   /** 每个构造器覆盖哪些知识点（界面与文档都靠它说清"现在能出什么题"） */
   coverage(): Readonly<Record<string, readonly string[]>> {
-    return Object.fromEntries([...this.covers.entries()])
+    return Object.fromEntries(this.covers)
   }
 
   kinds(): readonly string[] {
@@ -218,6 +218,6 @@ export function apply(ctx: Context, config: ConstructConfig): void {
   ctx.plugin(ConstructService, config)
   ctx.inject(['construct'], (scope) => {
     // 第三个参数声明覆盖的知识点：**选题位靠它匹配**（以前这张表私藏在这，别的构造器接不进来）
-    scope.construct.register('parabola/roots', createParabolaRoots(config), [...COVERED])
+    scope.construct.register('parabola/roots', createParabolaRoots(config), COVERED)
   })
 }

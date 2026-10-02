@@ -33,7 +33,6 @@ function rng(seed: number): () => number {
   }
 }
 
-const minus = (value: number): string => (value < 0 ? `− ${String(-value)}` : `${String(value)}`)
 /** 带符号的项，用于拼多项式文本：x² + 5x − 6 */
 const signed = (value: number, tail: string): string =>
   value === 0 ? '' : value > 0 ? ` + ${value === 1 && tail !== '' ? '' : String(value)}${tail}` : ` − ${-value === 1 && tail !== '' ? '' : String(-value)}${tail}`
@@ -278,7 +277,7 @@ function createLinearTwoPoints(config: AlgebraConfig): Constructor {
 function createInversePoint(config: AlgebraConfig): Constructor {
   return (slot, seed) => {
     const random = rng(seed)
-    let x = pickInt(random, 1, Math.min(config.maxValue, 9))
+    const x = pickInt(random, 1, Math.min(config.maxValue, 9))
     let y = pickInt(random, 2, Math.min(config.maxValue, 9))
     if (x === y) y = x + 3
     const k = x * y
@@ -307,7 +306,7 @@ function createInversePoint(config: AlgebraConfig): Constructor {
 
 /* ────────────── 6. 统计：平均数与众数 ────────────── */
 
-function createStatsMean(config: AlgebraConfig): Constructor {
+function createStatsMean(_config: AlgebraConfig): Constructor {
   return (slot, seed) => {
     const random = rng(seed)
     const count = 8

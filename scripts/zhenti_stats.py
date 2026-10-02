@@ -350,9 +350,11 @@ def docx_paragraphs(path: str | Path) -> list[str]:
 
 RE_YEAR = re.compile(r"(20\d{2})\s*年")
 
-# “满分 150 分”“全卷满分150分”“试卷满分：120分”
+# “满分 150 分”“全卷满分150分”“试卷满分：120分”“本试卷共8页，共120分”
 RE_TOTAL_SCORE = [
     re.compile(r"(?:全卷|试卷|本卷|卷面|卷|试题卷)?\s*(?:满分|总分|满分为|满分是|满分值)\s*(?:为|是|：|:)?\s*(\d{2,3})\s*分"),
+    # 只在卷头用（“共120分”）；正文里的“共N分”是大题标题，不能当卷面总分
+    re.compile(r"共\s*(\d{2,3})\s*分\s*[．.。；;]"),
 ]
 # “考试时间120分钟”“考试用时120分钟”“全卷考试时间共120分钟”
 RE_MINUTES = [
@@ -422,25 +424,32 @@ def parse_paper_meta(paras: list[str], stem: str, head_end: int | None = None) -
     # 卷头区域：第一道大题标题之前（封顶 60 段）
     if head_end is None:
         head_end = len(paras)
-    head = "\n".join(p for i, p in zip(nonempty_idx, nonempty) if i < head_end)[:4000]
-    # 全篇兜底（只看前 400 个非空段落，避免命中正文里的“满分”字样）
-    full = "\n".join(nonempty[:400])
+    head_lines = [p for i, p in zip(nonempty_idx, nonempty) if i < head_end]
+    head = "\n".join(head_lines)[:4000]
+    # 兜底区域：卷头之前的最前面 25 段（不能越过卷头，否则会命中大题标题里的分值）
+    front_lines = [p for i, p in zip(nonempty_idx, nonempty) if i < head_end][:25]
+    front = "\n".join(front_lines)
 
     total = None
-    for rx in RE_TOTAL_SCORE:
-        m = rx.search(head)
-        if m:
-            total = int(m.group(1))
-            break
+    for m in RE_TOTAL_SCORE[0].finditer(head):
+        total = int(m.group(1))
+        break
     if total is None:
-        for rx in RE_TOTAL_SCORE:
-            m = rx.search(full)
+        # “共N分”这一条只认卷头里不像“说明：本卷共有1大题，10小题，共30分”的行
+        for line in head_lines:
+            if re.search(r"小题|大题|本卷共|本大题", line):
+                continue
+            m = RE_TOTAL_SCORE[1].search(line)
             if m:
                 total = int(m.group(1))
-                meta["notes"].append("总分：卷头段落里没找到，取自正文较早出现的“满分 N 分”")
                 break
     if total is None:
-        meta["notes"].append("总分：全卷没有“满分/总分 N 分”字样")
+        m = RE_TOTAL_SCORE[0].search(front)
+        if m:
+            total = int(m.group(1))
+            meta["notes"].append("总分：卷头段落里没找到，取自卷头之前最前面 25 段里的“满分 N 分”")
+    if total is None:
+        meta["notes"].append("总分：全卷没有“满分/总分 N 分”字样，改用各大题分值之和")
     meta["totalScore"] = total
 
     minutes = None
@@ -451,10 +460,10 @@ def parse_paper_meta(paras: list[str], stem: str, head_end: int | None = None) -
             break
     if minutes is None:
         for rx in RE_MINUTES:
-            m = rx.search(full)
+            m = rx.search(front)
             if m:
                 minutes = int(m.group(1))
-                meta["notes"].append("时长：卷头段落里没找到，取自正文较早出现的“N 分钟”")
+                meta["notes"].append("时长：卷头段落里没找到，取自正文最前面 25 段里的“N 分钟”")
                 break
     if minutes is None:
         meta["notes"].append("时长：全卷没有“N 分钟”字样")
@@ -782,10 +791,54 @@ def parse_paper(path: str, txt_path: str | None = None) -> dict:
                     "declaredCount": sec["nQ"] if sec else None,
                     "declaredPerScore": sec["per"] if sec else None,
                     "declaredTotal": sec["total"] if sec else None,
+                    "declaredCount_raw": sec["raw"] if sec else "",
                     "questions": [],
                 }
             )
         groups[-1]["questions"].append(item["q"])
+
+    # --- 修复“漏掉大题标题”导致两组题被并到一起 ---
+    # 判据：同一组里题内容的类型出现了连续分段，而标题声明的题数正好等于第一段长度。
+    # 例：永州 2023 的卷子缺“二、填空题”标题，选择题组里混进了 11~18 题的填空。
+    split_groups: list[dict] = []
+    for g in groups:
+        qs = g["questions"]
+        runs: list[tuple[str, list[dict]]] = []
+        for q in qs:
+            if runs and runs[-1][0] == q["contentType"]:
+                runs[-1][1].append(q)
+            else:
+                runs.append((q["contentType"], [q]))
+        if (
+            len(runs) > 1
+            and g["declaredCount"]
+            and len(runs[0][1]) == g["declaredCount"]
+            and len(runs[0][1]) < len(qs)
+        ):
+            head, *tail = runs
+            rec["notes"].append(
+                f"第{qs[0]['no']}-{qs[-1]['no']}题：标题只声明 {g['declaredCount']} 题，"
+                f"但这一段里混进了后面的题（原文缺大题标题），已按题目内容切成 "
+                f"{len(runs)} 段：" + "、".join(f"{t}{len(r)}题" for t, r in runs)
+            )
+            split_groups.append({**g, "questions": head[1], "type": head[0]})
+            for t, r in tail:
+                split_groups.append(
+                    {
+                        "_key": None,
+                        "type": t,
+                        "heading": None,
+                        "declaredCount": None,
+                        "declaredPerScore": None,
+                        "declaredTotal": None,
+                        "declaredCount_raw": "",
+                        "questions": r,
+                        "repaired": True,
+                    }
+                )
+        else:
+            split_groups.append(g)
+    groups = split_groups
 
     for g in groups:
         qs = g.pop("questions")
@@ -817,7 +870,27 @@ def parse_paper(path: str, txt_path: str | None = None) -> dict:
                 rec["notes"].append(f"第{g['qFrom']}-{g['qTo']}题：每小题分值不唯一 {uniq}")
         else:
             g["perScore"] = g["declaredPerScore"]
-        # 分值合计的优先级：标题声明的“共N分” > 逐题分值之和 > 每小题分×题数
+        # 分值合计的优先级：
+        #   ① 标题里的“共N分”/“满分N分”（卷子自己的口径）
+        #   ② 逐题分值之和（题目自带“（N分）”）
+        #   ③ 每小题分 × 题数
+        # 一致性检查：若标题既写了“每小题M分”又写“共T分”，但 M×题数 ≠ T，
+        # 且标题没有“19~20题每题6分”这种分段计分写法，则认为 T 是笔误，改用 M×题数。
+        uniform_per = g["declaredPerScore"] is not None and not re.search(
+            r"\d+\s*[~～至\-—]\s*\d+\s*(?:小)?题", g["declaredCount_raw"] or ""
+        )
+        if (
+            uniform_per
+            and g["declaredCount"]
+            and g["declaredTotal"] is not None
+            and abs(g["declaredPerScore"] * g["declaredCount"] - g["declaredTotal"]) > 0.01
+        ):
+            rec["notes"].append(
+                f"第{g['qFrom']}-{g['qTo']}题：标题“每小题{g['declaredPerScore']}分 × "
+                f"{g['declaredCount']}题 = {g['declaredPerScore']*g['declaredCount']}分”"
+                f"与标题“共{g['declaredTotal']}分”不符，采用前者"
+            )
+            g["declaredTotal"] = None
         if g["declaredTotal"] is not None:
             g["scoreSum"] = g["declaredTotal"]
             g["scoreSumSource"] = "heading-total"
@@ -846,6 +919,7 @@ def parse_paper(path: str, txt_path: str | None = None) -> dict:
                 f"实际切到 {g['detectedCount']} 题（缺号多为题目在图片/OLE 里）"
             )
         g.pop("_key", None)
+        g.pop("declaredCount_raw", None)
         rec["sections"].append(g)
 
     # --- 总分兜底：卷头没有“满分 N 分”时，用各大题分值之和 ---
