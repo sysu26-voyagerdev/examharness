@@ -60,7 +60,9 @@ function readParsed(value: Record<string, unknown> | undefined): ParsedStem | un
   if (value === undefined) return undefined
   const count = value.givensCount
   const answer = value.answer
-  const stated = value.numbers
+  // numbers 允许是数字或字符串（模型多半写成数字）：统一成字符串再比
+  const raw = value.numbers
+  const stated = Array.isArray(raw) ? raw.map((item) => (typeof item === 'number' ? String(item) : item)) : raw
   // goals 允许写成字符串（兼容旧提示词的 goal 字段），但优先数组
   const goals = Array.isArray(value.goals)
     ? value.goals.filter((item): item is string => typeof item === 'string')
@@ -218,9 +220,9 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
         return {
           pass: false,
           gate: name,
-          reason: '回译失败：题面无法被还原成结构',
+          reason: '回译失败：题面没能被还原成结构（这一步是让模型把题面读回结构，它这次没按约定回话）',
           fixable: true,
-          hint: '题面表述有歧义，重写一遍',
+          hint: '先按原样再交一次（换个种子也行）；若连续失败，再看题面是不是表述不清或缺少 goals 声明',
         }
       }
       // 非严格模式：留痕放行，但**必须标 needsReview**——没验成就是没验成，

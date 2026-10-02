@@ -1234,7 +1234,12 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         }
         return {
           kind: "tool",
-          text: `constructor_write：${kindName} 通过验收并生效（覆盖 ${report.covers.join("、")}）。下一步可以按蓝图出这种题了。`,
+          text:
+            `constructor_write：${kindName} 通过验收并生效（覆盖 ${report.covers.join("、")}）` +
+            (args.temporary === true
+              ? "——写在**试验目录**（data/constructors/，不进仓库）：正式题型请不带 temporary 再交一次。"
+              : "——已写进仓库的 constructors/（团队共享、随版本走）。") +
+            "下一步可以按蓝图出这种题了。",
           payload: {
             ok: true,
             kind: kindName,

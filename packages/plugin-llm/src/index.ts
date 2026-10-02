@@ -21,6 +21,8 @@ export const Config = z.object({
   model: z.string().default('gpt-4o-mini'),
   temperature: z.number().default(0.2),
   timeoutMs: z.number().default(60_000),
+  /** 暂时性失败（超时/网络抖动/5xx）重试几次：一次抖动不该把整轮 agent 带停 */
+  retries: z.number().default(2),
 })
 
 export interface LlmConfig {
@@ -29,6 +31,7 @@ export interface LlmConfig {
   model: string
   temperature: number
   timeoutMs: number
+  retries: number
 }
 
 export { expandEnv }
@@ -153,17 +156,54 @@ export class LlmService extends Service implements LlmApi {
   async chat(messages: readonly LlmMessage[], tools?: readonly LlmToolSpec[]): Promise<LlmReply> {
     if (!this.configured) throw new Error('未配置模型密钥：在设置页填，或设环境变量 EXAMHARNESS_API_KEY')
     const active = this.effective()
-    const response = await fetch(`${active.baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    const attempts = Math.max(1, this.config.retries + 1)
+    let lastError: unknown
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- 重试必须串行
+        return await this.once(active.baseUrl, active.model, messages, tools)
+      } catch (error) {
+        lastError = error
+        // 只重试**暂时性**失败（超时、网络抖动、5xx）：真实的错（密钥、参数、余额）重试也没用，
+        // 早报早改。加这个是因为一次 60 秒超时把整轮 agent 直接带停了——
+        // 那不是"该停"，是网线抖了一下（真实踩过）。
+        if (!isTransient(error) || attempt === attempts - 1) break
+        // eslint-disable-next-line no-await-in-loop -- 退避等待
+        await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)))
+      }
+    }
+    throw lastError instanceof Error ? lastError : new Error(String(lastError))
+  }
+
+  /** 一次调用（不带重试） */
+  private async once(
+    baseUrl: string,
+    model: string,
+    messages: readonly LlmMessage[],
+    tools?: readonly LlmToolSpec[],
+  ): Promise<LlmReply> {
+    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.key()}` },
-      body: JSON.stringify(buildPayload({ ...this.config, model: active.model }, messages, tools)),
+      body: JSON.stringify(buildPayload({ ...this.config, model }, messages, tools)),
       signal: AbortSignal.timeout(this.config.timeoutMs),
     })
     if (!response.ok) {
-      throw new Error(`模型调用失败：HTTP ${response.status} ${await response.text()}`)
+      const body = await response.text()
+      const error = new Error(`模型调用失败：HTTP ${response.status} ${body}`)
+      ;(error as Error & { status?: number }).status = response.status
+      throw error
     }
     return parseReply(await response.json())
   }
+}
+
+/** 这次失败值不值得重试：超时、网络错误、5xx 值得；4xx（密钥/参数/余额）不值得 */
+function isTransient(error: unknown): boolean {
+  const status = (error as { status?: number } | undefined)?.status
+  if (typeof status === 'number') return status >= 500 || status === 429
+  const message = error instanceof Error ? `${error.name} ${error.message}` : String(error)
+  return /timeout|timed out|aborted|ECONNRESET|ENOTFOUND|EAI_AGAIN|fetch failed|socket hang up|network/i.test(message)
 }
 
 export function apply(ctx: Context, config: LlmConfig): void {

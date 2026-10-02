@@ -13,6 +13,7 @@ const config: LlmConfig = {
   model: 'm',
   temperature: 0.2,
   timeoutMs: 1000,
+  retries: 2,
 }
 
 describe('模型接入的纯函数', () => {

@@ -281,4 +281,25 @@ describe('回译闸门', () => {
     expect(gate?.text).toContain('200')
     expect(gate?.text).toContain('构造参数里没有的数字')
   })
+  it('回译解析器把数字写成数字（不是字符串）也算数——别因此判"回译失败"', async () => {
+    const expected = await expectedItem()
+    const ctx = await boot(
+      brain({
+        serialize: false,
+        parse: () => ({
+          goals: expected.instance.goals ?? [expected.instance.goal],
+          givensCount: expected.instance.givens.length,
+          answer: expected.witness.answer,
+          // 真实模型就是这么写的：数字就是数字
+          numbers: [2, 3],
+        }),
+      }),
+    )
+    const run = await ctx.workbench.run({ goal: '出题', blueprint })
+    // 2、3 不在构造参数里 → 该被"题面里出现了构造参数里没有的数字"拦下，
+    // 而不是因为"类型不对"被判"回译失败"
+    const gate = run.transcript.find((event) => event.kind === 'gate')
+    expect(gate?.text).toContain('构造参数里没有的数字')
+    expect(gate?.text).not.toContain('回译失败')
+  })
 })
