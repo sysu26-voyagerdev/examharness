@@ -531,17 +531,28 @@ export class SessionService extends Service implements SessionApi {
 /**
  * 规整一份蓝图：空编号补上、道数与分值至少是 1，**卷头分数按题位算**。
  * "卷头 100 分、题位只有 20 分"这种自相矛盾，从入口就掐掉。
+ *
+ * **规整 ≠ 重写**：我们不认识的字段要原样留着。真实踩过——题位上的 `_evidence`
+ * （这个题位依据哪些真题统计出来的、支持多少份卷）在一次界面保存后**全部消失**了，
+ * 依据没了，蓝图就只剩一串数字。所以这里按 key 把原题位的"旁注"捡回来再拼。
  */
 function normalizeBlueprint(before: Blueprint, patch: BlueprintPatch): Blueprint {
-  const rows = (patch.blueprint ?? before.blueprint).map((row) => ({
-    key: row.key === '' ? nextKey(before.blueprint) : row.key,
-    knowledge: row.knowledge,
-    cognitive: row.cognitive,
-    type: row.type,
-    count: Math.max(1, Math.round(row.count)),
-    difficulty: row.difficulty,
-    score: Math.max(1, Math.round(row.score)),
-  }))
+  const KNOWN = new Set(['key', 'knowledge', 'cognitive', 'type', 'count', 'difficulty', 'score'])
+  const notesOf = (row: object): Record<string, unknown> =>
+    Object.fromEntries(Object.entries(row).filter(([field]) => !KNOWN.has(field)))
+  const priorByKey = new Map(before.blueprint.map((row) => [row.key, notesOf(row)]))
+  // 原题位的旁注 + 这次补丁里带的旁注（补丁优先，比如直接改依据）
+  const rows = (patch.blueprint ?? before.blueprint).map((row) =>
+    Object.assign(Object.create(null) as Record<string, unknown>, priorByKey.get(row.key), notesOf(row), {
+      key: row.key === '' ? nextKey(before.blueprint) : row.key,
+      knowledge: row.knowledge,
+      cognitive: row.cognitive,
+      type: row.type,
+      count: Math.max(1, Math.round(row.count)),
+      difficulty: row.difficulty,
+      score: Math.max(1, Math.round(row.score)),
+    }),
+  ) as unknown as BlueprintRow[]
   return {
     paper: { ...before.paper, ...patch.paper, totalScore: rows.reduce((sum, row) => sum + row.score * row.count, 0) },
     blueprint: rows,

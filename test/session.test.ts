@@ -123,6 +123,29 @@ describe('会话与版本', () => {
     expect(diff.filter((change) => change.change === 'same').length).toBe(blueprint.blueprint.length)
   })
 
+  it('改蓝图不会抹掉题位上的旁注（_evidence 是依据，不是垃圾）', async () => {
+    const ctx = await boot()
+    const dir = mkdtempSync(join(tmpdir(), 'examharness-bp-note-'))
+    scratch.push(dir)
+    const path = join(dir, 'blueprint-notes.json')
+    const withNote = structuredClone(blueprint)
+    // 题位上的依据：真实统计出来的支持卷数（界面/agent 保存蓝图时不许丢）
+    ;(withNote.blueprint[0] as unknown as Record<string, unknown>)['_evidence'] = {
+      supportPapers: 61,
+      mappedKnowledge: ['二次函数图象'],
+    }
+    writeFileSync(path, JSON.stringify(withNote), 'utf8')
+    ctx.session.update({ blueprintPath: path })
+
+    // 只改分值，别的什么都不知道（就像界面只回传它认识的字段）
+    const rows = withNote.blueprint.map((row) => Object.assign({}, row, { score: (row.score ?? 0) + 1 }))
+    ctx.session.updateBlueprint({ blueprint: rows } as never)
+
+    const after = JSON.parse(readFileSync(path, 'utf8')) as { blueprint: Record<string, unknown>[] }
+    expect(after.blueprint[0]?.['_evidence']).toEqual({ supportPapers: 61, mappedKnowledge: ['二次函数图象'] })
+    expect(after.blueprint[0]?.['score']).toBe((blueprint.blueprint[0]?.score ?? 0) + 1)
+  })
+
   it('局部重做：只换一个题位、守住蓝图约束、产生 v2 且 diff 标为 replaced', async () => {
     const ctx = await boot()
     await ctx.session.assemble()
