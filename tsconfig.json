@@ -44,6 +44,9 @@
       "path": "./packages/plugin-workbench"
     },
     {
+      "path": "./packages/plugin-websearch"
+    },
+    {
       "path": "./packages/plugin-web"
     }
   ]

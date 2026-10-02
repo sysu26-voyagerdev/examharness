@@ -76,7 +76,7 @@ export function apply(ctx: Context, config: DedupConfig): void {
     const corpus = ctx.get('corpus')
     let corpusNote = '未接入语料库'
     if (corpus !== undefined && corpus.size > 0) {
-      const hit = corpus.maxSimilarity(item.prose.stem)
+      const hit = corpus.compare(item.prose.stem)
       // 两个条件同时满足才算"抄原题"：数字一样 + 措辞也像。
       // 只看措辞会把"同知识点不同数值"的题全误伤——那是误判，不是查重。
       if (hit.wording >= config.corpusWordingMax && hit.numbers >= config.corpusNumbersMin) {

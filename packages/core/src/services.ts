@@ -188,17 +188,72 @@ export interface CorpusRecord {
  *   - 语料库 = 真实世界的参考材料（默认不可分发）。
  * 混在一起会同时毁掉"原创"叙事和查重语义。
  */
+/** 检索命中：给 agent 看的是**摘要**，不是整条原文 */
+export interface CorpusHit {
+  id: string
+  source: string
+  snippet: string
+  knowledge: readonly string[]
+  type?: string
+  difficulty?: number
+  /** 这条能不能对外（默认 false：受版权保护的只作内部参考） */
+  distributable: boolean
+}
+
+/** 双指标：数字（数学上是不是同一道题）+ 措辞（有没有换皮） */
+export interface CorpusCompareResult {
+  wording: number
+  numbers: number
+  id?: string
+  source?: string
+}
+
+/**
+ * 语料库：**同一个资产，两副面孔**（见 docs/agent/03 §3）。
+ *
+ *   - **引导**（agent 自己调度）：`search` / `read` / `compare` —— 查、读、对比；
+ *   - **闸门**（框架调度，agent 跳不过）：查重闸门调用 `compare`，按阈值判定原创度。
+ *
+ * 两者用同一批方法，**差别只在谁在调度**。把语料做成"只给闸门用"是设计错误：
+ * agent 拿不到检索手段，就等于把教材原文这条参考线砍掉了。
+ */
 export interface CorpusApi {
   readonly size: number
   records(): readonly CorpusRecord[]
+  /** 引导：按关键词与知识点检索（命中给摘要，不给全文） */
+  search(query: { text?: string; knowledge?: readonly string[]; limit?: number }): readonly CorpusHit[]
+  /** 引导：读某一条的全文（读过才谈得上参考表述、比较结构） */
+  read(id: string): CorpusRecord | undefined
   /**
-   * 与语料库最像的那一条。**两个指标缺一不可**：
-   *   - `numbers`：数字与条件的重合度（数学上是不是同一道题）
-   *   - `wording`：措辞相似度（表述有没有换皮）
+   * 双指标相似度（引导与闸门共用同一实现）。
    * 只看措辞会把"同一知识点不同数值"的题全判成抄原题——这是必须避免的误伤。
    */
-  maxSimilarity(text: string): { wording: number; numbers: number; id?: string; source?: string }
-  stats(): { total: number; distributable: number; bySource: Readonly<Record<string, number>> }
+  compare(text: string): CorpusCompareResult
+  stats(): {
+    total: number
+    distributable: number
+    bySource: Readonly<Record<string, number>>
+    byKnowledge: Readonly<Record<string, number>>
+  }
+}
+
+// ── 联网搜索（可配置的引导工具；默认关闭）──────────────────────
+
+export interface WebSearchResult {
+  title: string
+  url: string
+  snippet: string
+}
+
+/**
+ * 联网搜索。**它是引导，不是闸门**：网上既有可用的素材（情境、数据、课标原文），
+ * 也有别人已经出过的题——后者只有查重闸门拦得住，所以检索结果**永远只是素材**，
+ * 绝不作为数学真值（R1）。
+ */
+export interface WebSearchApi {
+  /** 未启用时 agent 连这个工具都看不到（工具表按配置生成） */
+  readonly enabled: boolean
+  search(query: string, limit?: number): Promise<readonly WebSearchResult[]>
 }
 
 /** 图形渲染：由 spec 决定，不靠模型"画" */
@@ -218,5 +273,6 @@ declare module '@deepseek-ai/cordis' {
     llm: LlmApi
     workbench: WorkbenchApi
     corpus: CorpusApi
+    websearch: WebSearchApi
   }
 }

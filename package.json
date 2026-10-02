@@ -24,7 +24,8 @@
     "dev:client": "pnpm --filter @examharness/client run dev",
     "serve": "bash scripts/serve.sh start",
     "serve:stop": "bash scripts/serve.sh stop",
-    "serve:status": "bash scripts/serve.sh status"
+    "serve:status": "bash scripts/serve.sh status",
+    "ingest": "node bin.js --check-corpus"
   },
   "dependencies": {
     "@deepseek-ai/cordis": "^4.0.4",
@@ -44,6 +45,7 @@
     "@examharness/plugin-verify-scope": "workspace:*",
     "@examharness/plugin-verify-symbolic": "workspace:*",
     "@examharness/plugin-web": "workspace:*",
+    "@examharness/plugin-websearch": "workspace:*",
     "@examharness/plugin-workbench": "workspace:*"
   },
   "devDependencies": {

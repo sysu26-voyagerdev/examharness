@@ -1,5 +1,6 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { LlmApi, LlmMessage, LlmReply, LlmToolCall, LlmToolSpec } from '@examharness/core'
+import { expandEnv } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -30,10 +31,7 @@ export interface LlmConfig {
   timeoutMs: number
 }
 
-/** 展开 `${VAR}`；找不到就返回空串（调用方据此判定"没配好"） */
-export function expandEnv(value: string, env: Record<string, string | undefined> = process.env): string {
-  return value.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_, key: string) => env[key] ?? '')
-}
+export { expandEnv }
 
 /** 纯函数：请求体长什么样。测试只测这个，不测网络 */
 export function buildPayload(

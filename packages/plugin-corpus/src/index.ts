@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { basename, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { CorpusApi, CorpusRecord } from '@examharness/core'
+import type { CorpusApi, CorpusHit, CorpusRecord } from '@examharness/core'
 import { normalize } from '@examharness/core'
 import z from 'schemastery'
 
@@ -218,8 +218,43 @@ export class CorpusService extends Service implements CorpusApi {
     return this.items
   }
 
-  /** 原创度报告：与语料库（真实题库/教材）最像的那一条 */
-  maxSimilarity(text: string): { wording: number; numbers: number; id?: string; source?: string } {
+  /** 引导：按关键词与知识点检索；命中给摘要，全文要 read() */
+  search(query: { text?: string; knowledge?: readonly string[]; limit?: number }): readonly CorpusHit[] {
+    const text = query.text ?? ''
+    const knowledge = query.knowledge ?? []
+    const limit = query.limit ?? 5
+    const scored = this.items
+      .map((item) => {
+        const knowledgeHits = knowledge.filter((key) => item.knowledge.includes(key)).length
+        const textScore = text === '' ? 0 : 0.6 * similarity(text, item.stem) + 0.4 * numberSimilarity(text, item.stem)
+        // 知识点命中优先于关键词命中：老师找参考材料是按知识点找的
+        return { item, score: knowledgeHits * 2 + textScore }
+      })
+      .filter((entry) => entry.score > 0)
+      .toSorted((a, b) => b.score - a.score)
+      .slice(0, limit)
+
+    return scored.map(({ item }) => {
+      const hit: CorpusHit = {
+        id: item.id,
+        source: item.source,
+        snippet: item.stem.length > 60 ? `${item.stem.slice(0, 60)}…` : item.stem,
+        knowledge: item.knowledge,
+        distributable: item.distributable,
+      }
+      if (item.type !== undefined) hit.type = item.type
+      if (item.difficulty !== undefined) hit.difficulty = item.difficulty
+      return hit
+    })
+  }
+
+  /** 引导：读全文 */
+  read(id: string): CorpusRecord | undefined {
+    return this.items.find((item) => item.id === id)
+  }
+
+  /** 双指标相似度（引导与闸门共用） */
+  compare(text: string): { wording: number; numbers: number; id?: string; source?: string } {
     let best = -1
     let hit: CorpusRecord | undefined
     for (const item of this.items) {
@@ -240,13 +275,23 @@ export class CorpusService extends Service implements CorpusApi {
     }
   }
 
-  stats(): { total: number; distributable: number; bySource: Readonly<Record<string, number>> } {
+  stats(): {
+    total: number
+    distributable: number
+    bySource: Readonly<Record<string, number>>
+    byKnowledge: Readonly<Record<string, number>>
+  } {
     const bySource: Record<string, number> = {}
-    for (const item of this.items) bySource[item.source] = (bySource[item.source] ?? 0) + 1
+    const byKnowledge: Record<string, number> = {}
+    for (const item of this.items) {
+      bySource[item.source] = (bySource[item.source] ?? 0) + 1
+      for (const key of item.knowledge) byKnowledge[key] = (byKnowledge[key] ?? 0) + 1
+    }
     return {
       total: this.items.length,
       distributable: this.items.filter((item) => item.distributable).length,
       bySource,
+      byKnowledge,
     }
   }
 }

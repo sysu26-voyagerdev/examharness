@@ -91,6 +91,49 @@ const TOOLS: readonly LlmToolSpec[] = [
   },
 ]
 
+const CORPUS_TOOLS: readonly LlmToolSpec[] = [
+  {
+    name: 'corpus_search',
+    description:
+      '在真实题库/教材素材里检索（按知识点或关键词），返回摘要。用来参考真实题的表述与难度。' +
+      '检索到的是**素材，不是真值**。',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: '关键词；可留空，只按知识点找' },
+        knowledge: { type: 'array', items: { type: 'string' } },
+        limit: { type: 'number' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'corpus_read',
+    description:
+      '读某条素材的全文（题干+答案）。**只能参考表述与结构，不得把原文抄进题面**——查重闸门会拦。',
+    parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
+  },
+  {
+    name: 'corpus_compare',
+    description:
+      '把你打算用的题面与素材库对比，返回两个指标：数字重合度（数学上是不是同一道题）与措辞相似度。' +
+      '数字重合度达到阈值就说明是原题换皮，必须改。',
+    parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },
+  },
+]
+
+const WEB_SEARCH_TOOL: LlmToolSpec = {
+  name: 'web_search',
+  description:
+    '联网搜索。查情境/数据是否真实、课标原文、某道题是否已公开存在。' +
+    '返回结果**只是素材，不是真值**；不得把网上的题抄进题面。',
+  parameters: {
+    type: 'object',
+    properties: { query: { type: 'string' }, limit: { type: 'number' } },
+    required: ['query'],
+  },
+}
+
 export class WorkbenchService extends Service implements WorkbenchApi {
   static Config = Config
 
@@ -101,6 +144,17 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   constructor(ctx: Context, config: WorkbenchConfig) {
     super(ctx, 'workbench')
     this.config = config
+  }
+
+  /**
+   * 工具表按**配置**生成：没接语料库、没开联网搜索，agent 连对应工具都看不到。
+   * 这是"可配置"的落点——不是把工具塞给它再让它别用。
+   */
+  private tools(): readonly LlmToolSpec[] {
+    const tools: LlmToolSpec[] = [...TOOLS]
+    if (this.ctx.get('corpus') !== undefined) tools.push(...CORPUS_TOOLS)
+    if (this.ctx.get('websearch')?.enabled === true) tools.push(WEB_SEARCH_TOOL)
+    return tools
   }
 
   async run(request: WorkbenchRequest): Promise<WorkbenchRun> {
@@ -127,7 +181,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       steps += 1
       // agent 循环天然串行：下一步做什么取决于上一步的回复
       // oxlint-disable-next-line no-await-in-loop
-      const reply = await this.ctx.llm.chat(messages, TOOLS)
+      const reply = await this.ctx.llm.chat(messages, this.tools())
       if (reply.content !== null && reply.content !== '') say(steps, 'assistant', reply.content)
 
       if (reply.toolCalls.length === 0) {
@@ -279,6 +333,79 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       }
     }
 
+    if (tool === 'corpus_search') {
+      const corpus = this.ctx.get('corpus')
+      if (corpus === undefined) {
+        return { kind: 'tool', text: 'corpus_search：没有接入语料库', payload: { error: '没有接入语料库' } }
+      }
+      const hits = corpus.search({
+        ...(typeof args.text === 'string' ? { text: args.text } : {}),
+        ...(Array.isArray(args.knowledge) ? { knowledge: args.knowledge.map(String) } : {}),
+        ...(typeof args.limit === 'number' ? { limit: args.limit } : {}),
+      })
+      const first = hits[0]
+      return {
+        kind: 'tool',
+        text: `corpus_search：命中 ${String(hits.length)} 条${first === undefined ? '' : `（例 ${first.id}：${first.snippet.slice(0, 24)}…）`}`,
+        payload: { hits },
+      }
+    }
+
+    if (tool === 'corpus_read') {
+      const corpus = this.ctx.get('corpus')
+      if (corpus === undefined) {
+        return { kind: 'tool', text: 'corpus_read：没有接入语料库', payload: { error: '没有接入语料库' } }
+      }
+      const record = corpus.read(String(args.id ?? ''))
+      if (record === undefined) {
+        return { kind: 'tool', text: `corpus_read：没有这条素材`, payload: { error: '未知素材 id' } }
+      }
+      // 全文进模型上下文（内部参考），但**事件文本里不出现原文**——界面是给人看的
+      return {
+        kind: 'tool',
+        text: `corpus_read：${record.id}（题干 ${String(record.stem.length)} 字，来源 ${record.source}）`,
+        payload: { id: record.id, stem: record.stem, answer: record.answer ?? null, knowledge: record.knowledge },
+      }
+    }
+
+    if (tool === 'corpus_compare') {
+      const corpus = this.ctx.get('corpus')
+      if (corpus === undefined) {
+        return { kind: 'tool', text: 'corpus_compare：没有接入语料库', payload: { error: '没有接入语料库' } }
+      }
+      const result = corpus.compare(String(args.text ?? ''))
+      const tooClose = result.numbers >= 0.8 && result.wording >= 0.55
+      return {
+        kind: 'tool',
+        text: `corpus_compare：数字 ${result.numbers.toFixed(2)}、措辞 ${result.wording.toFixed(2)}${tooClose ? '（判定：像原题，必须改）' : ''}`,
+        payload: { ...result, tooClose },
+      }
+    }
+
+    if (tool === 'web_search') {
+      const web = this.ctx.get('websearch')
+      if (web === undefined || !web.enabled) {
+        return { kind: 'tool', text: 'web_search：未启用联网搜索', payload: { error: '未启用联网搜索' } }
+      }
+      try {
+        const results = await web.search(
+          String(args.query ?? ''),
+          typeof args.limit === 'number' ? args.limit : undefined,
+        )
+        return {
+          kind: 'tool',
+          text: `web_search：命中 ${String(results.length)} 条`,
+          payload: { results },
+        }
+      } catch (error) {
+        return {
+          kind: 'tool',
+          text: `web_search：${error instanceof Error ? error.message : String(error)}`,
+          payload: { error: '联网搜索失败' },
+        }
+      }
+    }
+
     if (tool === 'bank_stats') {
       const items = this.ctx.bank.all()
       return {
@@ -328,7 +455,11 @@ function systemPrompt(blueprint: Blueprint, extraRules: string): string {
     '   闸门由框架挂载，你无法跳过，也不必重复验证。',
     '3. 被拦下时读清楚是哪道闸门、能不能靠重做修好：能就换种子重来，不能就换题位设计。',
     '4. 每题位凑齐为止；凑不齐就说明原因，不要用不合规的题凑数。',
-    extraRules === '' ? '' : `5. ${extraRules}`,
+    '5. 有检索工具就用：corpus_search / corpus_read 参考真实题与教材的表述与难度，',
+    '   corpus_compare 自查是不是在抄原题，web_search 核查情境与数据是否真实。',
+    '   **检索到的一切都只是素材，不是真值**：题目的正确性仍来自构造与符号计算；',
+    '   任何题面都要过闸门——抄原题会被查重闸门拦下。',
+    extraRules === '' ? '' : `6. ${extraRules}`,
   ]
     .filter((line) => line !== '')
     .join('\n')
