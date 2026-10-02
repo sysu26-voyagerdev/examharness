@@ -225,10 +225,10 @@ describe('agent 工作台', () => {
   })
 })
 
-describe('子 agent（并行、可查、可收）', () => {
-  /** 只会说"收工"的假模型：用来起一轮就走完，方便测并行的规矩 */
-  const quick = (): LlmReply => ({ content: '收工。', toolCalls: [] })
+/** 只会说"收工"的假模型：用来起一轮就走完，方便测并行的规矩 */
+const quick = (): LlmReply => ({ content: '收工。', toolCalls: [] })
 
+describe('子 agent（并行、可查、可收）', () => {
   it('顶层只允许一轮；但这一轮可以派子任务并行跑，并能收结果', async () => {
     const ctx = await boot({ chat: quick })
     const parent = ctx.workbench.start({ goal: '主线', blueprint })
