@@ -19,6 +19,12 @@ import z from 'schemastery'
 
 export const name = 'verify-parts'
 
+/**
+ * 证据键：写进 item.evidence 的名字，**也是向题库报到的名字**。
+ * 两者必须一致——不然"每道现役闸门都签过字"永远对不上，旧题就没法复用（真踩过）。
+ */
+export const evidenceKey = 'parts'
+
 export const Config = z.object({
   /** 多少分以上的解答题至少两问 */
   twoPartFrom: z.number().default(8),
@@ -47,13 +53,24 @@ export function requiredParts(item: Item, config: PartsConfig): number {
 }
 
 export function apply(ctx: Context, config: PartsConfig): void {
+  // 报到：题库据此判断"旧题能不能直接复用"（新闸门上线后，旧题要被重新验一遍）
+  ctx.get('bank')?.declareGate?.(evidenceKey)
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict
 
     const parts = partsOf(item)
     const required = requiredParts(item, config)
-    if (parts >= required) return verdict
+    if (parts >= required) {
+      return {
+        ...verdict,
+        pass: true,
+        evidence: {
+          ...verdict.evidence,
+          [evidenceKey]: { pass: true, detail: `${String(parts)} 问，题位要求至少 ${String(required)} 问` },
+        },
+      }
+    }
 
     return {
       pass: false,

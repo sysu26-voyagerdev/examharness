@@ -116,6 +116,17 @@ export class BankService extends Service implements BankApi {
     return confirmed
   }
 
+  /** 现役闸门名单：闸门挂载时自己来报到（见 BankApi.declareGate 的说明） */
+  private readonly gateNames: string[] = []
+
+  declareGate(gate: string): void {
+    if (!this.gateNames.includes(gate)) this.gateNames.push(gate)
+  }
+
+  gates(): readonly string[] {
+    return [...this.gateNames]
+  }
+
   all(): readonly Item[] {
     return [...this.items.values()]
   }

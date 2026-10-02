@@ -174,4 +174,21 @@ describe('选择题闸门', () => {
     expect(result.ok).toBe(false)
     expect(result.ok ? '' : result.verdict.reason).toContain('选项文字一样')
   })
+
+  it('闸门会向题库报到，没被现役闸门签过字的旧题不许直接复用', async () => {
+    const ctx = await boot()
+    expect(ctx.bank.gates?.()).toContain('parts')
+    expect(ctx.bank.gates?.()).toContain('options')
+
+    // 一道"当年入库"的题：证据里没有 verify-parts 的签字
+    const item = withGoals(await itemFor('解答', 9), ['求对称轴'])
+    const legacy: Item = {
+      ...item,
+      lifecycle: 'verified',
+      evidence: { scope: { pass: true }, symbolic: { pass: true }, dedup: { pass: true } },
+    }
+    const gates = ctx.bank.gates?.() ?? []
+    const signed = gates.every((gate) => legacy.evidence[gate] !== undefined)
+    expect(signed).toBe(false)
+  })
 })

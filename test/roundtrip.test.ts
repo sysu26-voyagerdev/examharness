@@ -203,8 +203,8 @@ describe('回译闸门', () => {
 
     expect(result.ok).toBe(true)
     expect(ctx.bank.all()[0]?.prose.serializer.model).toBe('template')
-    // 没过回译：证据里就没有 roundtrip 这一项（而不是"过了但没验"）
-    expect(ctx.bank.all()[0]?.evidence.roundtrip).toBeUndefined()
+    // 模板题**不走回译**，但要留一条痕迹（题库靠"每道现役闸门都签过字"判断旧题能否复用）
+    expect(ctx.bank.all()[0]?.evidence.roundtrip?.detail).toContain('模板序列化')
   })
 
   it('构造实例没声明目标/条件 → 这两项没验成，如实落"待复核"（不假装通过）', async () => {

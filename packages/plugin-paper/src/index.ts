@@ -92,8 +92,12 @@ export class PaperService extends Service implements PaperApi {
               reason = `构造器不覆盖该题位：${error instanceof Error ? error.message : String(error)}`
               break
             }
-            // 已入库的同 (题位, 种子) 题目直接复用：导出只读归档，不重跑（R3）
-            if (this.ctx.bank.get(item.id) !== undefined) {
+            // 已入库的同 (题位, 种子) 题目直接复用：导出只读归档，不重跑（R3）。
+            // **但复用要有资格**：这道题的证据里每一道现役闸门都签过字才行——
+            // 否则新加的闸门对旧题无效（真实后果：分量闸门上线后，
+            // 卷子里还留着"9 分解答题 = 化简 √108"这类旧题）。
+            const stored = this.ctx.bank.get(item.id)
+            if (stored !== undefined && signedByAll(stored, this.ctx.bank.gates?.() ?? [])) {
               placed = { key, spec, itemId: item.id }
               break
             }
@@ -141,6 +145,11 @@ export class PaperService extends Service implements PaperApi {
     if (item === undefined) return 0
     return (item.slot.difficulty[0] + item.slot.difficulty[1]) / 2
   }
+}
+
+/** 这道题有没有被所有现役闸门签过字（见 BankApi.declareGate） */
+function signedByAll(item: Item, gates: readonly string[]): boolean {
+  return gates.every((gate) => item.evidence[gate] !== undefined)
 }
 
 export function apply(ctx: Context, config: PaperConfig): void {

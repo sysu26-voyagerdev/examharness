@@ -9,6 +9,12 @@ import z from 'schemastery'
  */
 
 export const name = 'verify-dedup'
+
+/**
+ * 证据键：写进 item.evidence 的名字，**也是向题库报到的名字**。
+ * 两者必须一致——不然"每道现役闸门都签过字"永远对不上，旧题就没法复用（真踩过）。
+ */
+export const evidenceKey = 'dedup'
 export const inject = ['bank']
 
 export const Config = z.object({
@@ -42,6 +48,8 @@ function live(ctx: Context, config: DedupConfig): DedupConfig {
 }
 
 export function apply(ctx: Context, config: DedupConfig): void {
+  // 报到：题库据此判断"旧题能不能直接复用"（新闸门上线后，旧题要被重新验一遍）
+  ctx.get('bank')?.declareGate?.(evidenceKey)
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict
@@ -53,8 +61,24 @@ export function apply(ctx: Context, config: DedupConfig): void {
     let worstId: string | undefined
 
     for (const other of ctx.bank.all()) {
-      // 同 id = 同一道题又提了一次（submit 是插入语义，没有"更新"这条路）
+      // 同 id 的三种情形：
+      //   · 内容不同 → id 被改写（id 由构造参数算出）——拦下；
+      //   · 内容一样、而且这道题**已经被现役闸门全部签过字** → 是重复提交，照旧拦下；
+      //   · 内容一样、但缺现役闸门的签字 → 这是**旧题补审**（新闸门上线后重新送一遍），
+      //     跳过自身比对放行——不然新闸门永远管不到库里已有的题。
       if (other.id === item.id) {
+        if (ctx.bank.fingerprint(other) !== fingerprint) {
+          return {
+            pass: false,
+            gate: name,
+            reason: `同一 id 但构造参数不同（${other.id}）：id 由构造参数算出，不该被改写`,
+            fixable: false,
+            hint: '不要手改题目 id；局部重做应当生成新的构造参数',
+          }
+        }
+        // 看**库里那道题**签没签全（送进来的这次是新鲜构造的，证据当然是空的）
+        const unsigned = (ctx.bank.gates?.() ?? []).filter((gate) => other.evidence[gate] === undefined)
+        if (unsigned.length > 0) continue
         return {
           pass: false,
           gate: name,
@@ -113,7 +137,7 @@ export function apply(ctx: Context, config: DedupConfig): void {
       pass: true,
       evidence: {
         ...verdict.evidence,
-        dedup: {
+        [evidenceKey]: {
           pass: true,
           detail: `与题库最高相似度 ${worst.toFixed(2)}（阈值 ${config.maxSimilarity}）`,
         },

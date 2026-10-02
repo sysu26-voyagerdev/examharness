@@ -19,6 +19,12 @@ import z from 'schemastery'
  */
 
 export const name = 'verify-roundtrip'
+
+/**
+ * 证据键：写进 item.evidence 的名字，**也是向题库报到的名字**。
+ * 两者必须一致——不然"每道现役闸门都签过字"永远对不上，旧题就没法复用（真踩过）。
+ */
+export const evidenceKey = 'roundtrip'
 export const inject = ['llm']
 
 export const Config = z.object({
@@ -167,6 +173,8 @@ function checkTexLayer(item: Item): Verdict | undefined {
 }
 
 export function apply(ctx: Context, config: RoundTripConfig): void {
+  // 报到：题库据此判断"旧题能不能直接复用"（新闸门上线后，旧题要被重新验一遍）
+  ctx.get('bank')?.declareGate?.(evidenceKey)
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict
@@ -175,8 +183,19 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
     const texVerdict = checkTexLayer(item)
     if (texVerdict !== undefined) return { ...verdict, ...texVerdict }
 
-    // 模板序列化是确定性的：不需要往返（也就不会白花一次模型调用）
-    if (item.prose.serializer.model === 'template') return verdict
+    // 模板序列化是确定性的：不需要往返（也就不会白花一次模型调用）。
+    // 但**照样要留痕**：题库靠"每道现役闸门都签过字"判断旧题能不能复用（BankApi.declareGate），
+    // 不留痕会让所有模板题永远无法复用、每次组卷都重跑一遍闸门。
+    if (item.prose.serializer.model === 'template') {
+      return {
+        ...verdict,
+        pass: true,
+        evidence: {
+          ...verdict.evidence,
+          [evidenceKey]: { pass: true, detail: '模板序列化（确定性题面）：不需要回译' },
+        },
+      }
+    }
 
     if (!ctx.llm.configured) {
       return {
@@ -211,7 +230,7 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
         needsReview: true,
         evidence: {
           ...verdict.evidence,
-          roundtrip: { pass: true, detail: '非严格模式：回译未拿到结构，本项未验成，需人工复核' },
+          [evidenceKey]: { pass: true, detail: '非严格模式：回译未拿到结构，本项未验成，需人工复核' },
         },
       }
     }
@@ -269,7 +288,7 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
         needsReview: true,
         evidence: {
           ...verdict.evidence,
-          roundtrip: {
+          [evidenceKey]: {
             pass: true,
             detail: `答案「${parsed.answer}」对得上、题面数字都来自构造；但构造实例没声明${unverifiable.join('与')}，这项没验成，落待复核`,
           },
@@ -282,7 +301,7 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
       pass: true,
       evidence: {
         ...verdict.evidence,
-        roundtrip: {
+        [evidenceKey]: {
           pass: true,
           detail: `回译一致：${String(declaredGoals.length)} 问、条件 ${String(parsed.givensCount)} 条、答案「${parsed.answer}」、题面数字都来自构造`,
         },

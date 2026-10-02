@@ -15,6 +15,12 @@ import z from 'schemastery'
  */
 
 export const name = 'verify-figure'
+
+/**
+ * 证据键：写进 item.evidence 的名字，**也是向题库报到的名字**。
+ * 两者必须一致——不然"每道现役闸门都签过字"永远对不上，旧题就没法复用（真踩过）。
+ */
+export const evidenceKey = 'figure'
 export const inject = ['figure']
 
 export const Config = z.object({
@@ -27,12 +33,20 @@ export interface VerifyFigureConfig {
 }
 
 export function apply(ctx: Context, config: VerifyFigureConfig): void {
+  // 报到：题库据此判断"旧题能不能直接复用"（新闸门上线后，旧题要被重新验一遍）
+  ctx.get('bank')?.declareGate?.(evidenceKey)
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict
 
     if (item.figure === undefined) {
-      if (!config.requireFigure) return verdict
+      if (!config.requireFigure) {
+        return {
+          ...verdict,
+          pass: true,
+          evidence: { ...verdict.evidence, [evidenceKey]: { pass: true, detail: '本题没有图，且本卷不要求带图' } },
+        }
+      }
       return {
         pass: false,
         gate: name,
@@ -73,7 +87,7 @@ export function apply(ctx: Context, config: VerifyFigureConfig): void {
       pass: true,
       evidence: {
         ...verdict.evidence,
-        figure: {
+        [evidenceKey]: {
           pass: true,
           detail: `断言 ${Object.keys(artifact.assertions).length} 项全过（${Object.keys(artifact.assertions).join('、')}）`,
         },

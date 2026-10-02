@@ -13,6 +13,12 @@ import z from 'schemastery'
 
 export const name = 'verify-symbolic'
 
+/**
+ * 证据键：写进 item.evidence 的名字，**也是向题库报到的名字**。
+ * 两者必须一致——不然"每道现役闸门都签过字"永远对不上，旧题就没法复用（真踩过）。
+ */
+export const evidenceKey = 'symbolic'
+
 export const Config = z.object({
   /** 根的代入误差容忍度 */
   tolerance: z.number().default(1e-9),
@@ -220,6 +226,8 @@ const CHECKS: Readonly<Record<string, Check>> = {
 }
 
 export function apply(ctx: Context, config: SymbolicConfig): void {
+  // 报到：题库据此判断"旧题能不能直接复用"（新闸门上线后，旧题要被重新验一遍）
+  ctx.get('bank')?.declareGate?.(evidenceKey)
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict
@@ -258,7 +266,7 @@ export function apply(ctx: Context, config: SymbolicConfig): void {
         pass: true,
         evidence: {
           ...verdict.evidence,
-          symbolic: {
+          [evidenceKey]: {
             pass: true,
             detail: `按题型声明的 ${String(checks.length)} 个检验点独立复算通过（动态题型 ${kind}）`,
           },
@@ -294,7 +302,7 @@ export function apply(ctx: Context, config: SymbolicConfig): void {
       pass: true,
       evidence: {
         ...verdict.evidence,
-        symbolic: {
+        [evidenceKey]: {
           pass: true,
           detail: `按参数独立复算通过（构造器 ${kind}）`,
         },

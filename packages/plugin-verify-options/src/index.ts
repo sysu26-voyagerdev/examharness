@@ -23,6 +23,12 @@ import z from 'schemastery'
 
 export const name = 'verify-options'
 
+/**
+ * 证据键：写进 item.evidence 的名字，**也是向题库报到的名字**。
+ * 两者必须一致——不然"每道现役闸门都签过字"永远对不上，旧题就没法复用（真踩过）。
+ */
+export const evidenceKey = 'options'
+
 export const Config = z.object({
   /** 选择题的选项个数（中考都是四个） */
   optionCount: z.number().default(4),
@@ -33,6 +39,8 @@ export interface OptionsConfig {
 }
 
 export function apply(ctx: Context, config: OptionsConfig): void {
+  // 报到：题库据此判断"旧题能不能直接复用"（新闸门上线后，旧题要被重新验一遍）
+  ctx.get('bank')?.declareGate?.(evidenceKey)
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict
@@ -93,7 +101,7 @@ export function apply(ctx: Context, config: OptionsConfig): void {
       pass: true,
       evidence: {
         ...verdict.evidence,
-        options: { pass: true, detail: `四个选项，正确答案是 ${correct[0]?.key ?? '?'}` },
+        [evidenceKey]: { pass: true, detail: `四个选项，正确答案是 ${correct[0]?.key ?? '?'}` },
       },
     }
   })

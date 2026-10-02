@@ -9,6 +9,12 @@ import z from 'schemastery'
  */
 
 export const name = 'verify-scope'
+
+/**
+ * 证据键：写进 item.evidence 的名字，**也是向题库报到的名字**。
+ * 两者必须一致——不然"每道现役闸门都签过字"永远对不上，旧题就没法复用（真踩过）。
+ */
+export const evidenceKey = 'scope'
 export const inject = ['graph']
 
 export const Config = z.object({
@@ -21,6 +27,8 @@ export interface ScopeConfig {
 }
 
 export function apply(ctx: Context, config: ScopeConfig): void {
+  // 报到：题库据此判断"旧题能不能直接复用"（新闸门上线后，旧题要被重新验一遍）
+  ctx.get('bank')?.declareGate?.(evidenceKey)
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict
@@ -53,7 +61,7 @@ export function apply(ctx: Context, config: ScopeConfig): void {
       pass: true,
       evidence: {
         ...verdict.evidence,
-        scope: {
+        [evidenceKey]: {
           pass: true,
           detail: `前置闭包合法：${ctx.graph.closure(item.slot.knowledge).join('、')}`,
         },
