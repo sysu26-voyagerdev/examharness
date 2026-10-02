@@ -2,8 +2,9 @@ import { useState } from 'react'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import { Icon } from '../icons.js'
-import type { KbBatchView, KbStatus, RunView } from '../types.js'
+import type { KbBatchView, KbStatus } from '../types.js'
 import { TranscriptView } from '../views.js'
+import { WorkspacePane } from '../WorkspacePane.js'
 
 /**
  * 知识库：**上传的是原料，整理交给 agent**。
@@ -36,9 +37,18 @@ export function KbPage(): React.JSX.Element {
   const [chunk, setChunk] = useState<{ text: string; total: number; next?: number } | null>(null)
   const [offset, setOffset] = useState(0)
 
-  const [ingest, setIngest] = useState<{ name: string; run: RunView } | null>(null)
+  // 整理是**一轮 agent 循环**：起一轮 → 过程走事件流（看得见每一步）→ 也能插话/叫停
+  const [ingest, setIngest] = useState<{ name: string; batchId: string; runId: string } | null>(null)
+  const [say, setSay] = useState('')
+  const ingestRun = ingest === null ? null : (app.runs.find((entry) => entry.id === ingest.runId) ?? null)
 
   const configured = settings?.runtime.modelConfigured === true
+  const STOPPED: Readonly<Record<string, string>> = {
+    done: '整理完成',
+    'max-steps': '步数用尽',
+    'no-llm': '模型未配置',
+    stopped: '被叫停',
+  }
   const pending = pasted === '' ? files : [...files, { name: pastedName === '' ? '粘贴.txt' : pastedName, text: pasted }]
 
   const pick = async (list: FileList | null): Promise<void> => {
@@ -79,9 +89,7 @@ export function KbPage(): React.JSX.Element {
   const runIngest = (batch: KbBatchView): void => {
     void app.guard('ingest', async () => {
       const result = await api.ingestKb(batch.id)
-      setIngest({ name: batch.name, run: result.run })
-      // 这一轮也是 agent 的工作，接到全局工作记录上
-      app.record(`整理知识库「${batch.name}」`, result.run)
+      setIngest({ name: batch.name, batchId: batch.id, runId: result.runId })
       await app.reload()
     })
   }
@@ -231,10 +239,58 @@ export function KbPage(): React.JSX.Element {
             <div className="grouphd">
               <Icon name="tool" />
               <b>整理「{ingest.name}」</b>
-              <span className="hint mono">{ingest.run.steps} 步</span>
+              {ingestRun === null ? (
+                <span className="hint">正在起这一轮…</span>
+              ) : ingestRun.stopped === '' ? (
+                <>
+                  <span className="chip warn">正在跑（第 {ingestRun.steps} 步）</span>
+                  <span className="lacts" style={{ marginLeft: 'auto' }}>
+                    <input
+                      className="flat"
+                      value={say}
+                      placeholder="插一句话：下一步它会读到"
+                      onChange={(event) => setSay(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter' || say === '') return
+                        const text = say
+                        setSay('')
+                        void app.guard('interject', async () => {
+                          await api.interjectRun(ingest.runId, text)
+                        })
+                      }}
+                    />
+                    <button
+                      className="ghost"
+                      disabled={busy !== ''}
+                      onClick={() =>
+                        void app.guard('stop', async () => {
+                          await api.stopRun(ingest.runId)
+                        })
+                      }
+                    >
+                      叫停
+                    </button>
+                  </span>
+                </>
+              ) : (
+                <span className="hint">
+                  {STOPPED[ingestRun.stopped] ?? ingestRun.stopped}　{ingestRun.steps} 步
+                </span>
+              )}
             </div>
-            <div className="bd" style={{ maxHeight: 320 }}>
-              <TranscriptView goal={ingest.run.goal} events={ingest.run.transcript} live={[]} stopped={ingest.run.stopped} />
+            {ingestRun !== null && (
+              <div className="bd" style={{ maxHeight: 320 }}>
+                <TranscriptView
+                  goal={ingestRun.goal}
+                  events={ingestRun.events}
+                  live={[]}
+                  stopped={ingestRun.stopped}
+                />
+              </div>
+            )}
+            {/* 这一轮留下了什么：原件副本、agent 写的脚本、转出来的文本 */}
+            <div className="panel">
+              <WorkspacePane name={ingest.batchId} refreshKey={app.workspaceTick + (ingestRun?.events.length ?? 0)} />
             </div>
           </div>
         )}

@@ -109,9 +109,26 @@ const PATHS: Readonly<Record<string, JSX.Element>> = {
 
 export type IconName = keyof typeof PATHS
 
-export function Icon({ name }: { name: IconName }): JSX.Element {
+/**
+ * 图标自带尺寸（width/height 属性，而不是靠 CSS）。
+ *
+ * 踩过的坑：只写 viewBox 不给 width/height 的 SVG 会被当成替换元素按容器宽度铺开——
+ * 一个 16px 视框的图标能长到几百像素。尺寸写在组件上，任何地方用它都不会出事；
+ * 服务端渲染的题目插图是另一条路（它们自带 width/height）。
+ */
+export function Icon({ name, size = 16 }: { name: IconName; size?: number }): JSX.Element {
   return (
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
       {PATHS[name]}
     </svg>
   )

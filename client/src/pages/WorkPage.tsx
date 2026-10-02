@@ -4,11 +4,13 @@ import { useApp } from '../app-context.js'
 import { Icon } from '../icons.js'
 import type { ItemView, SlotChangeView, VersionView } from '../types.js'
 import { EvidencePane, KnowledgePane, PaperPane, SessionDialog, TranscriptView } from '../views.js'
+import { WorkspacePane } from '../WorkspacePane.js'
 
 const TABS = [
   { key: 'paper', label: '卷子' },
   { key: 'net', label: '知识网络' },
   { key: 'ev', label: '证据' },
+  { key: 'ws', label: '工作区' },
 ] as const
 
 type TabKey = (typeof TABS)[number]['key']
@@ -35,7 +37,14 @@ export function diffVersions(before: VersionView | undefined, after: VersionView
 /** 工作台：会话（左）· 工作记录（中）· 卷子/网络/证据（右）。三栏各自独立滚动。 */
 export function WorkPage(): React.JSX.Element {
   const app = useApp()
-  const { session, sessions, state, transcript, live, runGoal, stopped, busy, error } = app
+  const { session, sessions, state, busy, error, workspaceTick, live } = app
+
+  // 正在跑的那一轮优先显示；没有就跑最近一轮（老师能看到刚刚 agent 干了什么）
+  const active = app.activeRun
+  const currentRun = active ?? app.runs.at(-1) ?? null
+  const transcript = currentRun?.events ?? []
+  const runGoal = currentRun?.goal ?? ''
+  const stopped = currentRun?.stopped ?? ''
 
   const [goal, setGoal] = useState('按蓝图出一份课后作业卷')
   const [tab, setTab] = useState<TabKey>('paper')
@@ -65,8 +74,14 @@ export function WorkPage(): React.JSX.Element {
   const needsReview = rows.filter(({ item }) => item.lifecycle === 'needs_review').length
   const frozen = session?.meta.frozen === true
 
+  /** 没在跑 = 起一轮；正在跑 = 插话（下一步就生效），这才是"可插话"的意思 */
   const send = (text: string): void => {
-    void app.run(text === '' ? '出题' : text)
+    if (active !== null) {
+      void app.interject(text === '' ? '继续' : text)
+      setGoal('')
+      return
+    }
+    void app.startRun(text === '' ? '出题' : text)
     setViewVersion(null)
   }
 
@@ -150,9 +165,18 @@ export function WorkPage(): React.JSX.Element {
         </div>
         <div className="cmp">
           <div className="quick">
-            <button className="ghost" disabled={busy !== ''} onClick={() => send(goal)}>
-              跑一次命题组
-            </button>
+            {active !== null ? (
+              <>
+                <span className="chip warn">agent 正在跑（第 {active.steps} 步）</span>
+                <button className="ghost" disabled={busy !== ''} onClick={() => void app.stopRun()}>
+                  叫停
+                </button>
+              </>
+            ) : (
+              <button className="ghost" disabled={busy !== ''} onClick={() => send(goal)}>
+                跑一次命题组
+              </button>
+            )}
             <button className="ghost" disabled={busy !== '' || frozen} onClick={assemble}>
               按蓝图组卷
             </button>
@@ -176,7 +200,7 @@ export function WorkPage(): React.JSX.Element {
           <div className="in">
             <input
               value={goal}
-              placeholder="说需求、纠正，或只改某一道题"
+              placeholder={active === null ? '说需求、纠正，或只改某一道题' : '插一句话：下一步它会读到（不是另起一轮）'}
               onChange={(event) => setGoal(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && busy === '') send(goal)
@@ -248,6 +272,12 @@ export function WorkPage(): React.JSX.Element {
           )}
           {tab === 'net' && state !== null && <KnowledgePane knowledge={state.knowledge} items={state.items} />}
           {tab === 'ev' && <EvidencePane rows={rows} events={transcript} versions={versions} />}
+          {tab === 'ws' && (
+            <div className="pane">
+              {/* 主 agent 也在工作区里干活：原件副本、它写的脚本、跑出来的产物都在这儿，可复查 */}
+              <WorkspacePane name={session?.meta.id ?? ''} refreshKey={workspaceTick} />
+            </div>
+          )}
         </div>
       </section>
 

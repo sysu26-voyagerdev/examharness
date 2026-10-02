@@ -6,45 +6,118 @@ import type { AppSettingsView } from '../types.js'
 /**
  * 设置：**能改的都当场生效，改不了的明说**。
  *
- * 分三块：热设置（落盘 data/settings.json，改完立刻生效）、装机配置（只读展示）、
- * 运行期观测值（语料条目、构造器、闸门链——这些是"现在系统里到底有什么"的事实）。
- * 密钥永远不在这里：它只从环境变量取，页面上只告诉你"配了没配"。
+ * 密钥这块照 DeepSeek Harness 的做法（docs/agent/06 ADR-0022）：
+ *   - 后端只回 {已配置/未配置, 来源, 能不能改}，**值从不回传**；所以界面上永远看不到密钥；
+ *   - 因为看不到，就**不能整体替换**设置：写入是按路径的补丁（`{path, value}`），
+ *     否则"保存"会把界面从没见过的密钥一起删掉；
+ *   - 写入带修订号：别人改过了就明确报冲突，而不是默默覆盖。
  */
+
+const MODEL_KEY_REF = 'model.apiKeyEnv'
+
+/** 按叶子路径比对出补丁（数组整片替换，对象逐层下钻） */
+function diffOps(base: unknown, next: unknown, path: readonly string[] = []): api.SettingsOp[] {
+  if (base === next) return []
+  const bothObjects =
+    typeof base === 'object' && base !== null && typeof next === 'object' && next !== null && !Array.isArray(base) && !Array.isArray(next)
+  if (!bothObjects) return [{ path, value: next }]
+  const keys = new Set([...Object.keys(base as object), ...Object.keys(next as object)])
+  return [...keys].flatMap((key) =>
+    key === MODEL_KEY_REF.split('.').at(-1) && path.length === 1 && path[0] === 'model'
+      ? [] // 密钥引用名不在界面上改
+      : diffOps((base as Record<string, unknown>)[key], (next as Record<string, unknown>)[key], [...path, key]),
+  )
+}
+
 export function SettingsPage(): React.JSX.Element {
   const app = useApp()
   const { settings, busy, error } = app
   const [draft, setDraft] = useState<AppSettingsView | null>(null)
-  const [saved, setSaved] = useState(false)
+  const [saved, setSaved] = useState('')
+  const [keyInput, setKeyInput] = useState('')
+  const [models, setModels] = useState<readonly { id: string; name: string }[]>([])
+  const [fetching, setFetching] = useState(false)
 
   // 只灌一次：之后 SSE 触发的 reload 不该把正在编辑的内容冲掉
   useEffect(() => {
-    if (draft === null && settings !== null) setDraft(structuredClone(settings.app))
+    if (draft === null && settings !== null) {
+      const { apiKey: _ignored, ...model } = settings.app.model
+      setDraft({ ...settings.app, model })
+    }
   }, [settings, draft])
 
-  if (settings === null || draft === null) return <div className="page"><div className="wrap"><div className="hint">正在读取设置…</div></div></div>
-  const runtime = settings.runtime
-  const edit = (patch: Partial<AppSettingsView>): void => {
-    setDraft({ ...draft, ...patch })
-    setSaved(false)
+  if (settings === null || draft === null) {
+    return (
+      <div className="page">
+        <div className="wrap">
+          <div className="hint">正在读取设置…</div>
+        </div>
+      </div>
+    )
   }
 
+  const runtime = settings.runtime
+  const key = settings.app.model.apiKey
+  const edit = (patch: Partial<AppSettingsView>): void => {
+    setDraft({ ...draft, ...patch })
+    setSaved('')
+  }
+  const dirs = draft.corpusDirs
+  const setDir = (index: number, value: string): void => edit({ corpusDirs: dirs.map((dir, at) => (at === index ? value : dir)) })
+
+  /** 保存：只发改动过的那几片（整体替换会删掉密钥） */
   const save = (): void => {
+    const ops = diffOps(settings.app, { ...draft, model: { ...draft.model, apiKeyEnv: settings.app.model.apiKeyEnv } })
+    if (ops.length === 0) {
+      setSaved('没有改动')
+      return
+    }
     void app.guard('settings', async () => {
-      await api.patchSettings(draft)
-      setSaved(true)
+      await api.patchSettings(ops, settings.revision)
+      setSaved(`已保存 ${String(ops.length)} 项（立刻生效）`)
       await app.reload()
     })
   }
 
-  const dirs = draft.corpusDirs
-  const setDir = (index: number, value: string): void => edit({ corpusDirs: dirs.map((dir, at) => (at === index ? value : dir)) })
+  const saveKey = (): void => {
+    if (keyInput === '') return
+    void app.guard('key', async () => {
+      await api.setCredential(key.ref, keyInput)
+      setKeyInput('')
+      setSaved('密钥已保存（只进不出，界面上不会再显示）')
+      await app.reload()
+    })
+  }
+
+  const clearKey = (): void => {
+    void app.guard('key', async () => {
+      await api.setCredential(key.ref, null)
+      setSaved('密钥已清除')
+      await app.reload()
+    })
+  }
+
+  const fetchModels = (): void => {
+    setFetching(true)
+    void app
+      .guard('models', async () => {
+        // 先试后存：输入框里刚填的新密钥可以一次性带上，不落盘
+        const result = await api.discoverModels(
+          draft.model.baseUrl,
+          keyInput === '' ? undefined : keyInput,
+        )
+        setModels(result.models)
+        setSaved(`拉到 ${String(result.models.length)} 个模型`)
+      })
+      .finally(() => setFetching(false))
+  }
 
   return (
     <div className="page">
       <div className="wrap">
         <div className="pagehd">
           <h1>设置</h1>
-          <span className="hint">{saved ? '已保存（立刻生效）' : '改动即时生效，落盘 data/settings.json'}</span>
+          <span className="hint">{saved === '' ? '改动即时生效，落盘 data/settings.json' : saved}</span>
           <span className="r">
             <button className="pri" disabled={busy !== ''} onClick={save}>
               保存
@@ -54,20 +127,73 @@ export function SettingsPage(): React.JSX.Element {
 
         {error !== '' && <div className="hint err">{error}</div>}
 
+        {/* ── 模型（照 DSH 的模型卡片：地址 / 密钥 / 模型 / 拉列表）── */}
         <div className="panel card2">
           <div className="grid2">
             <div className="field">
-              <label>模型网关</label>
-              <input value={draft.model.baseUrl} onChange={(event) => edit({ model: { ...draft.model, baseUrl: event.target.value } })} />
+              <label>API 地址</label>
+              <input
+                value={draft.model.baseUrl}
+                placeholder="https://api.deepseek.com/v1"
+                onChange={(event) => edit({ model: { ...draft.model, baseUrl: event.target.value } })}
+              />
             </div>
             <div className="field">
-              <label>模型名</label>
-              <input value={draft.model.model} onChange={(event) => edit({ model: { ...draft.model, model: event.target.value } })} />
+              <label>模型</label>
+              <input
+                value={draft.model.model}
+                placeholder="deepseek-chat"
+                list="model-options"
+                onChange={(event) => edit({ model: { ...draft.model, model: event.target.value } })}
+              />
+              <datalist id="model-options">
+                {models.map((entry) => (
+                  <option key={entry.id} value={entry.id} />
+                ))}
+              </datalist>
             </div>
           </div>
-          <div className="hint">
-            密钥只从环境变量取（<span className="mono">EXAMHARNESS_API_KEY</span>），不写进仓库、不落在本页。
-            当前：{runtime.modelConfigured ? `已配置，型号 ${runtime.modelName}` : '未配置——工作台会明确拒绝运行'}
+
+          <div className="field">
+            <label>
+              API 密钥　<span className="mono">{key.ref}</span>
+            </label>
+            {key.source === 'env' ? (
+              <div className="hint">由启动环境提供（只读）：界面改不了，改环境变量再启动</div>
+            ) : (
+              <div style={{ display: 'flex', gap: 'var(--sp-3)' }}>
+                <input
+                  type="password"
+                  style={{ flex: 1 }}
+                  value={keyInput}
+                  autoComplete="off"
+                  placeholder={key.configured ? '已配置——输入新值可替换' : '还没配置'}
+                  onChange={(event) => setKeyInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') saveKey()
+                  }}
+                />
+                <button className="pri" disabled={busy !== '' || keyInput === ''} onClick={saveKey}>
+                  保存密钥
+                </button>
+                {key.configured && (
+                  <button className="ghost" disabled={busy !== ''} onClick={clearKey}>
+                    清除
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="acts">
+            <span className="hint">
+              密钥只写不读：存 data/credentials.json（0600），从不回传界面。
+              当前：
+              {runtime.modelConfigured ? `已配置（${runtime.modelName}，来源 ${runtime.modelSource}）` : '未配置——工作台会拒绝运行'}
+            </span>
+            <button className="ghost" disabled={busy !== '' || fetching} onClick={fetchModels}>
+              获取可用模型
+            </button>
           </div>
         </div>
 
@@ -115,7 +241,7 @@ export function SettingsPage(): React.JSX.Element {
                 加一条
               </button>
               <span className="hint">
-                真实题库/教材整理件放这里，默认不可对外分发（<span className="mono">distributable: false</span>）
+                真实题库/教材整理件放这里；agent 从知识库抽出来的题落 corpus/extracted
               </span>
             </div>
           </div>
@@ -127,9 +253,7 @@ export function SettingsPage(): React.JSX.Element {
               <label>新建会话默认班级</label>
               <input
                 value={draft.sessionDefaults.className}
-                onChange={(event) =>
-                  edit({ sessionDefaults: { ...draft.sessionDefaults, className: event.target.value } })
-                }
+                onChange={(event) => edit({ sessionDefaults: { ...draft.sessionDefaults, className: event.target.value } })}
               />
             </div>
             <div className="field">
@@ -221,8 +345,12 @@ export function SettingsPage(): React.JSX.Element {
             <dd className="mono">{runtime.constructors.join('、')}</dd>
             <dt>闸门链</dt>
             <dd className="mono">{runtime.gates.join(' → ')}</dd>
+            <dt>设置修订号</dt>
+            <dd className="mono">r{settings.revision}</dd>
             <dt>需重启才生效</dt>
-            <dd className="mono">{runtime.restartRequired.length === 0 ? '无（都是热设置）' : runtime.restartRequired.join('、')}</dd>
+            <dd className="mono">
+              {runtime.restartRequired.length === 0 ? '无（都是热设置）' : runtime.restartRequired.join('、')}
+            </dd>
           </dl>
         </div>
       </div>

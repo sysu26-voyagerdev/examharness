@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as api from './api.js'
-import { AppCtx, type AppValue } from './app-context.js'
+import { AppCtx, type AppValue, type RunLogEntry } from './app-context.js'
 import { Icon, type IconName } from './icons.js'
 import { KbPage } from './pages/KbPage.js'
 import { SessionsPage } from './pages/SessionsPage.js'
 import { SettingsPage } from './pages/SettingsPage.js'
 import { WorkPage } from './pages/WorkPage.js'
 import { useRoute } from './router.js'
-import type { KbListView, LiveEvent, RunEventView, RunView, SessionView, SessionsView, SettingsView, StateView } from './types.js'
+import { mergeRunSignal } from './runs.js'
+import type {
+  KbListView,
+  LiveEvent,
+  SessionView,
+  SessionsView,
+  SettingsView,
+  StateView,
+} from './types.js'
 
 /**
  * 应用外壳（信息架构见 docs/agent/07）。
@@ -37,10 +45,9 @@ export function App(): React.JSX.Element {
   const [settings, setSettings] = useState<SettingsView | null>(null)
   const [kb, setKb] = useState<KbListView | null>(null)
 
-  const [transcript, setTranscript] = useState<readonly RunEventView[]>([])
+  const [runs, setRuns] = useState<readonly RunLogEntry[]>([])
   const [live, setLive] = useState<readonly LiveEvent[]>([])
-  const [runGoal, setRunGoal] = useState('')
-  const [stopped, setStopped] = useState('')
+  const [workspaceTick, setWorkspaceTick] = useState(0)
 
   const [dark, setDark] = useState(false)
   const [busy, setBusy] = useState('')
@@ -65,13 +72,17 @@ export function App(): React.JSX.Element {
     void reload().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
     const unsubscribe = api.subscribe(
       (event) => {
-        // run:step 已经在工作记录里逐条长出来了，不要再进"实时"列表
-        if (event.kind !== 'run:step') {
+        // run:* 与 workspace:changed 是"过程"，不进实时结论列表
+        if (event.kind !== 'run:step' && event.kind !== 'run:started' && event.kind !== 'run:done' && event.kind !== 'workspace:changed') {
           setLive((previous) => [event, ...previous].slice(0, 30))
           void reload().catch(() => undefined)
         }
+        if (event.kind === 'workspace:changed') setWorkspaceTick((previous) => previous + 1)
+        if (event.kind === 'run:done') void reload().catch(() => undefined)
       },
-      (event) => setTranscript((previous) => [...previous, event]),
+      (signal) => {
+        setRuns((previous) => mergeRunSignal(previous, signal))
+      },
     )
     return unsubscribe
   }, [reload])
@@ -93,34 +104,38 @@ export function App(): React.JSX.Element {
   }, [])
 
   const clearLog = useCallback(() => {
-    setTranscript([])
+    setRuns([])
     setLive([])
-    setRunGoal('')
-    setStopped('')
   }, [])
 
-  const run = useCallback(
-    async (goal: string): Promise<RunView | undefined> => {
-      let done: RunView | undefined
+  const startRun = useCallback(
+    async (goal: string): Promise<void> => {
       await guard('run', async () => {
-        setRunGoal(goal)
-        setTranscript([])
-        const next = await api.runWorkbench(goal)
-        setTranscript(next.transcript)
-        setStopped(next.stopped)
-        done = next
-        await reload()
+        // 服务端会立刻回 runId，过程走 SSE；这里不 await 那一轮跑完
+        await api.startRun(goal)
       })
-      return done
     },
-    [guard, reload],
+    [guard],
   )
 
-  const record = useCallback((goal: string, done: RunView) => {
-    setRunGoal(goal)
-    setTranscript(done.transcript)
-    setStopped(done.stopped)
-  }, [])
+  const interject = useCallback(
+    async (text: string): Promise<void> => {
+      const active = runs.find((entry) => entry.stopped === '')
+      if (active === undefined) return
+      await guard('interject', async () => {
+        await api.interjectRun(active.id, text)
+      })
+    },
+    [guard, runs],
+  )
+
+  const stopRun = useCallback(async (): Promise<void> => {
+    const active = runs.find((entry) => entry.stopped === '')
+    if (active === undefined) return
+    await guard('stop', async () => {
+      await api.stopRun(active.id)
+    })
+  }, [guard, runs])
 
   const value: AppValue = useMemo(
     () => ({
@@ -129,22 +144,23 @@ export function App(): React.JSX.Element {
       state,
       settings,
       kb,
-      transcript,
+      runs,
+      activeRun: runs.find((entry) => entry.stopped === '') ?? null,
       live,
-      runGoal,
-      stopped,
+      workspaceTick,
       busy,
       error,
       dark,
       toggleDark: () => setDark((previous) => !previous),
       reload,
       guard,
-      run,
-      record,
+      startRun,
+      interject,
+      stopRun,
       clearLog,
       go,
     }),
-    [session, sessions, state, settings, kb, transcript, live, runGoal, stopped, busy, error, dark, reload, guard, run, record, clearLog, go],
+    [session, sessions, state, settings, kb, runs, live, workspaceTick, busy, error, dark, reload, guard, startRun, interject, stopRun, clearLog, go],
   )
 
   const page = NAV.some((entry) => entry.key === route.page) ? route.page : 'work'

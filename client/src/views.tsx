@@ -15,6 +15,14 @@ import type {
 
 const TOOL_ICONS: Readonly<Record<string, IconName>> = {
   graph_query: 'graph',
+  kb_list: 'layers',
+  kb_read: 'paper',
+  kb_write: 'upload',
+  kb_mark: 'check',
+  ws_ls: 'folder',
+  ws_read: 'paper',
+  ws_write: 'paper',
+  ws_run: 'play',
   construct_item: 'grid',
   serialize_item: 'image',
   submit_item: 'upload',
@@ -80,22 +88,24 @@ export function TranscriptView({
             命题组
           </div>
           {events.map((event, index) => {
-            const { key, body } = splitRow(event.text)
+            const { key, body } = event.kind === 'user' ? { key: '老师', body: event.text } : splitRow(event.text)
             const tone = event.kind === 'gate' ? gateTone(event.text) : ''
             const icon: IconName =
-              event.kind === 'assistant'
-                ? 'chat'
-                : event.kind === 'gate'
-                  ? tone === 'warn'
-                    ? 'alert'
-                    : 'check'
-                  : (TOOL_ICONS[key] ?? 'tool')
+              event.kind === 'user'
+                ? 'send'
+                : event.kind === 'assistant'
+                  ? 'chat'
+                  : event.kind === 'gate'
+                    ? tone === 'warn'
+                      ? 'alert'
+                      : 'check'
+                    : (TOOL_ICONS[key] ?? 'tool')
             return (
               <div className="step" key={`${String(event.step)}-${String(index)}`}>
                 <span className="ico">
                   <Icon name={icon} />
                 </span>
-                <span className={event.kind === 'assistant' ? 'k' : 'k mono'}>{key}</span>
+                <span className={event.kind === 'tool' ? 'k mono' : 'k'}>{key}</span>
                 <span className="dot" />
                 <span className={tone === '' ? 'st' : `st ${tone}`}>{body}</span>
               </div>
@@ -217,8 +227,8 @@ function Question({
           <b>答案</b>　{item.answer}
           <div className="hint">
             {Object.entries(item.evidence)
-              .map(([gate, value]) => `${gate}${value.pass ? '✓' : '✗'}`)
-              .join(' · ')}
+              .map(([gate, value]) => `${gate} ${value.pass ? '通过' : '未通过'}`)
+              .join('　')}
           </div>
           <div className="hint">
             构造器 {item.constructor}　种子 <span className="mono">{item.seed}</span>

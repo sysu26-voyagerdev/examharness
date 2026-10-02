@@ -898,8 +898,7 @@ td.n {
 }
 
 .navtabs svg {
-  width: 15px;
-  height: 15px;
+  color: currentcolor;
 }
 
 .page {
@@ -981,8 +980,6 @@ td.n {
 }
 
 .grouphd svg {
-  width: 15px;
-  height: 15px;
   color: var(--label-4);
 }
 
@@ -1095,4 +1092,27 @@ td.n {
   color: var(--label-2);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* 图标一律不参与伸缩：SVG 在 flex 容器里默认会被拉伸 */
+svg {
+  flex: 0 0 auto;
+}
+
+/* 工作区面板：脚本与产物要看得清（等宽、可滚动、长行不撑破） */
+.ws {
+  max-width: var(--content);
+  margin: 0 auto;
+  padding: var(--sp-5) var(--sp-6);
+}
+
+.ws .hint {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.ws .hint svg {
+  color: var(--label-4);
 }
