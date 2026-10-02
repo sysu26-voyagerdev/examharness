@@ -11,6 +11,9 @@
       "path": "./packages/plugin-bank"
     },
     {
+      "path": "./packages/plugin-corpus"
+    },
+    {
       "path": "./packages/plugin-verify-scope"
     },
     {

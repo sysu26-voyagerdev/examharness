@@ -164,6 +164,43 @@ export interface WorkbenchApi {
   run(request: WorkbenchRequest): Promise<WorkbenchRun>
 }
 
+/** 语料库里的一条记录（真实题库/教材整理来的参考材料） */
+export interface CorpusRecord {
+  id: string
+  /** 来源标识（文件名或机构名），便于回溯 */
+  source: string
+  /** 题干纯文本 */
+  stem: string
+  answer?: string
+  knowledge: readonly string[]
+  type?: string
+  difficulty?: number
+  /**
+   * 是否可以对外展示。**默认 false**：受版权保护的材料只作内部参考
+   * （对齐风格、难度先验、错因、查重对照），对外只出数字不出原文（ADR-0014）。
+   */
+  distributable: boolean
+}
+
+/**
+ * 语料库。**与题库严格分开**：
+ *   - 题库 = 我们自己构造并经闸门验证的原创题（可分发）；
+ *   - 语料库 = 真实世界的参考材料（默认不可分发）。
+ * 混在一起会同时毁掉"原创"叙事和查重语义。
+ */
+export interface CorpusApi {
+  readonly size: number
+  records(): readonly CorpusRecord[]
+  /**
+   * 与语料库最像的那一条。**两个指标缺一不可**：
+   *   - `numbers`：数字与条件的重合度（数学上是不是同一道题）
+   *   - `wording`：措辞相似度（表述有没有换皮）
+   * 只看措辞会把"同一知识点不同数值"的题全判成抄原题——这是必须避免的误伤。
+   */
+  maxSimilarity(text: string): { wording: number; numbers: number; id?: string; source?: string }
+  stats(): { total: number; distributable: number; bySource: Readonly<Record<string, number>> }
+}
+
 /** 图形渲染：由 spec 决定，不靠模型"画" */
 export interface FigureApi {
   render(spec: FigureSpec): FigureArtifact
@@ -180,5 +217,6 @@ declare module '@deepseek-ai/cordis' {
     figure: FigureApi
     llm: LlmApi
     workbench: WorkbenchApi
+    corpus: CorpusApi
   }
 }

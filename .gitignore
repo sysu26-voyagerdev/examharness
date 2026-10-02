@@ -15,6 +15,10 @@ client/dist/
 
 # 运行期数据（绝不入库：会话、卷子、渲染产物、题库索引）
 data/
+
+# 语料（真实题库/教材整理件）：版权 + 体积，绝不入库；只保留说明
+corpus/*
+!corpus/README.md
 *.local.yml
 *.local.yaml
 .env

@@ -9,6 +9,8 @@
   name: '@examharness/plugin-graph'
   config:
     path: seed/knowledge.json
+    # 追加知识点清单（课标/教材目录整理件，可放多份）
+    paths: []
     # 已学集合：不在其中的前置知识 = 超纲（本卷只讲到「最值」）
     learned:
       - 一次函数
@@ -19,6 +21,17 @@
       - 对称轴
       - 与坐标轴交点
       - 最值
+
+# 语料库：真实题库/教材整理件（corpus/ 不进 Git）。缺目录也不影响启动。
+- id: corpus
+  name: '@examharness/plugin-corpus'
+  config:
+    dirs:
+      - corpus/questions
+      - corpus/textbooks
+      - seed/corpus
+    minLength: 8
+    maxSimilarity: 0.6
 
 - id: bank
   name: '@examharness/plugin-bank'
@@ -42,6 +55,8 @@
   name: '@examharness/plugin-verify-dedup'
   config:
     maxSimilarity: 0.85
+    corpusWordingMax: 0.55
+    corpusNumbersMin: 0.8
 
 - id: construct
   name: '@examharness/plugin-construct-parabola'

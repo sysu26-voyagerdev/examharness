@@ -1,0 +1,3 @@
+{"id":"sample-1","stem":"已知抛物线 y = x² - 4x + 3 与 x 轴交于 A、B 两点，求线段 AB 的长。","answer":"AB = 2","knowledge":["与坐标轴交点"],"type":"解答","difficulty":0.72,"distributable":true}
+{"id":"sample-2","stem":"二次函数 y = x² - 2x + m 的图象与 x 轴有两个不同交点，求 m 的取值范围。","answer":"m < 1","knowledge":["与坐标轴交点"],"type":"解答","difficulty":0.68,"distributable":true}
+{"id":"sample-3","stem":"将抛物线 y = x² 先向右平移 2 个单位，再向上平移 1 个单位，写出所得抛物线的解析式。","answer":"y = (x − 2)² + 1","knowledge":["图象平移"],"type":"填空","difficulty":0.74,"distributable":true}
