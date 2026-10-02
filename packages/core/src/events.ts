@@ -20,5 +20,9 @@ declare module '@deepseek-ai/cordis' {
     'item:stored'(payload: { item: Item }): void
     /** 被闸门拦下（emit，仅广播；用于界面与轨迹） */
     'item:rejected'(payload: { item: Item; verdict: Verdict }): void
+    /** 老师签了字（emit，仅广播；R4 的留痕） */
+    'item:confirmed'(payload: { item: Item; by: string }): void
+    /** 工作台的一步（emit，仅广播；界面实时显示 agent 在干什么） */
+    'run:step'(payload: { step: number; kind: 'assistant' | 'tool' | 'gate'; text: string }): void
   }
 }

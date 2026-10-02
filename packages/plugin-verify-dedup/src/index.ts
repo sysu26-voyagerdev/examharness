@@ -92,6 +92,7 @@ export function apply(ctx: Context, config: DedupConfig): void {
     }
 
     return {
+      ...verdict,
       pass: true,
       evidence: {
         ...verdict.evidence,

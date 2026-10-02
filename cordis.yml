@@ -105,6 +105,15 @@
     limit: 5
     timeoutMs: 15000
 
+# 会话与卷子版本：多会话、版本、diff、局部重做、人工确认、冻结
+- id: session
+  name: '@examharness/plugin-session'
+  config:
+    path: data/sessions.json
+    defaultBlueprint: seed/blueprint.json
+    defaultClass: 初三(2)班
+    defaultProgress: 九上·22章·第2课时
+
 - id: workbench
   name: '@examharness/plugin-workbench'
   config:

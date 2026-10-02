@@ -69,6 +69,7 @@ export function apply(ctx: Context, config: VerifyFigureConfig): void {
     }
 
     return {
+      ...verdict,
       pass: true,
       evidence: {
         ...verdict.evidence,

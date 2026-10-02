@@ -158,7 +158,11 @@ export interface Blueprint {
 
 /** 闸门判定。fixable=false 表示结构性违规（如超纲），重做无意义 */
 export type Verdict =
-  | { pass: true; evidence?: Evidence }
+  /**
+   * 通过。`needsReview = true` 表示**过了但有疑点**（例如非严格模式下没验成），
+   * 这种题入库后状态是 `needs_review`，只能由人确认（R4）。
+   */
+  | { pass: true; evidence?: Evidence; needsReview?: boolean }
   | { pass: false; gate: string; reason: string; fixable: boolean; hint?: string }
 
 export type MaybePromise<T> = T | Promise<T>

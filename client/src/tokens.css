@@ -723,3 +723,138 @@ td.n {
     height: auto;
   }
 }
+
+/* ── 应用级补充（对话框 / 字段 / 版本条 / 徽章） ── */
+.chips {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--bg-module);
+  color: var(--label-2);
+  font-size: var(--fs-cap);
+  white-space: nowrap;
+}
+
+.chip.warn {
+  background: var(--st-warn-bg);
+  color: var(--st-warn);
+}
+
+.chip.ok {
+  color: var(--st-success);
+  background: var(--bg-module);
+}
+
+.chip.click {
+  cursor: pointer;
+  border: 1px solid var(--line-2);
+  background: none;
+  color: var(--label-3);
+}
+
+.chip.click:hover {
+  color: var(--label-1);
+  background: var(--bg-hover);
+}
+
+.chip.on {
+  background: var(--label-1);
+  border-color: var(--label-1);
+  color: var(--bg);
+}
+
+.panel {
+  border-bottom: 1px solid var(--line-1);
+  padding: var(--sp-4) var(--sp-5);
+  background: var(--bg-module);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+}
+
+.field label {
+  font-size: var(--fs-cap);
+  color: var(--label-3);
+}
+
+.field input,
+.field textarea {
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-ctl);
+  padding: 5px 8px;
+  font: var(--fs-sm) / var(--lh-sm) var(--font);
+  color: var(--label-1);
+  background: var(--bg);
+  outline: 0;
+}
+
+.field input:focus,
+.field textarea:focus {
+  border-color: var(--label-4);
+}
+
+.dialog-back {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8vh;
+  background: rgb(0 0 0 / 34%);
+}
+
+.dialog {
+  width: min(560px, 92vw);
+  max-height: 80vh;
+  overflow: auto;
+  border-radius: var(--r-code);
+  background: var(--bg);
+  padding: var(--sp-6);
+}
+
+.dialog h2 {
+  margin: 0 0 var(--sp-4);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-sm);
+}
+
+.kv dt {
+  color: var(--label-3);
+}
+
+.kv dd {
+  margin: 0;
+  color: var(--label-1);
+}
+
+.slot-hit {
+  box-shadow: inset 2px 0 0 var(--accent);
+  padding-left: var(--sp-5);
+}
+
+.ver {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}

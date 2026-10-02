@@ -93,6 +93,7 @@ export function apply(ctx: Context, config: SymbolicConfig): void {
     }
 
     return {
+      ...verdict,
       pass: true,
       evidence: {
         ...verdict.evidence,

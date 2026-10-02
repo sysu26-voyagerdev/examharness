@@ -37,6 +37,11 @@ export interface BankApi {
   submit(item: Item): Promise<SubmitResult>
   get(id: string): Item | undefined
   all(): readonly Item[]
+  /**
+   * 人工终审签字（R4）：把题目从 needs_review / draft 变成 verified 并留痕。
+   * **系统不得自己调用它**——只有老师在界面上点"我确认"才会走到这里。
+   */
+  confirm(id: string, by: string): Item | undefined
 }
 
 /** 知识点图谱：既是 agent 的设计工具（引导），也是闸门（越界检测） */
@@ -164,6 +169,73 @@ export interface WorkbenchApi {
   run(request: WorkbenchRequest): Promise<WorkbenchRun>
 }
 
+// ── 会话与版本（应用层）─────────────────────────────────────
+// paper 只负责"按蓝图凑齐一份卷子"；会话负责**它是谁、第几版、谁签过字**。
+
+export interface SessionMeta {
+  id: string
+  title: string
+  className: string
+  /** 教学进度，例如「九上·22章·第2课时」 */
+  progress: string
+  /** 本次会话要用的蓝图文件 */
+  blueprintPath: string
+  createdAt: string
+  /** 冻结后所有写操作一律拒绝（R3） */
+  frozen: boolean
+}
+
+/** 卷面题位 → 题目，以及这道题的人工签字 */
+export interface SlotBinding {
+  slot: string
+  itemId: string
+  /** 人工终审签字（R4）：谁、何时 */
+  confirmedBy: string | null
+  confirmedAt: string | null
+}
+
+export interface PaperVersion {
+  version: number
+  at: string
+  /** 为什么产生这一版（组卷 / 重做某题位） */
+  reason: string
+  bindings: readonly SlotBinding[]
+  totalScore: number
+  scoreGap: number
+  attempts: number
+  gaps: readonly PaperGap[]
+}
+
+/** 两个版本之间某个题位的变化 */
+export interface SlotChange {
+  slot: string
+  change: 'added' | 'removed' | 'replaced' | 'same'
+  from?: string
+  to?: string
+}
+
+export interface SessionApi {
+  list(): readonly SessionMeta[]
+  current(): SessionMeta
+  create(patch?: Partial<Pick<SessionMeta, 'title' | 'className' | 'progress' | 'blueprintPath'>>): SessionMeta
+  switch(id: string): SessionMeta
+  update(patch: Partial<Pick<SessionMeta, 'title' | 'className' | 'progress' | 'blueprintPath'>>): SessionMeta
+  versions(): readonly PaperVersion[]
+  latest(): PaperVersion | undefined
+  /**
+   * 两版之间的题位变化。参数是**版本号**（1 起，与界面显示的 v1/v2 一致），
+   * 缺省为最后两版——界面与测试都不该去记数组下标。
+   */
+  diff(from?: number, to?: number): readonly SlotChange[]
+  /** 组卷并记为新版本 */
+  assemble(reason?: string): Promise<PaperVersion>
+  /** 只重做某一个题位，**必须守住蓝图约束**；返回被替换掉的那道题 */
+  regenerate(slotKey: string, seed?: number): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }>
+  /** 人工终审签字（R4）。签名与时间落入题目的 review 与会话轨迹 */
+  confirm(itemId: string, by: string): SlotBinding | undefined
+  freeze(): PaperVersion | undefined
+}
+
 /** 语料库里的一条记录（真实题库/教材整理来的参考材料） */
 export interface CorpusRecord {
   id: string
@@ -274,5 +346,6 @@ declare module '@deepseek-ai/cordis' {
     workbench: WorkbenchApi
     corpus: CorpusApi
     websearch: WebSearchApi
+    session: SessionApi
   }
 }

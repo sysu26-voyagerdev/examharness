@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Blueprint, BlueprintRow, Item } from '@examharness/core'
+import type { Blueprint, BlueprintRow, Item, SessionMeta } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -15,7 +15,7 @@ import z from 'schemastery'
  */
 
 export const name = 'web'
-export const inject = ['bank', 'graph', 'construct', 'paper', 'figure', 'workbench']
+export const inject = ['bank', 'graph', 'construct', 'paper', 'figure', 'workbench', 'session', 'llm']
 
 export const Config = z.object({
   port: z.number().default(8787),
@@ -29,6 +29,121 @@ export interface WebConfig {
 export interface GenerateRequest {
   slotKey: string
   seed: number
+}
+
+/** 会话视图：卷子页签要的东西一次给全（题位顺序、题、图、证据、签字、版本、diff） */
+function sessionView(
+  ctx: Context,
+  base: string,
+  summarize: (item: Item) => Record<string, unknown>,
+): Record<string, unknown> {
+  const meta = ctx.session.current()
+  const latest = ctx.session.latest()
+  const blueprint = loadBlueprint(base)
+  const slots = [...(latest?.bindings ?? [])]
+    .toSorted((a, b) => a.slot.localeCompare(b.slot))
+    .flatMap((binding) => {
+      const item = ctx.bank.get(binding.itemId)
+      if (item === undefined) return []
+      const row = blueprint.blueprint.find((entry) => entry.key === binding.slot || binding.slot.startsWith(`${entry.key}-`))
+      return [
+        {
+          ...summarize(item),
+          slotKey: binding.slot,
+          difficulty: item.slot.difficulty,
+          confirmedBy: binding.confirmedBy,
+          confirmedAt: binding.confirmedAt,
+          knowledgeWanted: row?.knowledge ?? [],
+        },
+      ]
+    })
+
+  return {
+    meta,
+    blueprint,
+    slots,
+    // 每个版本都带完整绑定：界面要能"翻到 v1 看看当时是什么"（题都还在题库里）
+    versions: ctx.session.versions().map((version) => ({
+      version: version.version,
+      at: version.at,
+      reason: version.reason,
+      totalScore: version.totalScore,
+      scoreGap: version.scoreGap,
+      gaps: version.gaps,
+      attempts: version.attempts,
+      bindings: version.bindings,
+    })),
+    diff: ctx.session.diff(),
+  }
+}
+
+/** 导出为 HTML（Word 能直接打开；图内嵌，公式以原文呈现） */
+export function renderPaperHtml(meta: SessionMeta, items: readonly Item[], figureOf: (item: Item) => string): string {
+  const rows = items
+    .map((item, index) => {
+      const options = (item.prose.options ?? []).map((option) => `${option.key}. ${option.text}`).join('　　')
+      const figure = figureOf(item)
+      return [
+        `<div class="q">`,
+        `<div class="head"><b>${String(index + 1)}.</b>（${item.slot.type}，${String(item.slot.score)} 分）</div>`,
+        `<div class="stem">${item.prose.stem}</div>`,
+        options === '' ? '' : `<div class="opts">${options}</div>`,
+        figure === '' ? '' : `<div class="fig">${figure}</div>`,
+        `</div>`,
+      ].join('\n')
+    })
+    .join('\n')
+
+  const answers = items
+    .map(
+      (item, index) =>
+        `<div class="a"><b>${String(index + 1)}.</b> ${item.prose.answerText}<ol>${item.prose.solution
+          .map((step) => `<li>${step}</li>`)
+          .join('')}</ol></div>`,
+    )
+    .join('\n')
+
+  const total = items.reduce((sum, item) => sum + item.slot.score, 0)
+  return `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>${meta.title}</title>
+<style>
+body{font:14px/1.9 "Songti SC","SimSun",serif;max-width:820px;margin:32px auto;padding:0 24px;color:#111}
+h1{font-size:20px;text-align:center}
+.meta{text-align:center;color:#666;font-size:12px;border-bottom:1px solid #ddd;padding-bottom:8px;margin-bottom:16px}
+.q{margin:14px 0}
+.head b{font-weight:600}
+.opts{margin-top:4px}
+.fig{margin-top:6px}
+hr{border:0;border-top:1px dashed #bbb;margin:24px 0}
+.a{margin:10px 0}
+.a ol{margin:4px 0 0 20px}
+</style></head><body>
+<h1>${meta.title}</h1>
+<div class="meta">${meta.className}　${meta.progress}　满分 ${String(total)} 分</div>
+${rows}
+<hr>
+<h1>参考答案与解析</h1>
+${answers}
+</body></html>`
+}
+
+/** 导出为 Markdown（图以 SVG 内联，便于进 Git 或再加工） */
+export function renderPaperMarkdown(meta: SessionMeta, items: readonly Item[], figureOf: (item: Item) => string): string {
+  const lines: string[] = [`# ${meta.title}`, '', `${meta.className}　${meta.progress}`, '']
+  items.forEach((item, index) => {
+    lines.push(`## ${String(index + 1)}. （${item.slot.type}，${String(item.slot.score)} 分）`, '', item.prose.stem, '')
+    for (const option of item.prose.options ?? []) lines.push(`- ${option.key}. ${option.text}`)
+    const figure = figureOf(item)
+    if (figure !== '') lines.push('', figure)
+    lines.push('')
+  })
+  lines.push('---', '', '## 参考答案与解析', '')
+  items.forEach((item, index) => {
+    lines.push(`**${String(index + 1)}.** ${item.prose.answerText}`, '')
+    for (const step of item.prose.solution) lines.push(`- ${step}`)
+    lines.push('')
+  })
+  return lines.join('\n')
 }
 
 const MIME: Readonly<Record<string, string>> = {
@@ -83,6 +198,8 @@ export function apply(ctx: Context, config: WebConfig): void {
   }
 
   ctx.on('item:stored', ({ item }) => broadcast('stored', summarize(item)))
+  ctx.on('item:confirmed', ({ item, by }) => broadcast('confirmed', { ...summarize(item), by }))
+  ctx.on('run:step', (payload) => broadcast('run:step', payload))
   ctx.on('item:rejected', ({ item, verdict }) => broadcast('rejected', { ...summarize(item), verdict }))
 
   const handle = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
@@ -156,6 +273,112 @@ export function apply(ctx: Context, config: WebConfig): void {
         blueprint,
       })
       send(res, 200, run)
+      return
+    }
+
+    // ── 会话与版本 ────────────────────────────────────────
+    if (method === 'GET' && path === '/api/session') {
+      send(res, 200, sessionView(ctx, base, summarize))
+      return
+    }
+
+    if (method === 'GET' && path === '/api/sessions') {
+      send(res, 200, { currentId: ctx.session.current().id, sessions: ctx.session.list() })
+      return
+    }
+
+    if (method === 'POST' && path === '/api/sessions') {
+      const body = (await readBody(req)) as Partial<SessionMeta>
+      send(res, 200, ctx.session.create(body))
+      return
+    }
+
+    if (method === 'POST' && path === '/api/session/switch') {
+      const body = (await readBody(req)) as { id?: string }
+      try {
+        send(res, 200, ctx.session.switch(String(body.id ?? '')))
+      } catch (error) {
+        send(res, 404, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    if (method === 'PATCH' && path === '/api/session') {
+      const body = (await readBody(req)) as Partial<SessionMeta>
+      try {
+        send(res, 200, ctx.session.update(body))
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    if (method === 'POST' && path === '/api/session/regenerate') {
+      const body = (await readBody(req)) as { slotKey?: string; seed?: number }
+      const result = await ctx.session.regenerate(
+        String(body.slotKey ?? ''),
+        typeof body.seed === 'number' ? body.seed : undefined,
+      )
+      send(res, result.ok ? 200 : 409, result)
+      return
+    }
+
+    if (method === 'POST' && path === '/api/session/confirm') {
+      const body = (await readBody(req)) as { itemId?: string; by?: string }
+      const binding = ctx.session.confirm(String(body.itemId ?? ''), body.by ?? '老师')
+      if (binding === undefined) {
+        send(res, 404, { error: '没有这道题' })
+        return
+      }
+      send(res, 200, binding)
+      return
+    }
+
+    if (method === 'POST' && path === '/api/session/freeze') {
+      send(res, 200, { frozen: true, version: ctx.session.freeze()?.version ?? null })
+      return
+    }
+
+    if (method === 'POST' && path === '/api/session/assemble') {
+      const body = (await readBody(req)) as { reason?: string }
+      try {
+        send(res, 200, await ctx.session.assemble(body.reason ?? '组卷'))
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    if (method === 'GET' && path === '/api/settings') {
+      const corpus = ctx.get('corpus')
+      const websearch = ctx.get('websearch')
+      send(res, 200, {
+        model: { configured: ctx.llm.configured, name: ctx.llm.model },
+        corpus: corpus === undefined ? { total: 0, distributable: 0 } : corpus.stats(),
+        websearch: { enabled: websearch?.enabled === true },
+        constructors: ctx.construct.kinds(),
+        gates: ['verify-symbolic', 'verify-scope', 'verify-dedup', 'verify-figure', 'verify-roundtrip'],
+      })
+      return
+    }
+
+    if (method === 'GET' && path === '/api/export') {
+      const meta = ctx.session.current()
+      const latest = ctx.session.latest()
+      const items = [...(latest?.bindings ?? [])]
+        .toSorted((a, b) => a.slot.localeCompare(b.slot))
+        .flatMap((binding) => {
+          const item = ctx.bank.get(binding.itemId)
+          return item === undefined ? [] : [item]
+        })
+      const figureOf = (item: Item): string => ctx.figure.renderItem(item)?.svg ?? ''
+      const markdown = (req.url ?? '').includes('format=md')
+      const body = markdown ? renderPaperMarkdown(meta, items, figureOf) : renderPaperHtml(meta, items, figureOf)
+      res.writeHead(200, {
+        'content-type': markdown ? 'text/markdown; charset=utf-8' : 'text/html; charset=utf-8',
+        'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(meta.title)}.${markdown ? 'md' : 'html'}`,
+      })
+      res.end(body)
       return
     }
 

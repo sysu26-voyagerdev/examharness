@@ -162,6 +162,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     const stored: string[] = []
     const say = (step: number, kind: WorkbenchEvent['kind'], text: string): void => {
       transcript.push({ step, kind, text })
+      // 实时推给界面：工作记录是"看得见的 agent"，不是跑完才出现的一坨
+      this.ctx.emit('run:step', { step, kind, text })
     }
 
     if (!this.ctx.llm.configured) {

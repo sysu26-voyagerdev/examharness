@@ -48,6 +48,8 @@ export function apply(ctx: Context, config: ScopeConfig): void {
     }
 
     return {
+      // 展开上游判定：不然会把它带的标记（例如 needsReview）吃掉
+      ...verdict,
       pass: true,
       evidence: {
         ...verdict.evidence,

@@ -98,12 +98,14 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
           hint: '题面表述有歧义，重写一遍',
         }
       }
-      // 非严格模式：留痕放行，但要在证据里写清楚"这一项没验成"
+      // 非严格模式：留痕放行，但**必须标 needsReview**——没验成就是没验成，
+      // 这种题要落到"待复核"，等老师签字（R4）
       return {
         pass: true,
+        needsReview: true,
         evidence: {
           ...verdict.evidence,
-          roundtrip: { pass: true, detail: '非严格模式：回译未拿到结构，本项未验成' },
+          roundtrip: { pass: true, detail: '非严格模式：回译未拿到结构，本项未验成，需人工复核' },
         },
       }
     }
@@ -130,6 +132,7 @@ export function apply(ctx: Context, config: RoundTripConfig): void {
     }
 
     return {
+      ...verdict,
       pass: true,
       evidence: {
         ...verdict.evidence,

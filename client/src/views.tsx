@@ -1,6 +1,16 @@
 import { useState } from 'react'
 import { Icon, type IconName } from './icons.js'
-import type { ItemView, KnowledgeView, LiveEvent, PaperView, RunEventView } from './types.js'
+import type {
+  ItemView,
+  KnowledgeView,
+  LiveEvent,
+  RunEventView,
+  SessionMetaView,
+  SettingsView,
+  SlotBindingView,
+  SlotChangeView,
+  VersionView,
+} from './types.js'
 
 /* ────────────────────────── 工作记录 ────────────────────────── */
 
@@ -10,9 +20,12 @@ const TOOL_ICONS: Readonly<Record<string, IconName>> = {
   serialize_item: 'image',
   submit_item: 'upload',
   bank_stats: 'chart',
+  corpus_search: 'search',
+  corpus_read: 'paper',
+  corpus_compare: 'sliders',
+  web_search: 'globe',
 }
 
-/** 行内一行一个事实：`工具名：摘要` → 左标题 + 圆点 + 右摘要 */
 function splitRow(text: string): { key: string; body: string } {
   const at = text.indexOf('：')
   if (at === -1) return { key: '命题组', body: text }
@@ -20,7 +33,7 @@ function splitRow(text: string): { key: string; body: string } {
 }
 
 const gateTone = (text: string): string =>
-  text.includes('拦下') || text.includes('不一致') || text.includes('失败')
+  text.includes('拦下') || text.includes('不一致') || text.includes('失败') || text.includes('过于相似')
     ? 'warn'
     : text.includes('入库') || text.includes('通过')
       ? 'ok'
@@ -44,12 +57,12 @@ export function TranscriptView({
   stopped: string
 }): React.JSX.Element {
   const idle = goal === '' && events.length === 0 && live.length === 0
-
   return (
     <div className="tx">
       {idle && (
         <div className="empty">
-          agent 内环拿工具自己迭代；收尾动作只有一个「提交」，跑不跑闸门由框架决定——它跳不过去。
+          agent 内环拿工具自己迭代（查图谱、查素材、构造、写题面、自查）；收尾动作只有一个「提交」——
+          跑不跑闸门由框架决定，它跳不过去。
         </div>
       )}
 
@@ -97,22 +110,26 @@ export function TranscriptView({
         <div className="turn">
           <div className="who">
             <Icon name="refresh" />
-            闸门实时
+            实时
           </div>
-          {live.map((event, index) => (
-            <div className="step" key={`live-${String(index)}`}>
-              <span className="ico">
-                <Icon name={event.kind === 'stored' ? 'check' : 'alert'} />
-              </span>
-              <span className="k mono">{event.at}</span>
-              <span className="dot" />
-              <span className={event.kind === 'stored' ? 'st ok' : 'st warn'}>
-                {event.kind === 'stored'
-                  ? `入库 ${event.id}`
-                  : `${event.verdict?.gate ?? '闸门'}：${event.verdict?.reason ?? '被拦下'}`}
-              </span>
-            </div>
-          ))}
+          {live.map((event, index) => {
+            const text =
+              event.kind === 'stored'
+                ? `入库 ${event.id ?? ''}（${event.slot ?? ''}）`
+                : event.kind === 'confirmed'
+                  ? `${event.by ?? '老师'} 确认了 ${event.id ?? ''}`
+                  : `${event.verdict?.gate ?? '闸门'}：${event.verdict?.reason ?? '被拦下'}`
+            return (
+              <div className="step" key={`live-${String(index)}`}>
+                <span className="ico">
+                  <Icon name={event.kind === 'rejected' ? 'alert' : 'check'} />
+                </span>
+                <span className="k mono">{event.at}</span>
+                <span className="dot" />
+                <span className={event.kind === 'rejected' ? 'st warn' : 'st ok'}>{text}</span>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>
@@ -121,21 +138,45 @@ export function TranscriptView({
 
 /* ────────────────────────── 卷子 ────────────────────────── */
 
-function statusOf(item: ItemView): { text: string; tone: string; icon: IconName } {
+function statusOf(item: ItemView, binding: SlotBindingView): { text: string; tone: string; icon: IconName } {
+  if (binding.confirmedBy !== null) return { text: `已确认 · ${binding.confirmedBy}`, tone: 'ok', icon: 'check' }
   const failed = Object.entries(item.evidence).filter(([, value]) => !value.pass)
-  if (failed.length > 0) return { text: '待复核', tone: 'warn', icon: 'alert' }
+  if (failed.length > 0 || item.lifecycle === 'needs_review') return { text: '待复核', tone: 'warn', icon: 'alert' }
   return { text: '通过', tone: 'ok', icon: 'check' }
 }
 
-function Question({ item, index, open, onToggle }: {
+function Question({
+  binding,
+  item,
+  index,
+  changed,
+  locked,
+  canAct,
+  onRegenerate,
+  onConfirm,
+}: {
+  binding: SlotBindingView
   item: ItemView
   index: number
-  open: boolean
-  onToggle: () => void
+  changed: SlotChangeView | undefined
+  locked: boolean
+  canAct: boolean
+  onRegenerate: (slotKey: string) => void
+  onConfirm: (itemId: string) => void
 }): React.JSX.Element {
-  const status = statusOf(item)
+  const [open, setOpen] = useState(false)
+  const status = statusOf(item, binding)
+  const mark =
+    changed === undefined || changed.change === 'same'
+      ? ''
+      : changed.change === 'replaced'
+        ? '本版替换'
+        : changed.change === 'added'
+          ? '本版新增'
+          : '本版移除'
+
   return (
-    <div className="q">
+    <div className={`q ${changed !== undefined && changed.change !== 'same' ? 'slot-hit' : ''}`}>
       <div className="no">{index + 1}</div>
       <div className="head">
         <em>{item.type}</em>
@@ -146,6 +187,7 @@ function Question({ item, index, open, onToggle }: {
           </span>
         )}
         <span>{item.knowledge.join('、')}</span>
+        {mark !== '' && <span className="chip">{mark}</span>}
       </div>
       <div className={`st ${status.tone}`}>
         <Icon name={status.icon} />
@@ -154,11 +196,19 @@ function Question({ item, index, open, onToggle }: {
 
       <div className="wide stem">{item.stem}</div>
       {item.figure !== '' && (
-        // 图是服务端由 spec 渲染好的 SVG：界面只显示，不解析、不重画
+        // 图是服务端按 spec 渲染好的 SVG：界面只显示，不解析、不重画
         <div className="wide fig" dangerouslySetInnerHTML={{ __html: item.figure }} />
       )}
       <div className="wide acts">
-        <button onClick={onToggle}>{open ? '收起答案' : '答案与解析'}</button>
+        <button onClick={() => setOpen((value) => !value)}>{open ? '收起答案' : '答案与解析'}</button>
+        <button disabled={!canAct} onClick={() => onRegenerate(binding.slot)} title={locked ? '冻结后不可改（R3）' : '只重做这个题位'}>
+          换一道
+        </button>
+        {item.lifecycle === 'needs_review' && binding.confirmedBy === null && (
+          <button disabled={!canAct} onClick={() => onConfirm(item.id)} title="人工终审签字（R4）">
+            我确认
+          </button>
+        )}
         <span className="mono" style={{ color: 'var(--label-4)', fontSize: 'var(--fs-cap)' }}>
           {item.id}
         </span>
@@ -171,30 +221,47 @@ function Question({ item, index, open, onToggle }: {
               .map(([gate, value]) => `${gate}${value.pass ? '✓' : '✗'}`)
               .join(' · ')}
           </div>
+          <div className="hint">
+            构造器 {item.constructor}　种子 <span className="mono">{item.seed}</span>
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-export function PaperPane({ paper, items, busy, onAssemble }: {
-  paper: PaperView | null
-  items: readonly ItemView[]
+export function PaperPane({
+  version,
+  rows,
+  changes,
+  frozen,
+  viewingOld,
+  busy,
+  onRegenerate,
+  onConfirm,
+  onAssemble,
+}: {
+  version: VersionView | undefined
+  rows: readonly { binding: SlotBindingView; item: ItemView }[]
+  changes: readonly SlotChangeView[]
+  frozen: boolean
+  viewingOld: boolean
   busy: boolean
-  onAssemble: () => Promise<void>
+  onRegenerate: (slotKey: string) => void
+  onConfirm: (itemId: string) => void
+  onAssemble: () => void
 }): React.JSX.Element {
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
-  const list = paper === null ? items : paper.slots
+  const canAct = !frozen && !viewingOld && !busy
 
-  if (list.length === 0) {
+  if (version === undefined || rows.length === 0) {
     return (
       <div className="pane">
         <div className="card">
           <div className="empty">
-            还没有题。组卷是约束求解：按蓝图配额逐题位凑齐，凑不到就报缺口——不许静默少给题。
+            还没有卷子。组卷是约束求解：按蓝图配额逐题位凑齐，凑不到就报缺口——不许静默少给题。
           </div>
           <div style={{ marginTop: 'var(--sp-5)' }}>
-            <button className="pri" disabled={busy} onClick={() => void onAssemble()}>
+            <button className="pri" disabled={busy || frozen} onClick={onAssemble}>
               按蓝图组卷
             </button>
           </div>
@@ -203,36 +270,48 @@ export function PaperPane({ paper, items, busy, onAssemble }: {
     )
   }
 
+  const changed = changes.filter((change) => change.change !== 'same')
+  const gapText =
+    version.gaps.length === 0
+      ? '缺口 0'
+      : `缺口 ${String(version.gaps.length)}：${version.gaps.map((gap) => `${gap.slot} ${gap.reason}`).join('；')}`
+
   return (
     <div className="pane">
       <div className="sheet">
-        {paper !== null && (
-          <div className="banner">
-            满分 {paper.totalScore} · 与蓝图差 {paper.scoreGap} · 提交 {paper.attempts} 次 ·{' '}
-            {paper.gaps.length === 0
-              ? '缺口 0'
-              : `缺口 ${String(paper.gaps.length)}：${paper.gaps.map((gap) => `${gap.slot} ${gap.reason}`).join('；')}`}
-          </div>
-        )}
-        <h1>{paper === null ? '题库（尚未组卷）' : '本次卷子'}</h1>
-        <div className="sub">
-          <span>共 {list.length} 题</span>
-          <span>{paper === null ? '点「按蓝图组卷」凑齐题位' : '由易到难'}</span>
+        <div className="banner">
+          v{version.version} · {version.reason} · 满分 {version.totalScore} · 与蓝图差 {version.scoreGap} · 提交{' '}
+          {version.attempts} 次 · {gapText}
+          {changed.length > 0 && (
+            <span>
+              　｜与上一版相比：
+              {changed.map((change) => `${change.slot} ${change.change === 'replaced' ? '替换' : change.change === 'added' ? '新增' : '移除'}`).join('、')}
+            </span>
+          )}
         </div>
-        {list.map((item, index) => (
+        {frozen && <div className="banner">本会话已冻结：冻结后不可改动（R3）</div>}
+        {viewingOld && <div className="banner">正在看历史版本：只读，右侧「回到最新」可返回</div>}
+
+        <h1>{version.reason === '组卷' ? '本次卷子' : `本次卷子（${version.reason}）`}</h1>
+        <div className="sub">
+          <span>共 {rows.length} 题</span>
+          <span>由易到难</span>
+          <span>
+            {new Date(version.at).toLocaleString('zh-CN')}
+          </span>
+        </div>
+
+        {rows.map(({ binding, item }, index) => (
           <Question
-            key={item.id}
+            key={`${binding.slot}-${item.id}`}
+            binding={binding}
             item={item}
             index={index}
-            open={open.has(item.id)}
-            onToggle={() =>
-              setOpen((previous) => {
-                const next = new Set(previous)
-                if (next.has(item.id)) next.delete(item.id)
-                else next.add(item.id)
-                return next
-              })
-            }
+            changed={changes.find((change) => change.slot === binding.slot)}
+            locked={frozen || viewingOld}
+            canAct={canAct}
+            onRegenerate={onRegenerate}
+            onConfirm={onConfirm}
           />
         ))}
       </div>
@@ -242,7 +321,10 @@ export function PaperPane({ paper, items, busy, onAssemble }: {
 
 /* ────────────────────────── 知识网络 ────────────────────────── */
 
-export function KnowledgePane({ knowledge, items }: {
+export function KnowledgePane({
+  knowledge,
+  items,
+}: {
   knowledge: KnowledgeView
   items: readonly ItemView[]
 }): React.JSX.Element {
@@ -353,34 +435,46 @@ export function KnowledgePane({ knowledge, items }: {
 
 const GATES = ['symbolic', 'scope', 'dedup', 'figure', 'roundtrip'] as const
 
-export function EvidencePane({ items, events }: {
-  items: readonly ItemView[]
+export function EvidencePane({
+  rows,
+  events,
+  versions,
+}: {
+  rows: readonly { binding: SlotBindingView; item: ItemView }[]
   events: readonly RunEventView[]
+  versions: readonly VersionView[]
 }): React.JSX.Element {
   const gateEvents = events.filter((event) => event.kind === 'gate')
+  const originality = rows
+    .map(({ item }) => item.evidence.originality?.detail)
+    .filter((detail): detail is string => typeof detail === 'string')
 
   return (
     <div className="pane">
       <div className="card">
         <div className="kpi">
           <div>
-            <b>{items.length}</b>
-            入库题数
+            <b>{rows.length}</b>
+            卷内题数
           </div>
           <div>
-            <b>{gateEvents.length}</b>
-            本次提交
+            <b>{rows.filter(({ item }) => item.lifecycle === 'needs_review').length}</b>
+            待复核
           </div>
           <div>
-            <b>{items.flatMap((item) => item.slot).length}</b>
-            覆盖题位
+            <b>{rows.filter(({ binding }) => binding.confirmedBy !== null).length}</b>
+            已签字
+          </div>
+          <div>
+            <b>{versions.length}</b>
+            版本数
           </div>
         </div>
 
         <table>
           <thead>
             <tr>
-              <th>题</th>
+              <th>题位</th>
               <th>构造器</th>
               <th>种子</th>
               {GATES.map((gate) => (
@@ -390,9 +484,9 @@ export function EvidencePane({ items, events }: {
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
-              <tr key={item.id}>
-                <td className="n">{item.slot}</td>
+            {rows.map(({ binding, item }) => (
+              <tr key={binding.slot}>
+                <td className="n">{binding.slot}</td>
                 <td className="n">{item.constructor}</td>
                 <td className="n">{item.seed}</td>
                 {GATES.map((gate) => {
@@ -403,15 +497,27 @@ export function EvidencePane({ items, events }: {
                     </td>
                   )
                 })}
-                <td>{item.lifecycle}</td>
+                <td>{binding.confirmedBy ?? item.lifecycle}</td>
               </tr>
             ))}
           </tbody>
         </table>
 
+        {originality.length > 0 && (
+          <>
+            <div style={{ height: 'var(--sp-6)' }} />
+            <div className="hint">原创度（只出数字，不出语料原文）：</div>
+            {originality.map((detail) => (
+              <div className="hint" key={detail}>
+                {detail}
+              </div>
+            ))}
+          </>
+        )}
+
         {gateEvents.length > 0 && (
           <>
-            <div style={{ height: 'var(--sp-7)' }} />
+            <div style={{ height: 'var(--sp-6)' }} />
             <table>
               <thead>
                 <tr>
@@ -431,8 +537,107 @@ export function EvidencePane({ items, events }: {
           </>
         )}
 
-        <div className="hint">
-          每个「通过」都能回答「凭什么」——这就是原创性与合规性的证据链。
+        <div className="hint">每个「通过」都能回答「凭什么」——这就是原创性与合规性的证据链。</div>
+      </div>
+    </div>
+  )
+}
+
+/* ────────────────────────── 对话框 ────────────────────────── */
+
+export function SessionDialog({
+  meta,
+  onClose,
+  onSave,
+}: {
+  meta: SessionMetaView
+  onClose: () => void
+  onSave: (patch: Partial<SessionMetaView>) => void
+}): React.JSX.Element {
+  const [title, setTitle] = useState(meta.title)
+  const [className, setClassName] = useState(meta.className)
+  const [progress, setProgress] = useState(meta.progress)
+  const [blueprintPath, setBlueprintPath] = useState(meta.blueprintPath)
+
+  return (
+    <div className="dialog-back" onClick={onClose}>
+      <div className="dialog" onClick={(event) => event.stopPropagation()}>
+        <h2>会话约定</h2>
+        <div className="hint" style={{ marginBottom: 'var(--sp-4)' }}>
+          这些是 agent 每次开工都要读的约定（进度、班级、蓝图）；改完立刻生效。
+          禁用清单在蓝图文件里（<span className="mono">forbidKnowledge</span>）。
+        </div>
+        <div className="field">
+          <label>卷子标题</label>
+          <input value={title} onChange={(event) => setTitle(event.target.value)} />
+        </div>
+        <div className="field">
+          <label>班级</label>
+          <input value={className} onChange={(event) => setClassName(event.target.value)} />
+        </div>
+        <div className="field">
+          <label>教学进度</label>
+          <input value={progress} onChange={(event) => setProgress(event.target.value)} />
+        </div>
+        <div className="field">
+          <label>蓝图文件</label>
+          <input value={blueprintPath} onChange={(event) => setBlueprintPath(event.target.value)} />
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--sp-3)', justifyContent: 'flex-end' }}>
+          <button className="ghost" onClick={onClose}>
+            取消
+          </button>
+          <button className="pri" onClick={() => onSave({ title, className, progress, blueprintPath })}>
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function SettingsDialog({
+  settings,
+  frozen,
+  onClose,
+  onFreeze,
+}: {
+  settings: SettingsView
+  frozen: boolean
+  onClose: () => void
+  onFreeze: () => void
+}): React.JSX.Element {
+  return (
+    <div className="dialog-back" onClick={onClose}>
+      <div className="dialog" onClick={(event) => event.stopPropagation()}>
+        <h2>能力与状态</h2>
+        <dl className="kv">
+          <dt>模型</dt>
+          <dd>
+            {settings.model.configured ? `已配置（${settings.model.name}）` : '未配置——工作台会明确拒绝运行'}
+          </dd>
+          <dt>语料库</dt>
+          <dd>
+            共 {settings.corpus.total} 条，其中可对外 {settings.corpus.distributable} 条
+          </dd>
+          <dt>联网搜索</dt>
+          <dd>{settings.websearch.enabled ? '已启用（agent 可见 web_search 工具）' : '未启用（agent 看不到该工具）'}</dd>
+          <dt>构造器</dt>
+          <dd className="mono">{settings.constructors.join('、')}</dd>
+          <dt>闸门链</dt>
+          <dd className="mono">{settings.gates.join(' → ')}</dd>
+        </dl>
+        <div className="hint" style={{ marginTop: 'var(--sp-4)' }}>
+          这些都在 <span className="mono">cordis.yml</span> 里配：改完重启即可。
+          密钥只从环境变量取（<span className="mono">{'${EXAMHARNESS_API_KEY}'}</span> 等），不写进仓库。
+        </div>
+        <div style={{ display: 'flex', gap: 'var(--sp-3)', justifyContent: 'flex-end', marginTop: 'var(--sp-5)' }}>
+          <button className="ghost" onClick={onClose}>
+            关闭
+          </button>
+          <button className="pri" disabled={frozen} onClick={onFreeze} title="冻结后所有写操作一律拒绝（R3）">
+            {frozen ? '已冻结' : '定稿冻结'}
+          </button>
         </div>
       </div>
     </div>

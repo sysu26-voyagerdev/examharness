@@ -86,9 +86,10 @@ export class BankService extends Service implements BankApi {
       this.ctx.emit('item:rejected', { item, verdict })
       return { ok: false, verdict }
     }
+    // 过了但有疑点 → needs_review：**只能由人**改成 verified（R4），系统不许自己升级
     const stored: Item = {
       ...item,
-      lifecycle: 'verified',
+      lifecycle: verdict.needsReview === true ? 'needs_review' : 'verified',
       evidence: { ...item.evidence, ...verdict.evidence },
     }
     this.items.set(stored.id, stored)
@@ -99,6 +100,20 @@ export class BankService extends Service implements BankApi {
 
   get(id: string): Item | undefined {
     return this.items.get(id)
+  }
+
+  /** 人工终审签字：把题目落成 verified 并把"谁、何时"写进 review。 */
+  confirm(id: string, by: string): Item | undefined {
+    const item = this.items.get(id)
+    if (item === undefined) return undefined
+    const confirmed: Item = {
+      ...item,
+      lifecycle: 'verified',
+      review: { confirmedBy: by, confirmedAt: new Date().toISOString() },
+    }
+    this.items.set(id, confirmed)
+    this.ctx.emit('item:confirmed', { item: confirmed, by })
+    return confirmed
   }
 
   all(): readonly Item[] {

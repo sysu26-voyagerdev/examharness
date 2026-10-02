@@ -88,6 +88,18 @@ const PATHS: Readonly<Record<string, JSX.Element>> = {
     </>
   ),
   moon: <path d="M13 9.6A5.6 5.6 0 0 1 6.4 3a5.6 5.6 0 1 0 6.6 6.6z" />,
+  paper: (
+    <>
+      <path d="M4 2.6h5l3 3v7.8H4z" />
+      <path d="M9 2.6v3h3" />
+    </>
+  ),
+  globe: (
+    <>
+      <circle cx="8" cy="8" r="5.4" />
+      <path d="M2.6 8h10.8M8 2.6c1.6 1.6 2.4 3.4 2.4 5.4S9.6 11.8 8 13.4C6.4 11.8 5.6 10 5.6 8S6.4 4.2 8 2.6z" />
+    </>
+  ),
 }
 
 export type IconName = keyof typeof PATHS

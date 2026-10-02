@@ -39,6 +39,7 @@
     "@examharness/plugin-graph": "workspace:*",
     "@examharness/plugin-llm": "workspace:*",
     "@examharness/plugin-paper": "workspace:*",
+    "@examharness/plugin-session": "workspace:*",
     "@examharness/plugin-verify-dedup": "workspace:*",
     "@examharness/plugin-verify-figure": "workspace:*",
     "@examharness/plugin-verify-roundtrip": "workspace:*",
