@@ -286,7 +286,11 @@ export class DynamicConstructorService extends Service implements DynamicConstru
     // 但严格说这不是沙箱——见文件开头的"诚实边界"）
     let moduleOk: ModuleShape
     try {
-      moduleOk = (await import(pathToFileURL(file).href)) as ModuleShape
+      // **URL 上带内容哈希**：题型文件常常是"改完再交"（同一个路径被重写）。
+      // ESM 按 URL 缓存模块——不带哈希的话，第二次交同一个路径就还是**旧代码**在跑，
+      // 而报告已经说了"通过验收并生效"：报告和实际行为对不上，agent 会以为框架在骗它
+      // （真实踩过：agent 反复重交，看到的题面始终是上一版，于是它去查蓝图、查缺口，白烧一轮）。
+      moduleOk = (await import(`${pathToFileURL(file).href}?rev=${fnv1a(source)}`)) as ModuleShape
     } catch (error) {
       return report(false, covers, 0, 0, [`通过验收后却加载不了：${error instanceof Error ? error.message : String(error)}`])
     }

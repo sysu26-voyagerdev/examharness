@@ -140,6 +140,21 @@ export function construct(slot, seed) {
 }
 `
 
+/** 同一个路径被改写的两版（用来钉住"重交生效的是新代码"） */
+const rewriteModule = (tag: string): string => `
+export const kind = 'dynamic/rewrite'
+export const covers = ['最值']
+export function construct(slot, seed) {
+  const x = 1 + (seed % 5)
+  return {
+    params: { x, y: 2 * x },
+    stem: '${tag}：求 ' + x + ' 的两倍',
+    answer: '${tag}=' + (2 * x),
+    checks: [{ expr: 'y - 2*x', at: { x, y: 2 * x }, expect: 0 }],
+  }
+}
+`
+
 async function boot(): Promise<Context> {
   const ctx = new Context()
   ctx.baseUrl = pathToFileURL(ROOT).href
@@ -276,5 +291,26 @@ describe('agent 在运行时制作新题型', () => {
     expect(item.prose.tex?.stem).toBe(`${String(params.k)}x + 3 > ${String(params.c)}`)
     expect(item.prose.tex?.answer).toBe(`x > ${String(params.x)}`)
     expect(item.prose.tex?.stem).not.toBe(item.prose.tex?.answer)
+  })
+  it('重交同一个路径的题型 → 生效的是新代码（不是缓存里的旧代码）', async () => {
+    writeModule('rewrite', rewriteModule('v1'))
+    const ctx = await boot()
+    await ctx.constructDynamic.loadAll()
+    const slot = {
+      key: 'Z7',
+      knowledge: ['最值'],
+      cognitive: '掌握' as const,
+      type: '解答' as const,
+      difficulty: [0.6, 0.85] as const,
+      score: 10,
+      count: 1,
+    }
+    expect(ctx.construct.generate(slot, 3).witness.answer.startsWith('v1')).toBe(true)
+
+    // 同一个文件改写后重交：验收说的是"生效"，那就必须真的生效
+    writeModule('rewrite', rewriteModule('v2'))
+    const report = await ctx.constructDynamic.loadOne(join(workdir, 'constructors', 'rewrite.mjs'))
+    expect(report.ok).toBe(true)
+    expect(ctx.construct.generate(slot, 3).witness.answer.startsWith('v2')).toBe(true)
   })
 })

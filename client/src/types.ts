@@ -241,7 +241,7 @@ export interface RunView {
   steps: number
   transcript: readonly RunEventView[]
   stored: readonly string[]
-  stopped: 'done' | 'no-llm' | 'stopped'
+  stopped: 'done' | 'no-llm' | 'stopped' | 'error'
   /** 这一轮留下的工作区 */
   workspace?: { name: string; files: readonly WorkspaceFileView[] }
 }

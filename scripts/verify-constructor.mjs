@@ -128,6 +128,48 @@ function discriminating(check) {
   return '把参数怎么改它都成立——没有在检验任何东西'
 }
 
+/** 契约的字段类型：**每个可选字段都查**，因为下游拿到的就是它们 */
+function contractProblems(built) {
+  const problems = []
+  const text = (name, value) => {
+    if (value !== undefined && typeof value !== 'string') problems.push(`${name} 必须是字符串（你给的是 ${Array.isArray(value) ? '数组' : typeof value}）`)
+  }
+  const texts = (name, value, hint) => {
+    if (value === undefined) return
+    if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
+      problems.push(`${name} 必须是**字符串数组**${hint === undefined ? '' : `（${hint}）`}：你给的是 ${Array.isArray(value) ? '数组里有非字符串' : typeof value}`)
+    }
+  }
+  text('stemTex', built.stemTex)
+  text('answerTex', built.answerTex)
+  text('goal', built.goal)
+  texts('givens', built.givens, '一条一个条件')
+  texts('solution', built.solution, '一步一条')
+  texts('solutionTex', built.solutionTex, '一步一条，不是一整段字符串')
+  if (built.steps !== undefined) {
+    if (!Array.isArray(built.steps) || built.steps.some((step) => typeof step?.text !== 'string' || typeof step?.basis !== 'string')) {
+      problems.push('steps 必须是 [{ text, basis }]（每条都要说明依据）')
+    }
+  }
+  if (built.options !== undefined) {
+    if (!Array.isArray(built.options) || built.options.some((option) => typeof option?.key !== 'string' || typeof option?.text !== 'string')) {
+      problems.push('options 必须是 [{ key, text }]')
+    }
+  }
+  if (built.checks !== undefined) {
+    for (const check of built.checks) {
+      if (typeof check?.expr !== 'string' || typeof check?.expect !== 'number' || check?.at === undefined || typeof check.at !== 'object') {
+        problems.push('checks 每一条都要是 { expr: 字符串, at: 对象, expect: 数字 }')
+        break
+      }
+    }
+  }
+  if (built.figure !== undefined && (typeof built.figure !== 'object' || built.figure === null || Array.isArray(built.figure))) {
+    problems.push('figure 必须是对象（图形规范）')
+  }
+  return problems
+}
+
 const problems = []
 const heapMb = () => Math.round(process.memoryUsage().heapUsed / 1024 / 1024)
 const done = (extra = {}) => {
@@ -187,6 +229,12 @@ for (let index = 0; index < samples && problems.length === 0; index += 1) {
   if (typeof built?.answer !== 'string' || built.answer.trim() === '') problems.push('answer 必须是字符串')
   if (built?.params === undefined || typeof built.params !== 'object') problems.push('没有 params：闸门与验收都靠它')
   if (!Array.isArray(built?.checks) || built.checks.length === 0) problems.push('没有 checks：题型必须声明"要被核对的数学事实"')
+  if (problems.length > 0) break
+
+  // **契约的每个字段都要看类型**：少看一眼，坏值就会走到下游去崩（真实踩过：
+  // solutionTex 写成一整段字符串 → 界面渲染时 (tex.solution ?? []).map 抛错 →
+  // 未处理的拒绝把正在跑的那一轮带走，界面再也起不了新一轮）。
+  problems.push(...contractProblems(built))
   if (problems.length > 0) break
 
   const texts = [built.stem, built.answer, ...(Array.isArray(built.solution) ? built.solution.map(String) : [])]

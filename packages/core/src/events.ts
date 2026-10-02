@@ -36,7 +36,7 @@ declare module '@deepseek-ai/cordis' {
     /** 一轮结束（emit，仅广播；界面据此收尾并刷新数据） */
     'run:done'(payload: {
       runId: string
-      stopped: 'done' | 'no-llm' | 'stopped'
+      stopped: 'done' | 'no-llm' | 'stopped' | 'error'
       steps: number
       stored: readonly string[]
       workspace: string

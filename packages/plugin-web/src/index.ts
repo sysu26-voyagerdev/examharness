@@ -128,7 +128,7 @@ export function renderPaperHtml(meta: SessionMeta, items: readonly Item[], figur
       (item, index) =>
         `<div class="a"><b>${String(index + 1)}.</b> ${renderMathInText(item.prose.answerText)}<ol>${item.prose.solution
           .map((step, stepIndex) => {
-            const tex = item.prose.tex?.solution?.[stepIndex]
+            const tex = texSteps(item)[stepIndex]
             return `<li>${renderMathInText(step)}${tex === undefined ? '' : `<div class="formula">${texToMathml(tex)}</div>`}</li>`
           })
           .join('')}</ol></div>`,
@@ -214,6 +214,16 @@ function readBody(req: IncomingMessage): Promise<unknown> {
     })
     req.on('error', fail)
   })
+}
+
+/**
+ * 解析里的一步步 LaTeX。**类型上要挡一道**：题库里可能留着早期不合契约的题
+ * （例如 solutionTex 曾写成一整段字符串），一条坏数据不该把整个状态接口带崩——
+ * 真实踩过：未处理的拒绝把正在跑的那一轮带走，界面再也起不了新一轮。
+ */
+function texSteps(item: Item): readonly string[] {
+  const value: unknown = item.prose.tex?.solution
+  return Array.isArray(value) ? value.filter((part): part is string => typeof part === 'string') : []
 }
 
 function send(res: ServerResponse, status: number, body: unknown): void {
@@ -1006,7 +1016,7 @@ function summarizeWith(item: Item, figureSvg: string): Record<string, unknown> {
           tex: {
             ...(tex.stem === undefined ? {} : { stem: tex.stem, stemMath: texToHtml(tex.stem) }),
             ...(tex.answer === undefined ? {} : { answer: tex.answer, answerMath: texToHtml(tex.answer) }),
-            solution: (tex.solution ?? []).map((part) => ({ tex: part, math: texToHtml(part) })),
+            solution: texSteps(item).map((part) => ({ tex: part, math: texToHtml(part) })),
           },
         }),
     figure: figureSvg,

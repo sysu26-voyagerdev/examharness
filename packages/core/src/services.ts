@@ -188,7 +188,7 @@ export interface WorkbenchRun {
   steps: number
   transcript: readonly WorkbenchEvent[]
   stored: readonly string[]
-  stopped: 'done' | 'no-llm' | 'stopped'
+  stopped: 'done' | 'no-llm' | 'stopped' | 'error'
   /** 这一轮留下的工作区（模型没干活时是空的，但目录还是在） */
   workspace?: { name: string; files: readonly WorkspaceFile[] }
 }

@@ -93,7 +93,12 @@ function checkTexLayer(item: Item): Verdict | undefined {
         gate: name,
         reason: `${label}的 LaTeX 编译不过：${result.error}`,
         fixable: true,
-        hint: '数学由构造给出，别自己改写公式；只把它嵌进句子里',
+        // 最常见的错法：把正文连同 $…$ 定界符一起塞进公式字段。
+        // 这里必须说清怎么改，否则 agent 只会换个写法再撞一次。
+        hint: fragment.includes('$')
+          ? '这个字段是**数学模式下的公式片段**，不要再带 $ 定界符（也别把"已知抛物线…与 x 轴交于…"整句塞进来）：' +
+            '正文留在题面里，这里只写给公式本身（例如 y=-2(x-4)^{2}-2）'
+          : '数学由构造给出，别自己改写公式；只把它嵌进句子里',
       }
     }
   }
