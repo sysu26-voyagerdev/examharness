@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Service, type Context } from "@deepseek-ai/cordis";
-import { numberSlots, parseJsonObject } from "@examharness/core";
+import { numberSlots, parseJsonObject, signedByAll } from "@examharness/core";
 import type {
   Blueprint,
   Cognitive,
@@ -189,6 +189,14 @@ const TOOLS: readonly LlmToolSpec[] = [
       properties: { candidateId: { type: "string" } },
       required: ["candidateId"],
     },
+  },
+  {
+    name: "reaudit_paper",
+    description:
+      "把卷子上**检查过期**的题重新送一遍闸门（闸门后来加了判据，老题要重新过一遍）。" +
+      "通过的就地更新签字；没通过的按它给的原因修（补图 / 改掉题面里的「如图」/ 重造一道）。" +
+      "老师问「这些题还能用吗」「重新检查一遍」时用它。",
+    parameters: { type: "object", properties: {}, required: [] },
   },
   {
     name: "quick_question",
@@ -1612,6 +1620,43 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       };
     }
 
+    if (tool === "reaudit_paper") {
+      const session = this.ctx.get("session");
+      const latest = session?.latest();
+      if (session === undefined || latest === undefined) {
+        return { kind: "tool", text: "reaudit_paper：还没有卷子", payload: { error: "没有卷子" } };
+      }
+      const gates = this.ctx.bank.gates?.() ?? [];
+      const stale = latest.bindings
+        .map((binding) => this.ctx.bank.get(binding.itemId))
+        .filter((item): item is Item => item !== undefined && !signedByAll(item, gates));
+      if (stale.length === 0) {
+        return {
+          kind: "tool",
+          text: "reaudit_paper：卷子上没有过期的检查——每道题都签的是现在这版规则",
+          payload: { ok: true, stale: 0 },
+        };
+      }
+      const passed: string[] = [];
+      const failed: string[] = [];
+      for (const item of stale) {
+        // oxlint-disable-next-line no-await-in-loop -- 重审要一道一道来：闸门会读题库现状
+        const result = await this.ctx.bank.submit(item);
+        if (result.ok) passed.push(item.id);
+        else failed.push(`${item.id}（第 ${String(item.slot.key)} 题）：${result.verdict.reason}`);
+      }
+      return {
+        kind: "gate",
+        text:
+          `reaudit_paper：过期 ${String(stale.length)} 道，重审通过 ${String(passed.length)} 道` +
+          (failed.length === 0
+            ? "——卷子上这些题都还站得住。"
+            : `；没通过 ${String(failed.length)} 道：\n${failed.map((line) => `  · ${line}`).join("\n")}\n` +
+              "按原因修：能给图的补 figureSpec，不需要图的把题面里的「如图」去掉，实在不行重造一道再 place_item。"),
+        payload: { ok: true, stale: stale.length, passed: passed.length, failed },
+      };
+    }
+
     if (tool === "quick_question") {
       const text = String(args.text ?? "").trim();
       if (text === "") {
@@ -1676,8 +1721,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       // 快路（quick_question）造出来的题本来就已经入库了，再 submit 会被去重闸门
       // 当成"重复提交"拦下，agent 于是白跑一轮（真实踩过）。
       const stored = this.ctx.bank.get(item.id);
-      const gates = this.ctx.bank.gates?.() ?? [];
-      const signed = stored !== undefined && gates.every((gate) => stored.evidence[gate] !== undefined);
+      const signed = stored !== undefined && signedByAll(stored, this.ctx.bank.gates?.() ?? []);
       if (signed) {
         item = stored;
       }
@@ -2727,6 +2771,7 @@ const SERIALIZER_PROMPT = [
   "4. 你不负责算答案：answerText 直接用给你的答案；solution 的数值必须与给你的数据一致；",
   "5. 数学式子写成 LaTeX，用 $…$ 包起来（例如 $y=-2(x-1)^{2}+8$）；",
   "5b. **选择题的选项由框架渲染，题面里一个都不要写**：不要写 A./B./C./D.，也不要写选项的内容，",
+  "5c. **不要写「如图」**：图是构造给的（有图才写）。自己加一句「如图」会被闸门拦下——",
   "    题面以「（　　）」结尾即可（题面里再写一遍，卷子上就会出现两套可能不一样的选项）；",
   "6. 不要输出 JSON 以外的任何内容。",
 ].join("\n");
@@ -2805,6 +2850,10 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     "**别再翻上一轮的产物**：工作区里的 out/、tmp/ 是以前的草稿，除非这次任务需要，不要一上来就重读。",
     "**默认动作**：把蓝图里缺的题位补齐，然后 assemble_paper 组卷。除非简报显示题位已齐、卷子已组好，",
     '   否则不要问"你要哪一种"——直接干。',
+    "**「再出一版」「换一道」不是换种子重抽**：那是抽题，抽来抽去还是同一批结构。" +
+    "   正确做法是**重新设计**：先看真题里这个考点怎么问（material_search），再决定这一道的情境与问法" +
+    "（必要时 constructor_write 写/改题型让结构真的不一样），然后 construct_item / quick_question 造出来，" +
+    "用 place_item 放上卷子。整卷换一版时也一样：设计变了才叫新卷子，只换数字不叫。",
     "**老师口头改设定**（「第 2 题换成圆」「大题改成 3 道」「别考动点」）用 change_setting：" +
     "   它按**卷面上的第几题**认，改的是这一张卷子自己的设定（不动别人的卷子）；" +
     "   改完要把受影响的题重出（quick_question / construct_item）再 place_item——只改设定不动卷子等于没改。",
@@ -2821,6 +2870,9 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     "      换问法（求解析式／求顶点／求面积／判断结论…），不要「一个句式换数字」——",
     "      验收会数：30 个种子只造出 1 种结构（抹掉数字后一样）的模块会被判「这不是题型」；",
     "   3) **分量要对**：8 分以上的解答题至少 2 问、12 分以上至少 3 问（用 goals 声明每一问）；",
+    "   3b) **几何题要么给图、要么别写「如图」**：题面里写「如图／见图」就必须给 figureSpec（框架按 spec 画图，"
+    + "        图必须与条件一致、不误导）；给不了图就把题面写成自足的（「点 A、B、C、D 都在 ⊙O 上…」），"
+    + "        不要指着一个不存在的东西——闸门会拦，而且这种题学生真的做不了；",
     "      选择题必须给四个选项（给 3 个 distractors 典型错解，正确项由框架用构造答案生成）；",
     "   4) 验收不通过就按它给的问题改，直到通过（检验点必须能区分对错，恒等式会被判无效）；",
     "   5) 再 assemble_paper 组卷，看缺口是否减少；还有缺口就回到第 1 步。",

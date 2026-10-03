@@ -10,8 +10,10 @@ import Alert from '@mui/material/Alert'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
+import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
 import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
@@ -63,6 +65,10 @@ export function PaperPage(): React.JSX.Element {
   const [editingBlueprint, setEditingBlueprint] = useState(false)
   const [revising, setRevising] = useState<{ slot: string; item: ItemView } | null>(null)
   const [versionsOpen, setVersionsOpen] = useState(false)
+  const [exportAt, setExportAt] = useState<HTMLElement | null>(null)
+  /** 卷名就地改（列表里认路靠它） */
+  const [renaming, setRenaming] = useState(false)
+  const [titleDraft, setTitleDraft] = useState('')
 
   const versions = session?.versions ?? []
   const latest = versions.at(-1)
@@ -115,14 +121,6 @@ export function PaperPage(): React.JSX.Element {
     setViewVersion(null)
   }
 
-  const regenerateAll = useCallback((): void => {
-    void app.guard('assemble', async () => {
-      await api.assemble('再出一版')
-      setViewVersion(null)
-      await app.reload()
-    })
-  }, [app])
-
   useEffect(() => {
     setViewVersion(null)
   }, [session?.meta.id])
@@ -131,7 +129,14 @@ export function PaperPage(): React.JSX.Element {
     <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', bgcolor: 'action.hover' }}>
       <PaperView
         version={shown}
-        paperTitle={session?.blueprint.paper.title ?? '试卷'}
+        paper={session?.blueprint.paper ?? { title: '（还没定卷名）', totalScore: 0, minutes: 0, className: '' }}
+        onPatchPaper={(patch) =>
+          void app.guard('paper-header', async () => {
+            const current = await api.getBlueprint()
+            await api.patchBlueprint({ paper: { ...current.blueprint.paper, ...patch } }, current.revision)
+            await app.reload()
+          })
+        }
         rows={rows}
         changes={shown === undefined ? [] : diffVersions(versions[shown.version - 2], shown)}
         frozen={frozen}
@@ -147,35 +152,37 @@ export function PaperPage(): React.JSX.Element {
             await app.reload()
           })
         }
-        onRegenerate={(slotKey) =>
-          void app.guard(`regen:${slotKey}`, async () => {
-            const result = await api.regenerate(slotKey)
-            if (!result.ok) throw new Error(result.reason ?? '这道题没能重做，换个要求再试')
-            setViewVersion(null)
-            await app.reload()
-          })
-        }
         onRevise={(slotKey, item) => setRevising({ slot: slotKey, item })}
         onConfirm={(itemId) =>
           void app.guard(`confirm:${itemId}`, async () => {
             await api.confirmItem(itemId, '老师')
             await app.reload()
+            app.notify('签过字了：重组卷不会换掉这一道')
           })
         }
-        onPatchText={(itemId, stem) => api.patchItem(itemId, { stem })}
+        onReaudit={() =>
+          void app.ask(
+            '把卷子上检查过期的题重新过一遍：用 reaudit_paper 送审，过不了的按原因修（补图，或把题面里的「如图」去掉），修好放回原来的位置',
+          )
+        }
+        onPatchText={async (itemId, stem) => {
+          const result = await api.patchItem(itemId, { stem })
+          if (result.ok) app.notify('改好了，检查也过了')
+          return result
+        }}
         onDelete={(slotKey) =>
           void app.guard(`clear:${slotKey}`, async () => {
             await api.clearSlot(slotKey)
             await app.reload()
+            app.notify('从卷子上拿掉了（想回来说一句「退回上一版」）')
           })
         }
-        onAssemble={regenerateAll}
       />
     </Box>
   )
 
   const agent = (
-    <Box sx={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+    <Box data-print-hide sx={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ flex: 1, minHeight: 0 }}>
         <AgentPane
           entries={entries}
@@ -201,7 +208,42 @@ export function PaperPage(): React.JSX.Element {
     <Box sx={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       {/* 这一张卷子的动词：少而稳定，其余全靠说话 */}
       <Stack direction="row" spacing={1} sx={{ px: 2, py: 0.75, alignItems: 'center', borderBottom: 1, borderColor: 'divider' }} data-print-hide>
-        <Typography variant="subtitle2">{session?.meta.title ?? '（没有卷子）'}</Typography>
+        {renaming ? (
+          <TextField
+            size="small"
+            autoFocus
+            value={titleDraft}
+            onChange={(event) => setTitleDraft(event.target.value)}
+            onBlur={() => {
+              const next = titleDraft.trim()
+              setRenaming(false)
+              if (next === '' || next === session?.meta.title) return
+              void app.guard('rename', async () => {
+                await api.updateSession({ title: next })
+                await app.reload()
+                app.notify('卷名改好了')
+              })
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') event.currentTarget.blur()
+              if (event.key === 'Escape') setRenaming(false)
+            }}
+            sx={{ width: 260 }}
+          />
+        ) : (
+          <Tooltip title="点一下改卷名">
+            <Typography
+              variant="subtitle2"
+              onClick={() => {
+                setTitleDraft(session?.meta.title ?? '')
+                setRenaming(true)
+              }}
+              sx={{ cursor: 'text', '&:hover': { textDecoration: 'underline dotted' } }}
+            >
+              {session?.meta.title ?? '（没有卷子）'}
+            </Typography>
+          </Tooltip>
+        )}
         <Chip size="small" variant="outlined" label={session?.meta.className ?? ''} />
         {frozen && <Chip size="small" color="warning" variant="outlined" label="已定稿" />}
         {viewingOld && (
@@ -210,9 +252,6 @@ export function PaperPage(): React.JSX.Element {
         <Box sx={{ flex: 1 }} />
         <Button size="small" startIcon={<SettingsOutlinedIcon />} onClick={() => setEditingBlueprint(true)}>
           设定
-        </Button>
-        <Button size="small" variant="outlined" disabled={frozen || app.busyWith('assemble')} onClick={regenerateAll}>
-          再出一版
         </Button>
         <Button size="small" startIcon={<HistoryOutlinedIcon />} disabled={versions.length === 0} onClick={() => setVersionsOpen((value) => !value)}>
           版本
@@ -228,16 +267,42 @@ export function PaperPage(): React.JSX.Element {
         >
           体检
         </Button>
+        {/* 导出：给的是"卷子能怎么拿出去"，不是一堆格式 */ }
         <Button
           size="small"
           variant="contained"
           disableElevation
           startIcon={<DownloadOutlinedIcon />}
           disabled={versions.length === 0}
-          href={api.exportUrl('html')}
+          href={api.exportUrl('docx', { answers: false })}
         >
-          导出
+          导出 Word
         </Button>
+        <Tooltip title="其他格式">
+          <IconButton size="small" disabled={versions.length === 0} onClick={(event) => setExportAt(event.currentTarget)}>
+            <MoreVertIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
+        <Menu anchorEl={exportAt} open={exportAt !== null} onClose={() => setExportAt(null)}>
+          <MenuItem
+            onClick={() => {
+              setExportAt(null)
+              window.print()
+            }}
+          >
+            打印 / 存成 PDF
+          </MenuItem>
+          <MenuItem component="a" href={api.exportUrl('docx', { answers: true })} onClick={() => setExportAt(null)}>
+            Word：试卷 + 参考答案
+          </MenuItem>
+          <Divider />
+          <MenuItem component="a" href={api.exportUrl('html')} target="_blank" rel="noreferrer" onClick={() => setExportAt(null)}>
+            网页（.html，带图与公式）
+          </MenuItem>
+          <MenuItem component="a" href={api.exportUrl('md')} target="_blank" rel="noreferrer" onClick={() => setExportAt(null)}>
+            Markdown（.md）
+          </MenuItem>
+        </Menu>
       </Stack>
 
       {versionsOpen && versions.length > 0 && (
@@ -287,6 +352,7 @@ export function PaperPage(): React.JSX.Element {
                     await api.restoreVersion(shown?.version ?? 0)
                     setViewVersion(null)
                     await app.reload()
+                    app.notify(`退回到第 ${String(shown?.version ?? 0)} 版了`)
                   })
                 }
               >
@@ -323,6 +389,7 @@ export function PaperPage(): React.JSX.Element {
           <>
             <Sash orientation="vertical" onPointerDown={panes.beginDrag('right')} onDoubleClick={() => panes.reset('right')} />
             <Box
+              data-print-hide
               sx={{
                 width: panes.panes.right,
                 flexShrink: 0,
@@ -387,9 +454,14 @@ export function PaperPage(): React.JSX.Element {
           busy={app.busyWith('regen') || app.busyWith('confirm')}
           onClose={() => setRevising(null)}
           onRevise={async (slotKey, instruction) => {
-            await api.reviseItem(slotKey, instruction)
+            const result = await api.reviseItem(slotKey, instruction)
             setViewVersion(null)
             await app.reload()
+            app.notify(
+              result.interjected === true
+                ? '它正在忙：这句已经插给它了，下一步就动手'
+                : '交给它了——它会重新设计这一道，做好直接放回卷子上',
+            )
           }}
           onPatch={api.patchItem}
         />
@@ -404,11 +476,6 @@ export function PaperPage(): React.JSX.Element {
         />
       )}
 
-      {rows.length === 0 && shown === undefined && (
-        <Alert severity="info" icon={<AutoAwesomeIcon />} sx={{ m: 2 }} data-print-hide>
-          这份卷子还是空的。下边那句说一句就行（"初三二次函数，一道选择两道大题"），它会先给设计和题。
-        </Alert>
-      )}
     </Box>
   )
 }

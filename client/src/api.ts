@@ -75,8 +75,13 @@ export const getBank = (query: BankQuery = {}): Promise<BankView> => {
 }
 
 /** 改这道题：把老师的意图交给 agent 重造（数值与答案仍由构造给出） */
-export const reviseItem = (slot: string, instruction: string): Promise<{ runId: string; slot: string }> =>
-  send('POST', '/api/session/revise', { slot, instruction }).then((r) => json<{ runId: string; slot: string }>(r))
+export const reviseItem = (
+  slot: string,
+  instruction: string,
+): Promise<{ runId: string; slot: string; interjected?: boolean }> =>
+  send('POST', '/api/session/revise', { slot, instruction }).then((r) =>
+    json<{ runId: string; slot: string; interjected?: boolean }>(r),
+  )
 
 /** 改文字：老师直接改题面/答案/解析（改的是说法，不是数学） */
 export const patchItem = (
@@ -270,7 +275,11 @@ export const interjectRun = (runId: string, text: string): Promise<{ ok: boolean
 export const stopRun = (runId: string): Promise<{ ok: boolean }> =>
   send('POST', '/api/run/stop', { runId }).then((r) => json<{ ok: boolean }>(r))
 
-export const exportUrl = (format: 'html' | 'md'): string => `/api/export?format=${format}`
+export const exportUrl = (format: 'html' | 'md' | 'docx', options: { answers?: boolean } = {}): string => {
+  const params = new URLSearchParams({ format })
+  if (options.answers === true) params.set('answers', '1')
+  return `/api/export?${params.toString()}`
+}
 
 /** 订阅实时事件。返回退订函数——组件卸载时必须调用，否则 EventSource 泄漏 */
 export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: RunSignal) => void): () => void {

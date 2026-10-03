@@ -9,7 +9,7 @@ import type {
   PaperSlot,
   SlotSpec,
 } from '@examharness/core'
-import { fnv1a, shapeOf } from '@examharness/core'
+import { fnv1a, shapeOf, signedByAll } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -213,11 +213,6 @@ export class PaperService extends Service implements PaperApi {
     if (item === undefined) return 0
     return (item.slot.difficulty[0] + item.slot.difficulty[1]) / 2
   }
-}
-
-/** 这道题有没有被所有现役闸门签过字（见 BankApi.declareGate） */
-function signedByAll(item: Item, gates: readonly string[]): boolean {
-  return gates.every((gate) => item.evidence[gate] !== undefined)
 }
 
 export function apply(ctx: Context, config: PaperConfig): void {

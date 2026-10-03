@@ -15,6 +15,7 @@ import * as partsGate from '@examharness/plugin-verify-parts'
 import * as questionGate from '@examharness/plugin-verify-question'
 import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
+import { signedByAll } from '@examharness/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { learnedClosure } from './helpers/learned.js'
 
@@ -209,8 +210,8 @@ describe('选择题闸门', () => {
 
   it('闸门会向题库报到，没被现役闸门签过字的旧题不许直接复用', async () => {
     const ctx = await boot()
-    expect(ctx.bank.gates?.()).toContain('parts')
-    expect(ctx.bank.gates?.()).toContain('options')
+    expect(ctx.bank.gates?.().map((gate) => gate.name)).toContain('parts')
+    expect(ctx.bank.gates?.().map((gate) => gate.name)).toContain('options')
 
     // 一道"当年入库"的题：证据里没有 verify-parts 的签字
     const item = withGoals(await itemFor('解答', 9), ['求对称轴'])
@@ -220,8 +221,8 @@ describe('选择题闸门', () => {
       evidence: { scope: { pass: true }, symbolic: { pass: true }, dedup: { pass: true } },
     }
     const gates = ctx.bank.gates?.() ?? []
-    const signed = gates.every((gate) => legacy.evidence[gate] !== undefined)
-    expect(signed).toBe(false)
+    // 判据统一在 core：签过字 = 每道现役闸门都签过，**且签的是现在这版规则**
+    expect(signedByAll(legacy, gates)).toBe(false)
   })
 })
 

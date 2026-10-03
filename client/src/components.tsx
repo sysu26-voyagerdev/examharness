@@ -176,6 +176,7 @@ const EXAMPLES: readonly string[] = [
   '出一份二次函数的课后作业，20 分钟',
   '再加一道圆的选择题，3 分',
   '这一版太难了，换简单点',
+  '整卷换一版：情境生活化一点',
 ]
 
 /**
@@ -206,6 +207,8 @@ export function Timeline({
   const boxRef = useRef<HTMLDivElement | null>(null)
   const stickRef = useRef(true)
   const [open, setOpen] = useState<readonly string[]>([])
+  /** 手动折起来的那些块（默认展开最近一块，收起来要能收） */
+  const [closed, setClosed] = useState<readonly string[]>([])
 
   useEffect(() => {
     const box = boxRef.current
@@ -256,31 +259,40 @@ export function Timeline({
     <Box ref={boxRef} sx={{ height: '100%', overflowY: 'auto', px: 1.25, py: 1 }}>
       {blocks.map((block, index) => {
         const current = running && block.id === runningId
-        // 默认展开**最近那一块**（刚发生的事才是老师要看的），更早的折成一行
+        // 默认展开**最近那一块**（刚发生的事才是老师要看的），更早的折成一行；
+        // 但"点一下收起来"必须有效——所以记的是**手动收起的那些**，而不是"手动展开的那些"
         const latest = index === blocks.length - 1
-        const expanded = current || open.includes(block.id) || (block.parent === undefined && latest)
+        const expanded = current || (!closed.includes(block.id) && (open.includes(block.id) || (block.parent === undefined && latest)))
         return (
           <Box key={block.id} sx={{ mb: 1.25 }}>
             <Stack
-              direction="row"
-              spacing={1}
-              onClick={() => setOpen((previous) => (previous.includes(block.id) ? previous.filter((id) => id !== block.id) : [...previous, block.id]))}
-              sx={{ alignItems: 'center', cursor: 'pointer', px: 0.5, py: 0.5, borderRadius: 1, '&:hover': { bgcolor: 'action.hover' } }}
+              onClick={() =>
+                setClosed((previous) =>
+                  previous.includes(block.id) ? previous.filter((id) => id !== block.id) : [...previous, block.id],
+                )
+              }
+              sx={{ cursor: 'pointer', px: 0.5, py: 0.5, borderRadius: 1, '&:hover': { bgcolor: 'action.hover' } }}
             >
-              {/* 说话人只在真正的"轮"上标（老师/子任务）；"这一版做了什么"不是谁说的话 */}
-              {block.id !== 'earlier' && (
+              {/* 第一行：谁说的 + 说了什么（**一行，截断**，不换行——换行会把整块挤成一坨） */}
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                  {block.parent === undefined ? '老师' : '子任务'}
+                  {block.id === 'earlier' ? '卷子' : block.parent === undefined ? '老师' : '子任务'}
+                </Typography>
+                <Typography variant="body2" sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
+                  {plain(block.title)}
+                </Typography>
+                {current && <Chip size="small" color="primary" label="在做" />}
+                {!current && <Chip size="small" variant="outlined" label="做完了" />}
+                <Typography variant="caption" color="text.disabled" sx={{ whiteSpace: 'nowrap' }}>
+                  {new Date(block.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+                </Typography>
+              </Stack>
+              {/* 第二行：折起来时给出"最后成了什么"（展开时就不必重复） */}
+              {!expanded && (
+                <Typography variant="caption" color="text.disabled" noWrap sx={{ display: 'block', pl: 4.5 }}>
+                  {String(block.entries.length)} 步 · {resultLine(block, translate)}
                 </Typography>
               )}
-              <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>
-                {plain(block.title)}
-              </Typography>
-              {current && <Chip size="small" color="primary" label="在做" />}
-              <Box sx={{ flex: 1 }} />
-              <Typography variant="caption" color="text.disabled">
-                {new Date(block.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-              </Typography>
             </Stack>
             {expanded && (
               <Stack spacing={0.25} sx={{ pl: block.parent === undefined ? 1 : 2.5, mt: 0.25 }}>
@@ -312,6 +324,15 @@ export function Timeline({
       <div ref={endRef} />
     </Box>
   )
+}
+
+/** 折起来的块也让人知道"最后成了什么"（取最后一条记录的第一句） */
+function resultLine(block: RunBlock, translate?: (text: string) => string): string {
+  const last = block.entries.at(-1)
+  if (last === undefined) return ''
+  const text = translate === undefined ? last.text : translate(last.text)
+  const first = (text.split('\n')[0] ?? '').trim()
+  return first.length > 40 ? `${first.slice(0, 40)}…` : first
 }
 
 interface RunBlock {
@@ -486,11 +507,17 @@ export function ReviseDialog({
   const [solution, setSolution] = useState(item.solutionHtml.map((step) => step.replace(/<[^>]+>/g, '')).join('\n'))
   const [note, setNote] = useState('')
 
-  const examples = ['把条件改简单一点', '再加一问求面积', '改成选择题（四个选项）', '情境换成测量教学楼', '数字换成整数、别太大']
+  const examples = [
+    '换一道不一样的（换情境、换问法）',
+    '把条件改简单一点',
+    '再加一问求面积',
+    '改成选择题（四个选项）',
+    '情境换成测量教学楼',
+  ]
 
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="sm">
-      <DialogTitle>改这道题（题位 {slot}）</DialogTitle>
+      <DialogTitle>改这一道</DialogTitle>
       <DialogContent>
         <Tabs value={mode} onChange={(_event, next: 'revise' | 'text') => setMode(next)} sx={{ mb: 2 }}>
           <Tab value="revise" label="改这道题" />
@@ -500,8 +527,8 @@ export function ReviseDialog({
         {mode === 'revise' ? (
           <Stack spacing={1.5}>
             <Typography variant="body2" color="text.secondary">
-              说清楚你想怎么改。数值与答案由构造给出——agent 可以换参数重造、换题型，必要时现写一个题型；
-              重造出来的题照例过检查，过关才放进这个题位。
+               说清楚你想要什么：换情境、加一问、换一道不一样的、改成选择题……都由它重新设计再造一道。
+              数值与答案由构造给出（它不会替你编数），重造出来的题照例过检查，过关才放进这一道。
             </Typography>
             <TextField
               autoFocus
@@ -611,6 +638,10 @@ export function formatDifficulty(range: readonly [number, number] | undefined): 
 }
 
 function statusOf(item: ItemView, binding: SlotBindingView): { text: string; tone: 'ok' | 'warn'; hint: string } {
+  // 检查过期先于其它状态：闸门加了判据之后，旧签字不算数——不能假装它还合格
+  if (item.stale === true) {
+    return { text: '要重查', tone: 'warn', hint: '这道题的检查是旧规则的（闸门后来加了判据），要重新过一遍' }
+  }
   if (binding.confirmedBy !== null) {
     return { text: '已确认', tone: 'ok', hint: `${binding.confirmedBy} 已确认这道题` }
   }
@@ -731,26 +762,27 @@ export function groupByType(rows: readonly { binding: SlotBindingView; item: Ite
 
 export function PaperView({
   version,
-  paperTitle,
+  paper,
   rows,
   changes,
   frozen,
   viewingOld,
   busy,
   bankSize,
-  onRegenerate,
   onRevise,
   onConfirm,
-  onAssemble,
   onSyncHeader,
+  onPatchPaper,
   onPatchText,
   onDelete,
+  onReaudit,
   answers,
   chrome = 'full',
 }: {
   version: VersionView | undefined
-  /** 卷名（来自会话的蓝图） */
-  paperTitle: string
+  /** 卷头（卷名/班级/时长/满分）：**在文档里点着改**，改的是这一张卷子的设定 */
+  paper: { title: string; totalScore: number; minutes: number; className: string; studentFields?: boolean }
+  onPatchPaper: (patch: Partial<{ title: string; minutes: number; className: string; studentFields: boolean }>) => void
   bankSize: number
   onSyncHeader: (totalScore: number) => void
   rows: readonly { binding: SlotBindingView; item: ItemView }[]
@@ -758,15 +790,15 @@ export function PaperView({
   frozen: boolean
   viewingOld: boolean
   busy: boolean
-  onRegenerate: (slotKey: string) => void
-  /** 打开"改这道题"（说一句要求，交给 agent 重造） */
+  /** 打开"改这一道"（说一句要求，交给 agent 重造） */
   onRevise: (slotKey: string, item: ItemView) => void
   onConfirm: (itemId: string) => void
-  onAssemble: () => void
   /** 就地改题面（改说法） */
   onPatchText: (itemId: string, stem: string) => Promise<{ ok: boolean; reason?: string; gate?: string }>
   /** 从卷子上拿掉这一道 */
   onDelete: (slotKey: string) => void
+  /** 把"检查过期"的题重新送审（闸门加了判据之后，旧签字不算数） */
+  onReaudit: () => void
   /** 由外面控制"要不要连着答案看"（底栏的 试卷|答案 视图标签） */
   answers?: boolean
   /**
@@ -789,16 +821,14 @@ export function PaperView({
             ? '这份卷子已经定稿。'
             : '在右边那一栏说一句你要什么——它会先给设计和题，你再一句句改。'}
         </Typography>
-        {!frozen && (
-          <Button variant="outlined" onClick={onAssemble}>
-            先按设定出一版
-          </Button>
-        )}
+
       </Box>
     )
   }
 
   const groups = groupByType(rows)
+  /** 检查过期的有几道（闸门加了判据之后，旧签字不算数） */
+  const staleCount = rows.filter(({ item }) => item.stale === true).length
 
   return (
     <Box sx={{ px: { xs: 1, md: 2.5 }, py: 2 }}>
@@ -826,9 +856,7 @@ export function PaperView({
         <Button size="small" variant="outlined" onClick={() => window.print()}>
           打印
         </Button>
-        <Button size="small" variant="outlined" disabled={frozen} onClick={onAssemble}>
-          再出一版
-        </Button>
+
       </Stack>
 
       {version.scoreGap > 0 && (
@@ -843,7 +871,24 @@ export function PaperView({
             </Button>
           }
         >
-          这份卷子 {String(version.totalScore)} 分，蓝图卷头写的是更多分（差 {String(version.scoreGap)} 分）。
+          这份卷子 {String(version.totalScore)} 分，设定里卷头写的是更多分（差 {String(version.scoreGap)} 分）。
+        </Alert>
+      )}
+
+      {staleCount > 0 && (
+        <Alert
+          severity="warning"
+          icon={<ReportOutlinedIcon />}
+          data-print-hide
+          sx={{ mb: 1.5 }}
+          action={
+            <Button color="inherit" size="small" disabled={busy} onClick={onReaudit}>
+              重新检查一遍
+            </Button>
+          }
+        >
+          有 {String(staleCount)} 道题的检查是旧规则的（闸门后来加了判据，比如「题面说『如图』就必须有图」）。
+          过得了的就地更新；过不了的它会按原因修（补图 / 去掉「如图」/ 重造）。
         </Alert>
       )}
 
@@ -864,6 +909,7 @@ export function PaperView({
 
       {/* 卷面：一张纸的样子——标题居中、按题型分节、题号连着走 */}
       <Paper
+        data-paper
         elevation={0}
         sx={{
           // 左边距留出 46px 给"这一道"的按钮（Word 的批注按钮也在边距里）；
@@ -878,14 +924,7 @@ export function PaperView({
           '& svg': { maxWidth: '100%', height: 'auto' },
         }}
       >
-        <Box sx={{ textAlign: 'center', mb: 3 }}>
-          <Typography sx={{ fontSize: 20, fontWeight: 700, letterSpacing: '0.04em' }}>
-            {paperTitle}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-            满分 {String(version.totalScore)} 分　共 {String(version.bindings.length)} 题
-          </Typography>
-        </Box>
+        <PaperHeader paper={paper} totalScore={version.totalScore} count={version.bindings.length} onPatch={onPatchPaper} />
 
         {groups.map((group) => {
           let running = 0
@@ -905,7 +944,6 @@ export function PaperView({
                       showAnswer={showAnswers}
                       busy={busy}
                       frozen={frozen}
-                      onRegenerate={onRegenerate}
                       onRevise={onRevise}
                       onConfirm={onConfirm}
                       onPatchText={onPatchText}
@@ -957,7 +995,6 @@ function QuestionBlock({
   showAnswer,
   busy,
   frozen,
-  onRegenerate,
   onRevise,
   onConfirm,
   onPatchText,
@@ -970,7 +1007,6 @@ function QuestionBlock({
   showAnswer: boolean
   busy: boolean
   frozen: boolean
-  onRegenerate: (slotKey: string) => void
   onRevise: (slotKey: string, item: ItemView) => void
   onConfirm: (itemId: string) => void
   /** 就地改题面（改的是说法；改了数字就得重造——见编辑器里的说明） */
@@ -1114,7 +1150,7 @@ function QuestionBlock({
                 ))}
               </Box>
               <Button size="small" sx={{ mt: 0.5, px: 0 }} onClick={() => setDetail((previous) => !previous)}>
-                {detail ? '收起检查结果' : '检查结果'}
+                {detail ? '收起体检' : '检查' }
               </Button>
               {detail && (
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
@@ -1208,16 +1244,7 @@ function QuestionBlock({
               onRevise(binding.slot, item)
             }}
           >
-            改这一道…（说一句要求，交给 agent 重造）
-          </MenuItem>
-          <MenuItem
-            disabled={frozen}
-            onClick={() => {
-              setMenuAt(null)
-              onRegenerate(binding.slot)
-            }}
-          >
-            换一道（机器再出一道）
+            改这一道…（说一句要求：换情境、加一问、换一道不一样的，都由它重造）
           </MenuItem>
           {item.lifecycle === 'needs_review' && binding.confirmedBy === null && (
             <MenuItem
@@ -1246,6 +1273,151 @@ function QuestionBlock({
   )
 }
 
+/**
+ * 卷头：**在纸面上点着改**（卷名、班级、时长、学生填写栏）。
+ *
+ * 为什么放在文档里而不是只有"设定"对话框里：老师看着卷子的时候才发现"名字不对""少一行姓名"，
+ * 这时候让他去翻对话框是反人性的。改完之后写回这一张卷子的设定（不影响别人的卷子）。
+ */
+function PaperHeader({
+  paper,
+  totalScore,
+  count,
+  onPatch,
+}: {
+  paper: { title: string; minutes: number; className: string; studentFields?: boolean }
+  totalScore: number
+  count: number
+  onPatch: (patch: Partial<{ title: string; minutes: number; className: string; studentFields: boolean }>) => void
+}): React.JSX.Element {
+  const [editing, setEditing] = useState<'title' | 'meta' | null>(null)
+  const [title, setTitle] = useState(paper.title)
+  const [className, setClassName] = useState(paper.className)
+  const [minutes, setMinutes] = useState(String(paper.minutes))
+
+  const commit = (): void => {
+    if (editing === 'title') {
+      if (title.trim() !== '' && title !== paper.title) onPatch({ title: title.trim() })
+    }
+    if (editing === 'meta') {
+      const next = Number(minutes)
+      onPatch({
+        ...(className === paper.className ? {} : { className }),
+        ...(Number.isFinite(next) && next > 0 && next !== paper.minutes ? { minutes: next } : {}),
+      })
+    }
+    setEditing(null)
+  }
+
+  if (editing === 'title') {
+    return (
+      <Box sx={{ textAlign: 'center', mb: 3 }} data-print-hide>
+        <TextField
+          autoFocus
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          onBlur={commit}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') event.currentTarget.blur()
+            if (event.key === 'Escape') {
+              setTitle(paper.title)
+              setEditing(null)
+            }
+          }}
+          sx={{ width: '70%', '& input': { textAlign: 'center', fontSize: 20, fontWeight: 700 } }}
+        />
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+          这就是卷子最上面那行名字
+        </Typography>
+      </Box>
+    )
+  }
+
+  if (editing === 'meta') {
+    return (
+      <Box data-print-hide sx={{ textAlign: 'center', mb: 3 }}>
+        <Stack direction="row" spacing={1.5} sx={{ justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap' }}>
+          <TextField
+            autoFocus
+            size="small"
+            label="班级"
+            value={className}
+            onChange={(event) => setClassName(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commit()
+              if (event.key === 'Escape') setEditing(null)
+            }}
+            sx={{ width: 150 }}
+          />
+          <TextField
+            size="small"
+            label="时长（分钟）"
+            value={minutes}
+            onChange={(event) => setMinutes(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') commit()
+              if (event.key === 'Escape') setEditing(null)
+            }}
+            sx={{ width: 130 }}
+          />
+          <Button size="small" variant="contained" disableElevation onClick={commit}>
+            好了
+          </Button>
+        </Stack>
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+          满分 {String(totalScore)} 分由每道题的分值加起来，不用填
+        </Typography>
+      </Box>
+    )
+  }
+
+  return (
+    <Box sx={{ textAlign: 'center', mb: 3 }}>
+      <Tooltip title="点一下改卷名">
+        <Typography
+          onClick={() => {
+            setTitle(paper.title)
+            setEditing('title')
+          }}
+          sx={{ fontSize: 20, fontWeight: 700, letterSpacing: '0.04em', cursor: 'text', '&:hover': { bgcolor: 'action.hover' } }}
+        >
+          {paper.title}
+        </Typography>
+      </Tooltip>
+      <Tooltip title="点一下改班级与时长">
+        <Typography
+          onClick={() => {
+            setClassName(paper.className)
+            setMinutes(String(paper.minutes))
+            setEditing('meta')
+          }}
+          variant="caption"
+          color="text.secondary"
+          sx={{ display: 'inline-block', mt: 0.5, cursor: 'text', '&:hover': { bgcolor: 'action.hover' } }}
+        >
+          {paper.className === '' ? '（没写班级）' : paper.className}　满分 {String(totalScore)} 分　时间{' '}
+          {String(paper.minutes)} 分钟　共 {String(count)} 题
+        </Typography>
+      </Tooltip>
+      {paper.studentFields !== false && (
+        <Typography sx={{ display: 'block', mt: 1.5, fontSize: 14, letterSpacing: '0.1em' }}>
+          学校：＿＿＿＿＿＿　班级：＿＿＿＿＿＿　姓名：＿＿＿＿＿＿　学号：＿＿＿＿＿＿
+        </Typography>
+      )}
+      <Tooltip title={paper.studentFields === false ? '加上"学校/班级/姓名"那一行' : '去掉学生填写那一行'}>
+        <Button
+          size="small"
+          data-print-hide
+          sx={{ mt: 0.5, opacity: 0.5, '&:hover': { opacity: 1 } }}
+          onClick={() => onPatch({ studentFields: paper.studentFields === false })}
+        >
+          {paper.studentFields === false ? '加学生填写栏' : '去掉学生填写栏'}
+        </Button>
+      </Tooltip>
+    </Box>
+  )
+}
+
 export function KnowledgeView({ knowledge, items }: { knowledge: KnowledgeView; items: readonly ItemView[] }): React.JSX.Element {
   const used = new Map<string, number>()
   for (const item of items) for (const key of item.knowledge) used.set(key, (used.get(key) ?? 0) + 1)
@@ -1258,7 +1430,7 @@ export function KnowledgeView({ knowledge, items }: { knowledge: KnowledgeView; 
           <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
             {knowledge.learned.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
-                还没有已学知识点。检查蓝图的设置。
+                还没有已学知识点——这份卷子的设定里换个范围试试。
               </Typography>
             ) : (
               knowledge.learned.map((key) => (

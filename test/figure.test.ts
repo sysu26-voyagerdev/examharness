@@ -12,6 +12,7 @@ import * as dedupPlugin from '@examharness/plugin-verify-dedup'
 import * as figureGate from '@examharness/plugin-verify-figure'
 import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
+import { signedByAll } from '@examharness/core'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { learnedClosure } from './helpers/learned.js'
 
@@ -92,6 +93,48 @@ describe('图形渲染与第四道闸门', () => {
     expect(Object.keys(stored?.evidence ?? {})).toEqual(
       expect.arrayContaining(['symbolic', 'scope', 'dedup', 'figure']),
     )
+  })
+
+  it('题面说「如图」却没有图 → 拦下（库里真实有 124 道这种做不了的题）', async () => {
+    const ctx = await boot()
+    const base = ctx.construct.generate(row(0), 42)
+    // 把图拿掉，题面却还在指图
+    const { figure: _dropped, ...rest } = base
+    const item: Item = {
+      ...rest,
+      prose: { ...rest.prose, stem: `如图，${rest.prose.stem}` },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok).toBe(false)
+    expect(result.ok ? '' : result.verdict.gate).toBe('verify-figure')
+    expect(result.ok ? '' : result.verdict.reason).toContain('没有图')
+  })
+
+  it('没有图、题面也没提图 → 不拦（不是所有题都要图）', async () => {
+    const ctx = await boot()
+    const base = ctx.construct.generate(row(0), 42)
+    const { figure: _dropped, ...rest } = base
+    const result = await ctx.bank.submit(rest)
+    expect(result.ok).toBe(true)
+  })
+
+  it('闸门判据升级后，**老签字自动失效**（旧题会被重新送审）', async () => {
+    const ctx = await boot()
+    const item = ctx.construct.generate(row(0), 42)
+    const stored = await ctx.bank.submit(item)
+    expect(stored.ok).toBe(true)
+    const gates = ctx.bank.gates?.() ?? []
+    const figure = gates.find((gate) => gate.name === 'figure')
+    expect(figure?.rule).toBeGreaterThan(1)
+
+    const signed = ctx.bank.all()[0]
+    if (signed === undefined) throw new Error('没入库')
+    // 现在的签字带着规则版本 → 有效
+    expect(signedByAll(signed, gates)).toBe(true)
+    // 当年那版规则（没有 rule 字段）→ 无效：这就是"闸门加判据后旧题必须重新过一遍"
+    const legacy: Item = { ...signed, evidence: { ...signed.evidence, figure: { pass: true } } }
+    expect(signedByAll(legacy, gates)).toBe(false)
   })
 
   it('点挤成一个点 → distinctPoints 断言失败，闸门拦下', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import SendIcon from '@mui/icons-material/Send'
 import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined'
 import Box from '@mui/material/Box'
@@ -10,6 +10,7 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import { Timeline } from './components.js'
+import { toolLabel } from './log.js'
 import type { LogEntryView, RunAgentView } from './types.js'
 
 /**
@@ -36,20 +37,6 @@ function useSeconds(since: number | undefined): number {
   return since === undefined ? 0 : Math.max(0, Math.round((now - since) / 1000))
 }
 
-/** 实时区：最后几条输出，固定高度（浅字，不抢注意力） */
-const TICKER_LINES = 3
-
-/** 把正在流出来的字切成最后三行（太长就截，保持固定高度） */
-function streamText(stream: { label: string; text: string } | null): readonly string[] {
-  if (stream === null) return []
-  const lines = stream.text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '')
-  if (lines.length === 0) return []
-  return lines.slice(-TICKER_LINES).map((line) => (line.length > 160 ? `${line.slice(-160)}` : line))
-}
-
 export function AgentPane({
   entries,
   running,
@@ -68,18 +55,15 @@ export function AgentPane({
   onExample: (example: string) => void
   onStop: () => void
 }): React.JSX.Element {
-  const seconds = useSeconds(running === null ? undefined : (doing?.at ?? Date.now()))
-  const recent = useMemo(() => {
-    const tail = entries.slice(-TICKER_LINES * 2)
-    const lines: string[] = []
-    for (const entry of tail) {
-      const text = translate(entry.text)
-      const first = (text.split('\n')[0] ?? '').trim()
-      if (first === '') continue
-      lines.push(first.length > 150 ? `${first.slice(0, 150)}…` : first)
-    }
-    return lines.slice(-TICKER_LINES)
-  }, [entries, translate])
+  // 计时用**整轮**起点：以前用"当前工具的开始时间"，每换一个工具就跳回 0:00（看着像卡住）
+  const elapsed = useSeconds(running?.since)
+  const stepSeconds = useSeconds(doing?.at)
+  /** 流的尾巴：每来一段就滚到底（它不是"看历史"的地方，是"看它此刻在写什么"的地方） */
+  const tailRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const box = tailRef.current
+    if (box !== null) box.scrollTop = box.scrollHeight
+  }, [stream])
 
   return (
     <Box sx={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
@@ -105,10 +89,12 @@ export function AgentPane({
         {running !== null && (
           <>
             <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0, flex: 1 }}>
-              {doing === null ? '想事情' : doing.what}
+              {doing === null
+                ? '想事情'
+                : `${toolLabel(doing.what)}（${String(stepSeconds)} 秒）`}
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-              {String(Math.floor(seconds / 60))}:{String(seconds % 60).padStart(2, '0')} · {String(running.steps)} 步
+              整轮 {String(Math.floor(elapsed / 60))}:{String(elapsed % 60).padStart(2, '0')} · {String(running.steps)} 步
             </Typography>
             <Button size="small" startIcon={<StopCircleOutlinedIcon />} onClick={() => onStop()}>
               按停
@@ -133,66 +119,53 @@ export function AgentPane({
         />
       </Box>
 
-      {/* 实时区：固定高度、浅字——不用翻记录也能看到它此刻在做什么 */}
-      <Box
-        data-print-hide
-        sx={{
-          px: 1.5,
-          py: 0.75,
-          height: 68,
-          flexShrink: 0,
-          borderTop: 1,
-          borderColor: 'divider',
-          bgcolor: 'action.hover',
-          overflow: 'hidden',
-        }}
-      >
-        {/* **模型正在写的字**（流式）：固定高度、浅字，最后三行——它每一秒都在动，
-            老师不用翻记录也知道它在写什么（用户："要能实时浅字看到 llm 的流式输出"） */}
-        {(() => {
-          const live = streamText(stream)
-          if (live.length > 0) {
-            return live.map((line, index) => (
-              <Typography
-                key={`live-${String(index)}-${line.slice(0, 10)}`}
-                variant="caption"
-                noWrap
-                sx={{
-                  display: 'block',
-                  lineHeight: 1.6,
-                  fontStyle: 'italic',
-                  color: index === live.length - 1 ? 'text.secondary' : 'text.disabled',
-                }}
-              >
-                {index === 0 ? `${stream?.label ?? '它'}：` : ''}
-                {line}
-              </Typography>
-            ))
-          }
-          if (recent.length === 0) {
-            return (
-              <Typography variant="caption" color="text.disabled">
-                还没开始
-              </Typography>
-            )
-          }
-          return recent.map((line, index) => (
+      {/* **模型正在写的字**：只有它在输出时这一块才存在（闲下来就没有），
+          内容是 LLM 实时流的尾巴，一直往下滚——不是解析出来的步骤，也不是记录。
+          （用户："显示的是 LLM 的实时流的末尾，所以应该是持续滚动的，而不是解析出的步骤"） */}
+      {(running !== null || (stream !== null && stream.text.trim() !== '')) && (
+        <Box
+          data-print-hide
+          sx={{
+            px: 1.5,
+            py: 0.75,
+            height: 76,
+            flexShrink: 0,
+            borderTop: 1,
+            borderColor: 'divider',
+            bgcolor: 'action.hover',
+            overflow: 'hidden',
+            display: 'flex',
+            gap: 0.75,
+          }}
+        >
+          <Typography variant="caption" color="text.disabled" sx={{ whiteSpace: 'nowrap', pt: 0.1 }}>
+            {stream === null ? '它在写' : `${stream.label}`}…
+          </Typography>
+          <Box
+            ref={tailRef}
+            sx={{
+              flex: 1,
+              minWidth: 0,
+              overflowY: 'auto',
+              '&::-webkit-scrollbar': { width: 4 },
+            }}
+          >
             <Typography
-              key={`${String(index)}-${line.slice(0, 12)}`}
               variant="caption"
-              noWrap
               sx={{
                 display: 'block',
+                whiteSpace: 'pre-wrap',
+                overflowWrap: 'anywhere',
+                fontStyle: 'italic',
                 lineHeight: 1.6,
-                color: index === recent.length - 1 ? 'text.secondary' : 'text.disabled',
+                color: 'text.secondary',
               }}
             >
-              {index === recent.length - 1 ? '› ' : '· '}
-              {line}
+              {stream === null || stream.text.trim() === '' ? '它在想…（模型还没吐字）' : stream.text}
             </Typography>
-          ))
-        })()}
-      </Box>
+          </Box>
+        </Box>
+      )}
     </Box>
   )
 }
@@ -242,14 +215,20 @@ export function AgentComposer({
           <SendIcon />
         </IconButton>
       </Stack>
-      {running !== null && (
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5 }}>
-          <Chip size="small" color="primary" variant="outlined" label="它在做别的" />
-          <Typography variant="caption" color="text.secondary">
-            这时说的会插进去（下一步生效），不用等它
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
+        {running !== null ? (
+          <>
+            <Chip size="small" color="primary" variant="outlined" label="它在做别的" />
+            <Typography variant="caption" color="text.secondary">
+              这时说的会插进去（下一步生效），不用等它
+            </Typography>
+          </>
+        ) : (
+          <Typography variant="caption" color="text.disabled">
+            Enter 发送 · Shift+Enter 换行
           </Typography>
-        </Stack>
-      )}
+        )}
+      </Stack>
       <Divider sx={{ mt: 1, mb: 0, borderStyle: 'dashed' }} />
     </Box>
   )

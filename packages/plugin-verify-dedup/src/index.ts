@@ -1,3 +1,4 @@
+import { signedByAll } from '@examharness/core'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Verdict } from '@examharness/core'
 import z from 'schemastery'
@@ -20,6 +21,9 @@ function proseOf(entry: { prose: { stem: string; answerText: string; solution: r
  * 两者必须一致——不然"每道现役闸门都签过字"永远对不上，旧题就没法复用（真踩过）。
  */
 export const evidenceKey = 'dedup'
+
+/** 判定规则的版本：加一条新判据就 +1（旧签字随即失效，旧题重新送审） */
+export const rule = 1
 export const inject = ['bank']
 
 export const Config = z.object({
@@ -54,7 +58,7 @@ function live(ctx: Context, config: DedupConfig): DedupConfig {
 
 export function apply(ctx: Context, config: DedupConfig): void {
   // 报到：题库据此判断"旧题能不能直接复用"（新闸门上线后，旧题要被重新验一遍）
-  ctx.get('bank')?.declareGate?.(evidenceKey)
+  ctx.get('bank')?.declareGate?.(evidenceKey, rule)
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict
@@ -87,8 +91,9 @@ export function apply(ctx: Context, config: DedupConfig): void {
         //     让其它闸门去管语言层（题面忠实、数字来自构造、算式核对）。
         //   以前这里一律拦，于是"改这一道"这条路根本走不通。
         if (proseOf(other) !== proseOf(item)) continue
-        const unsigned = (ctx.bank.gates?.() ?? []).filter((gate) => other.evidence[gate] === undefined)
-        if (unsigned.length > 0) continue
+        // 没签全、或签的是**旧版规则**（闸门后来加了判据）→ 这是重审，放行让闸门重新判一遍
+        // （不这么放，"闸门加判据"就永远管不到库里已有的题；库里 127 道"如图没图"就是这种）
+        if (!signedByAll(other, ctx.bank.gates?.() ?? [])) continue
         return {
           pass: false,
           gate: name,

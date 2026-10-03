@@ -56,7 +56,10 @@ export function IndexPane({
   }
 
   return (
-    <Box sx={{ width, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, bgcolor: 'background.paper' }}>
+    <Box
+      data-print-hide
+      sx={{ width, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0, bgcolor: 'background.paper' }}
+    >
       <Stack direction="row" sx={{ alignItems: 'center', borderBottom: 1, borderColor: 'divider' }}>
         <Tabs value={tab} onChange={(_event, next: 'index' | 'materials') => setTab(next)} sx={{ flex: 1, minHeight: 40 }}>
           <Tab value="index" label="索引" sx={{ minHeight: 40, py: 0 }} />

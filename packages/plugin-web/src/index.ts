@@ -1,9 +1,12 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildPaperDocx } from './docx.js'
 import type { Context } from '@deepseek-ai/cordis'
-import { normalize, numberSlots, optionDisplayText, renderMathInText } from '@examharness/core'
+import { normalize, numberSlots, optionDisplayText, renderMathInText, signedByAll } from '@examharness/core'
 import type {
   Blueprint,
   BlueprintPatch,
@@ -310,6 +313,83 @@ function briefOf(ctx: Context, blueprint: Blueprint): string {
   return lines.join('\n')
 }
 
+/**
+ * 卷面上的图是 SVG，Word 里要 PNG——所以导出时把图**光栅化**一遍。
+ *
+ * 用系统里的矢量转换器（rsvg-convert / inkscape / ImageMagick，有哪个用哪个）；
+ * 一个都没有就返回空表：docx 里会如实写一行"本题原带图，请看打印版或 PDF 版"，
+ * 而不是悄悄少一张图让老师到考场上才发现。
+ */
+function rasterizeFigures(
+  items: readonly Item[],
+  figureOf: (item: Item) => string,
+): ReadonlyMap<string, { png: Buffer; width: number; height: number }> {
+  const out = new Map<string, { png: Buffer; width: number; height: number }>()
+  if (process.platform === 'win32') return out
+  const tools: readonly { command: string; args: (file: string) => string[] }[] = [
+    { command: 'rsvg-convert', args: (file) => ['-w', '960', '-f', 'png', '-o', '/dev/stdout', file] },
+    { command: 'inkscape', args: (file) => [file, '--export-type=png', '--export-filename=/dev/stdout', '-w', '960'] },
+    { command: 'convert', args: (file) => ['-density', '144', `${file}`, 'png:-'] },
+  ]
+  const available = tools.find((tool) => spawnSync('which', [tool.command]).status === 0)
+  if (available === undefined) return out
+  for (const item of items) {
+    const svg = figureOf(item)
+    if (svg === '') continue
+    const temp = resolve(tmpdir(), `examharness-fig-${item.id.replace(/[^\w-]/gu, '_')}.svg`)
+    try {
+      writeFileSync(temp, svg, 'utf8')
+      const result = spawnSync(available.command, available.args(temp), { maxBuffer: 32 * 1024 * 1024 })
+      if (result.status === 0 && result.stdout.length > 0) {
+        const size = /width="(\d+(?:\.\d+)?)"[^>]*height="(\d+(?:\.\d+)?)"/u.exec(svg)
+        out.set(item.id, {
+          png: result.stdout,
+          width: Number(size?.[1] ?? 480),
+          height: Number(size?.[2] ?? 300),
+        })
+      }
+    } catch {
+      /* 这一张转不了就算了：docx 里会写"请看打印版" */
+    } finally {
+      rmSync(temp, { force: true })
+    }
+  }
+  return out
+}
+
+/**
+ * 让模型给这次出题起个卷名（6–12 字，像老师会写在卷头上的名字）。
+ *
+ * 为什么值得多花一次小调用：会话列表是老师认路的唯一线索，
+ * "未命名会话 3" 这种名字等于没有名字。起名只用一句话，失败就算了（不影响出题）。
+ */
+async function nameThisSession(
+  ctx: Context,
+  sessionId: string,
+  goal: string,
+  blueprint: Blueprint,
+): Promise<void> {
+  if (!ctx.llm.configured) return
+  const reply = await ctx.llm.chat([
+    {
+      role: 'system',
+      content:
+        '给这次出题起一个卷名：6–12 个汉字，像老师会写在卷子最上面的名字（例：二次函数最值·课后作业、圆与相似·单元测验）。' +
+        '只输出这个名字本身，不要引号、不要标点结尾、不要解释。',
+    },
+    { role: 'user', content: `老师的要求：${goal}\n范围：${blueprint.paper.title}\n班级：${blueprint.paper.className}` },
+  ])
+  const suggested = (reply.content ?? '')
+    .trim()
+    .split('\n')[0]
+    ?.replace(/^["'「『]|["'」』]$/gu, '')
+    .trim()
+  // 老师可能已经切到别的卷子了：只改"还是这一张"的时候
+  if (suggested === undefined || suggested === '' || suggested.length > 24) return
+  if (ctx.session.current().id !== sessionId) return
+  ctx.session.update({ title: suggested })
+}
+
 /** 没给目标时的默认目标：把缺的题位补齐，然后组卷——这才是老师想要的默认结果 */
 function defaultGoal(brief: string): string {
   const missing = /题位状态：还缺 ([^\n]+)/.exec(brief)?.[1]
@@ -351,7 +431,12 @@ export function apply(ctx: Context, config: WebConfig): void {
     return numberSlots(entries)
   }
   const summarize = (item: Item): Record<string, unknown> =>
-    summarizeWith(item, ctx.figure.renderItem(item)?.svg ?? '', numbersNow().get(item.slot.key))
+    summarizeWith(
+      item,
+      ctx.figure.renderItem(item)?.svg ?? '',
+      numbersNow().get(item.slot.key),
+      !signedByAll(item, ctx.bank.gates?.() ?? []),
+    )
 
   const broadcast = (event: string, data: unknown): void => {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
@@ -782,8 +867,17 @@ export function apply(ctx: Context, config: WebConfig): void {
       const seeded = seedFromKb(ctx, meta.id, meta.kbId) ?? seedAllKb(ctx, meta.id)
       // 新会话按老师的第一句话命名：卷子是给人看的，"未命名会话 3" 谁也认不出是哪张
       if (meta.title.startsWith('未命名') && (body.goal ?? '').trim() !== '') {
-        const goal = (body.goal ?? '').trim().replace(/\s+/gu, ' ')
-        ctx.session.update({ title: goal.length > 18 ? `${goal.slice(0, 18)}…` : goal })
+        // 先给一个"像话的"名字（去掉内部指令口吻，取第一句），保证列表里立刻不是"未命名会话 N"
+        const raw = (body.goal ?? '').trim().replace(/\s+/gu, ' ')
+        const short = raw
+          .replace(/^老师(要|说|想)/u, '')
+          .replace(/^要改这份卷子的设定[:：]?/u, '')
+          .replace(/^(改|换)这份卷子的/u, '')
+          .split(/[。；;\n]/u)[0] ?? raw
+        const title = short.trim() === '' ? raw : short.trim()
+        ctx.session.update({ title: title.length > 20 ? `${title.slice(0, 20)}…` : title })
+        // 再让模型起一个**像卷名**的名字（不阻塞这一轮：起好之后界面重新拉一次就能看到）
+        void nameThisSession(ctx, meta.id, raw, blueprint).catch(() => undefined)
       }
       try {
         const brief = briefOf(ctx, blueprint)
@@ -863,7 +957,18 @@ export function apply(ctx: Context, config: WebConfig): void {
     if (method === 'GET' && path === '/api/sessions') {
       send(res, 200, {
         currentId: ctx.session.current().id,
-        sessions: ctx.session.list(),
+        // 每张卷子带上"多少道、多少分、最后哪一版"：起始页的卡片要靠它说清是哪一张
+        sessions: ctx.session.list().map((meta) => {
+          const latest = ctx.session.versionsOf?.(meta.id)?.at(-1)
+          if (latest === undefined) return meta
+          return Object.assign({}, meta, {
+            version: latest.version,
+            items: latest.bindings.length,
+            totalScore: latest.totalScore,
+            updatedAt: latest.at,
+            gaps: latest.gaps.length,
+          })
+        }),
         groups: ctx.session.groups(),
         defaults: ctx.settings.get().sessionDefaults,
       })
@@ -1265,7 +1370,28 @@ export function apply(ctx: Context, config: WebConfig): void {
           return item === undefined ? [] : [item]
         })
       const figureOf = (item: Item): string => ctx.figure.renderItem(item)?.svg ?? ''
-      const markdown = (req.url ?? '').includes('format=md')
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      const format = url.searchParams.get('format') ?? 'html'
+
+      // **Word**：老师拿到卷子是要接着改的（HTML 只能看，PDF 改不动）
+      if (format === 'docx') {
+        const body = buildPaperDocx({
+          blueprint: sessionBlueprint(ctx),
+          items,
+          withAnswers: url.searchParams.get('answers') === '1',
+          studentLine: sessionBlueprint(ctx).paper.studentFields !== false,
+          figures: rasterizeFigures(items, figureOf),
+        })
+        res.writeHead(200, {
+          'content-type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(`${meta.title}.docx`)}`,
+          'content-length': String(body.length),
+        })
+        res.end(body)
+        return
+      }
+
+      const markdown = format === 'md'
       const body = markdown ? renderPaperMarkdown(meta, items, figureOf) : renderPaperHtml(meta, items, figureOf)
       res.writeHead(200, {
         'content-type': markdown ? 'text/markdown; charset=utf-8' : 'text/html; charset=utf-8',
@@ -1355,10 +1481,15 @@ function optionViews(item: Item): readonly Record<string, unknown>[] {
 }
 
 /** 推给界面的最小投影：不要整个 Item 糊过去 */
-function summarizeWith(item: Item, figureSvg: string, number?: number): Record<string, unknown> {
+function summarizeWith(item: Item, figureSvg: string, number?: number, stale = false): Record<string, unknown> {
   return {
     id: item.id,
     slot: item.slot.key,
+    /**
+     * 检查过期：闸门后来加了判据（见 EvidenceEntry.rule），这道题的签字是旧规则的。
+     * 界面据此说清"这些题要重新过一遍"，而不是让老师以为它们还是当年那个标准。
+     */
+    stale,
     /** 卷面上的"第 N 题"（服务端算：界面显示它、agent 也说它） */
     ...(number === undefined ? {} : { number }),
     knowledge: item.slot.knowledge,
