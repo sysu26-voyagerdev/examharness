@@ -68,6 +68,8 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
   const [notice, setNotice] = useState('')
   /** 正在跑的那一轮属于哪个会话：判定事件跟着它走（用 ref，避免闭包拿到旧值） */
   const runningNow = useRef('')
+  /** 正在跑的那一轮的 id：判定事件要落进**这一轮**的块里（不然它们会挤进兜底块） */
+  const runNow = useRef('')
 
   const mine = session?.meta.id ?? ''
   const running = runs.find((run) => run.parent === undefined && (run.workspace === '' || run.workspace === mine)) ?? null
@@ -96,13 +98,15 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         if (event.kind !== 'stored' && event.kind !== 'rejected' && event.kind !== 'confirmed') return
         setLive((previous) => [event, ...previous].slice(0, 20))
         // 判定属于当前在跑的那一轮（不再"两边都显示"）
-        setLog((previous) => appendLive(previous, event, runningNow.current))
+        setLog((previous) => appendLive(previous, event, runningNow.current, runNow.current))
       },
       (signal) => {
         if (signal.kind === 'started') {
-          // 新的一轮：实时区从头开始（上一轮的尾巴不该留着）
+          // **老师起的新一轮**：实时区从头开始（上一轮的尾巴不该留着）。
+          // 子任务（帮手）不算新一轮——它只是这一轮里派出去的活，实时区不该跟着它清掉。
           if (signal.parent === undefined) {
             runningNow.current = signal.workspace
+            runNow.current = signal.runId
             setStream(null)
           }
           setRuns((previous) => [
@@ -137,6 +141,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         if (signal.kind === 'done') {
           if (signal.parent === undefined && signal.workspace === runningNow.current) {
             runningNow.current = ''
+            runNow.current = ''
             setStream(null)
           }
           setRuns((previous) => previous.filter((run) => run.id !== signal.runId))

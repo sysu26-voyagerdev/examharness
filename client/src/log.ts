@@ -88,13 +88,31 @@ export function forWorkspace(log: readonly LogEntryView[], workspace: string): r
 let counter = 0
 const localId = (): string => `local-${String((counter += 1))}`
 
-/** 本地的增量：起一轮、走一步、看到判定 */
+/**
+ * 本地的增量：起一轮、走一步、看到判定。
+ *
+ * 一条规矩：**本地接上的那一行，字段要和服务端存的那一行一样**（workspace / agent / parent / 正文口径）。
+ * 少了字段，界面就会把这一轮认错：例如"起一轮"那一行以前没带 workspace，
+ * 于是界面按会话过滤时把它滤掉了——一轮的步骤**全都无家可归**，
+ * 它们挤进"这一版做了什么"那个兜底块里，直到这一轮结束、重新拉一遍记录才归位（用户看到的"串"）。
+ */
 export function appendSignal(log: readonly LogEntryView[], signal: RunSignal): readonly LogEntryView[] {
   const at = new Date().toISOString()
   if (signal.kind === 'started') {
-    // 老师直接起的一轮才把目标当"老师说的话"显示；子任务不是老师说的
-    if (signal.parent !== undefined) return log
-    return [...log, { id: localId(), at, kind: 'user', text: signal.goal, runId: signal.runId }]
+    // 起一轮的那一行就是"块头"：老师直接起的是他说的话，子任务（帮手）挂在自己那一轮底下。
+    // 两种都要有这一行——没有块头，这一轮的每一步都挂不住。
+    return [
+      ...log,
+      {
+        id: localId(),
+        at,
+        kind: 'user',
+        text: signal.label ?? signal.goal,
+        runId: signal.runId,
+        ...(signal.workspace === '' ? {} : { workspace: signal.workspace }),
+        ...(signal.parent === undefined ? {} : { parent: signal.parent }),
+      },
+    ]
   }
   if (signal.kind === 'busy') {
     // "正要做什么"不进时间线（那会刷屏）：它是**状态**，由界面显示成"正在…"
@@ -109,6 +127,7 @@ export function appendSignal(log: readonly LogEntryView[], signal: RunSignal): r
         kind: signal.stepKind === 'user' ? 'user' : signal.stepKind,
         text: signal.text,
         ...(signal.runId === undefined ? {} : { runId: signal.runId }),
+        ...(signal.agent === undefined ? {} : { agent: signal.agent }),
         ...(signal.workspace === '' ? {} : { workspace: signal.workspace }),
       },
     ]
@@ -116,15 +135,33 @@ export function appendSignal(log: readonly LogEntryView[], signal: RunSignal): r
   return log
 }
 
-/** 判定类事件（入库/没通过/确认）也进同一条时间线 */
-export function appendLive(log: readonly LogEntryView[], event: LiveEvent, workspace = ''): readonly LogEntryView[] {
+/**
+ * 判定类事件（入库/没通过/确认）也进同一条时间线。
+ *
+ * `runId` 是"这一轮里发生的"：带上它，判定行才会落进**那一轮**的块里，
+ * 而不是掉进兜底块和几十条别的事混成一条。
+ */
+export function appendLive(
+  log: readonly LogEntryView[],
+  event: LiveEvent,
+  workspace = '',
+  runId = '',
+): readonly LogEntryView[] {
   const at = event.at
-  const owner = workspace === '' ? {} : { workspace }
+  const owner = { ...(workspace === '' ? {} : { workspace }), ...(runId === '' ? {} : { runId }) }
   if (event.kind === 'stored') {
-    return [...log, { id: localId(), at, kind: 'verdict', text: `入库：第 ${event.slot ?? ''} 题`, ...owner }]
+    // 写法**照服务端那一句**来（`收下一道新题（知识点｜类型 分）`）：
+    // 以前这里写成"入库：第 S21-1 题"——内部题号直接露在老师眼前，
+    // 而且重拉记录之后同一件事会换成另一个说法，像发生了两次。
+    const what =
+      event.type === undefined
+        ? ''
+        : `（${event.knowledge?.join('、') || event.type}｜${event.type} ${String(event.score ?? 0)} 分）`
+    return [...log, { id: localId(), at, kind: 'verdict', text: `收下一道新题${what}`, ...owner }]
   }
   if (event.kind === 'confirmed') {
-    return [...log, { id: localId(), at, kind: 'verdict', text: `${event.by ?? '老师'}确认了第 ${event.slot ?? ''} 题`, ...owner }]
+    const where = event.number === undefined ? '这一道' : `第 ${String(event.number)} 题`
+    return [...log, { id: localId(), at, kind: 'verdict', text: `${event.by ?? '老师'}确认了${where}`, ...owner }]
   }
   if (event.kind === 'rejected') {
     const verdict = event.verdict

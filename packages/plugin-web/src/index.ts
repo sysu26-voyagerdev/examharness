@@ -447,16 +447,33 @@ export function apply(ctx: Context, config: WebConfig): void {
   let activeWorkspace = ''
   /** 记录一定有归属：没有正在跑的轮次，就归当前会话。**没有"两边都显示"这种中间态。** */
   const owner = (): string => (activeWorkspace === '' ? ctx.session.current().id : activeWorkspace)
+  /**
+   * 这次判定发生在**哪一轮**里。
+   *
+   * 判定行以前只记工作区、不记轮次，界面上按轮分块时它就无家可归——
+   * 全都会掉进"这一版做了什么"那个兜底块：一轮里"哪道题被拦下了"和几十条别的事混在一起。
+   * 取**最后派出去的那个**（子任务与主线共用一条时间线，正在干活的通常是最新的那个）。
+   */
+  const activeRunId = (): string | undefined => {
+    const here = owner()
+    return ctx.workbench
+      .active()
+      .toReversed()
+      .find((run) => run.workspace === here)?.id
+  }
   ctx.on('item:stored', ({ item }) => {
+    const runId = activeRunId()
     ctx.session.appendLog({
       kind: 'verdict',
       // 不写系统题名（S3-1 这种是内部编号，老师认的是卷面上的"第 N 题"）
       text: `收下一道新题（${item.slot.knowledge.join('、') || item.slot.type}｜${item.slot.type} ${String(item.slot.score)} 分）`,
       workspace: owner(),
+      ...(runId === undefined ? {} : { runId }),
     })
     broadcast('stored', summarize(item))
   })
   ctx.on('item:confirmed', ({ item, by }) => {
+    // 老师签字是**他自己**做的事，不挂到哪一轮上（挂上去就成了"agent 干的"）
     ctx.session.appendLog({ kind: 'verdict', text: `${by} 确认了第 ${item.slot.key} 题`, workspace: owner() })
     broadcast('confirmed', { ...summarize(item), by })
   })
@@ -469,7 +486,15 @@ export function apply(ctx: Context, config: WebConfig): void {
       workspace: workspace === '' ? owner() : workspace,
       ...(parent === undefined ? {} : { parent }),
     })
-    broadcast('run:started', { runId, goal, workspace, ...(label === undefined ? {} : { label }) })
+    // `parent` 必须跟着一起推：少这一个字段，界面就把子任务当成"老师起的新一轮"
+    // （状态行、按停、实时区都会认错人）
+    broadcast('run:started', {
+      runId,
+      goal,
+      workspace,
+      ...(label === undefined ? {} : { label }),
+      ...(parent === undefined ? {} : { parent }),
+    })
   })
   /** 模型正在写什么：只推给界面实时显示，**不进记录**（记录只认走完的那一步） */
   ctx.on('llm:delta', ({ runId, label, text, workspace }) => {
@@ -499,7 +524,10 @@ export function apply(ctx: Context, config: WebConfig): void {
   ctx.on('item:rejected', ({ item, verdict }) => {
     // 判定联合类型：只有失败那一支带 gate/reason
     const why = verdict.pass ? '（判定说通过，但仍被拦下）' : `没通过「${verdict.gate}」：${verdict.reason}`
-    ctx.session.appendLog({ kind: 'verdict', text: why })
+    const runId = activeRunId()
+    // **要带工作区**：界面按会话严格过滤记录，没有归属的行只会出现在"实时"那一瞬，
+    // 刷新（或这一轮结束）之后就再也看不见了——而"哪道题被什么拦下"正是老师最要看的东西
+    ctx.session.appendLog({ kind: 'verdict', text: why, workspace: owner(), ...(runId === undefined ? {} : { runId }) })
     broadcast('rejected', { ...summarize(item), verdict })
   })
 

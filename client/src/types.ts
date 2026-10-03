@@ -414,4 +414,13 @@ export interface LiveEvent {
   text?: string
   step?: number
   verdict?: { gate: string; reason: string; fixable: boolean; hint?: string }
+  /**
+   * stored / confirmed 的那一道是什么（服务端 `summarize` 里本来就有）：
+   * 界面拿它把实时那一行写成和服务端记录**同一句话**，一会儿重拉记录时不会"换一个说法"。
+   */
+  knowledge?: readonly string[]
+  type?: string
+  score?: number
+  /** 卷面上的第几题（在卷子上才有） */
+  number?: number
 }
