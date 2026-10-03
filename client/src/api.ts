@@ -1,4 +1,6 @@
 import type {
+  BankQuery,
+  BankView,
   BlueprintInfoView,
   BlueprintRowView,
   BlueprintView,
@@ -7,12 +9,12 @@ import type {
   KbListView,
   LiveEvent,
   RunEventView,
+  RunSignal,
   RunView,
   SessionGroupView,
   SessionMetaView,
-  SessionsView,
   SessionView,
-  RunSignal,
+  SessionsView,
   SettingsView,
   StateView,
   VersionView,
@@ -56,6 +58,21 @@ const send = (method: string, path: string, body?: unknown): Promise<Response> =
 
 export const getSession = (): Promise<SessionView> => fetch('/api/session').then((r) => json<SessionView>(r))
 export const getState = (): Promise<StateView> => fetch('/api/state').then((r) => json<StateView>(r))
+
+/** 题库：按条件筛（题库是老师手里的存货，得看得见、挑得动） */
+export const getBank = (query: BankQuery = {}): Promise<BankView> => {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== '') params.set(key, String(value))
+  }
+  const suffix = params.toString() === '' ? '' : `?${params.toString()}`
+  return fetch(`/api/bank${suffix}`).then((r) => json<BankView>(r))
+}
+
+/** 老师指定用这一道：把它放进某个题位 */
+export const placeItem = (slot: string, itemId: string): Promise<{ ok: boolean; reason?: string }> =>
+  send('POST', '/api/session/place', { slot, itemId }).then((r) => json<{ ok: boolean; reason?: string }>(r))
+
 export const getSettings = (): Promise<SettingsView> => fetch('/api/settings').then((r) => json<SettingsView>(r))
 
 export const getSessions = (): Promise<SessionsView> => fetch('/api/sessions').then((r) => json<SessionsView>(r))

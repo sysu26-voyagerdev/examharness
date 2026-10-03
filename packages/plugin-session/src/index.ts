@@ -288,6 +288,41 @@ export class SessionService extends Service implements SessionApi {
     return { ok: true, version }
   }
 
+  /**
+   * **老师指定用这一道**：把题库里已有的题放进某个题位。
+   *
+   * 与"重做"的区别：重做是让机器再造一道，这里是**老师挑好了**。
+   * 所以要守的规矩是"不许悄悄换掉题位的类型"（选择题填不进解答题位），
+   * 其余交给闸门：这道题若还没被现役闸门全部签过字，就重新送审一遍再放。
+   */
+  async place(slotKey: string, itemId: string): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }> {
+    const record = this.record()
+    if (record.meta.frozen) return { ok: false, reason: '本会话已冻结：冻结后不可改动（R3）' }
+
+    const blueprint = this.blueprintOf(record.meta)
+    const row = blueprint.blueprint.find((entry) => entry.key === slotKey || slotKey.startsWith(`${entry.key}-`))
+    if (row === undefined) return { ok: false, reason: `蓝图里没有题位 ${slotKey}` }
+
+    const item = this.ctx.bank.get(itemId)
+    if (item === undefined) return { ok: false, reason: '题库里没有这道题' }
+    if (item.slot.type !== row.type) {
+      return { ok: false, reason: `这是${item.slot.type}题，题位 ${slotKey} 要的是${row.type}题` }
+    }
+
+    // 没被现役闸门签过字的旧题：重新送审（通过才放，不通过就把原因说清）
+    const unsigned = (this.ctx.bank.gates?.() ?? []).filter((gate) => item.evidence[gate] === undefined)
+    if (unsigned.length > 0) {
+      const verdict = await this.ctx.bank.submit(item)
+      if (!verdict.ok) return { ok: false, reason: `${verdict.verdict.gate}：${verdict.verdict.reason}` }
+    }
+
+    const previous = this.latest()
+    const bindings = (previous?.bindings ?? []).filter((binding) => binding.slot !== slotKey)
+    bindings.push({ slot: slotKey, itemId, confirmedBy: null, confirmedAt: null })
+    const version = this.push(record, `指定 ${slotKey}`, bindings, 0, previous?.gaps ?? [], blueprint.paper.totalScore)
+    return { ok: true, version }
+  }
+
   confirm(itemId: string, by: string): SlotBinding | undefined {
     const item = this.ctx.bank.confirm(itemId, by)
     if (item === undefined) return undefined

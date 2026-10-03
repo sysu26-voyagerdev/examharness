@@ -703,6 +703,11 @@ export interface SessionApi {
   assemble(reason?: string): Promise<PaperVersion>
   /** 只重做某一个题位，**必须守住蓝图约束**；返回被替换掉的那道题 */
   regenerate(slotKey: string, seed?: number): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }>
+  /**
+   * **老师指定用这一道**：把题库里已有的题放进某个题位。
+   * 与 regenerate（让机器再造一道）相对——这是"人指了这一道"。
+   */
+  place(slotKey: string, itemId: string): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }>
   /** 人工终审签字（R4）。签名与时间落入题目的 review 与会话轨迹 */
   confirm(itemId: string, by: string): SlotBinding | undefined
   freeze(): PaperVersion | undefined

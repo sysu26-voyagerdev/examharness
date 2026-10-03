@@ -4,6 +4,7 @@ import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined'
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined'
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined'
 import MenuIcon from '@mui/icons-material/Menu'
+import LibraryBooksOutlinedIcon from '@mui/icons-material/LibraryBooksOutlined'
 import MenuBookOutlinedIcon from '@mui/icons-material/MenuBookOutlined'
 import ScienceOutlinedIcon from '@mui/icons-material/ScienceOutlined'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
@@ -35,6 +36,7 @@ import { useTheme } from '@mui/material/styles'
 import * as api from './api.js'
 import { AppCtx, type AppValue } from './app-context.js'
 import { appendLive, appendSignal } from './log.js'
+import { BankPage } from './pages/BankPage.js'
 import { KnowledgePage } from './pages/KnowledgePage.js'
 import { SessionsPage } from './pages/SessionsPage.js'
 import { SettingsPage } from './pages/SettingsPage.js'
@@ -53,6 +55,7 @@ import type {
 
 const NAV = [
   { key: 'work', label: '工作台', icon: <ScienceOutlinedIcon /> },
+  { key: 'bank', label: '题库', icon: <LibraryBooksOutlinedIcon /> },
   { key: 'sessions', label: '会话', icon: <MenuBookOutlinedIcon /> },
   { key: 'materials', label: '资料', icon: <TuneOutlinedIcon /> },
   { key: 'settings', label: '设置', icon: <SettingsOutlinedIcon /> },
@@ -377,6 +380,8 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         }}
       >
         {page === 'work' && <WorkPage />}
+        {/* 题库：老师手里的存货（看得到、挑得动、能放进题位） */}
+        {page === 'bank' && <BankPage />}
         {page === 'sessions' && <SessionsPage />}
         {page === 'materials' && <KnowledgePage />}
         {page === 'settings' && <SettingsPage />}

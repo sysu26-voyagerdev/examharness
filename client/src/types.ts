@@ -267,6 +267,26 @@ export type RunSignal =
       parent?: string
     }
 
+/** 题库页的投影：筛出来的题 + 分面（各知识点/题型/状态各有多少道） */
+export interface BankView {
+  total: number
+  facets: {
+    knowledge: readonly { key: string; count: number }[]
+    type: readonly { key: string; count: number }[]
+    status: readonly { key: string; count: number }[]
+  }
+  items: readonly ItemView[]
+}
+
+export interface BankQuery {
+  knowledge?: string
+  type?: string
+  status?: string
+  q?: string
+  limit?: number
+  offset?: number
+}
+
 /** 界面上的一个 agent（主线或子任务）：用来显示"谁在干什么、走到第几步" */
 export interface RunAgentView {
   id: string

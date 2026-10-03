@@ -379,6 +379,65 @@ export function apply(ctx: Context, config: WebConfig): void {
     const method = req.method ?? 'GET'
     const path = (req.url ?? '/').split('?')[0] ?? '/'
 
+    /**
+     * **题库**：老师要能看见手里有什么题。
+     *
+     * 以前题库只在接口里（`/api/state` 全量吐出来），界面上没有入口——
+     * 于是老师只能看见最终那份卷子，"换一道"是唯一的动作。
+     * 这里按条件筛选，并把分面（知识点/题型/分值/状态各有多少）一起给出去，
+     * 前端不必自己算。
+     */
+    if (method === 'GET' && path === '/api/bank') {
+      const params = new URL(req.url ?? '/', 'http://localhost').searchParams
+      const wantKnowledge = params.get('knowledge') ?? ''
+      const wantType = params.get('type') ?? ''
+      const wantStatus = params.get('status') ?? ''
+      const wantText = (params.get('q') ?? '').trim()
+      const limit = Math.min(200, Math.max(1, Number(params.get('limit') ?? '60') || 60))
+      const offset = Math.max(0, Number(params.get('offset') ?? '0') || 0)
+
+      const all = ctx.bank.all()
+      const matched = all.filter((item) => {
+        if (wantType !== '' && item.slot.type !== wantType) return false
+        if (wantStatus !== '' && item.lifecycle !== wantStatus) return false
+        if (wantKnowledge !== '' && !item.slot.knowledge.includes(wantKnowledge)) return false
+        if (wantText !== '' && !item.prose.stem.includes(wantText)) return false
+        return true
+      })
+      const knowledgeFacet = new Map<string, number>()
+      const typeFacet = new Map<string, number>()
+      const statusFacet = new Map<string, number>()
+      for (const item of matched) {
+        for (const key of item.slot.knowledge) knowledgeFacet.set(key, (knowledgeFacet.get(key) ?? 0) + 1)
+        typeFacet.set(item.slot.type, (typeFacet.get(item.slot.type) ?? 0) + 1)
+        statusFacet.set(item.lifecycle, (statusFacet.get(item.lifecycle) ?? 0) + 1)
+      }
+      send(res, 200, {
+        total: matched.length,
+        facets: {
+          knowledge: facet(knowledgeFacet),
+          type: facet(typeFacet),
+          status: facet(statusFacet),
+        },
+        items: matched
+          .slice()
+          .toReversed()
+          .slice(offset, offset + limit)
+          .map((item) => summarizeWith(item, ctx.figure.renderItem(item)?.svg ?? '')),
+      })
+      return
+    }
+
+    if (method === 'POST' && path === '/api/session/place') {
+      const body = (await readBody(req)) as { slot?: string; itemId?: string }
+      try {
+        send(res, 200, await ctx.session.place(String(body.slot ?? ''), String(body.itemId ?? '')))
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
     if (method === 'GET' && path === '/api/state') {
       send(res, 200, {
         blueprint,
@@ -979,6 +1038,13 @@ export function apply(ctx: Context, config: WebConfig): void {
     },
     'plugin-web: http server',
   )
+}
+
+/** 分面统计（题库页的筛选器用它）：按数量排，数量相同按名字排 */
+function facet(map: Map<string, number>): readonly { key: string; count: number }[] {
+  return [...map.entries()]
+    .map(([key, count]) => ({ key, count }))
+    .toSorted((a, b) => b.count - a.count || a.key.localeCompare(b.key))
 }
 
 /** 选项在卷面上的写法：**四个选项形式要一致**（混搭的名称全去掉，整齐的留着） */
