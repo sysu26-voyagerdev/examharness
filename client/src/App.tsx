@@ -204,6 +204,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
 
   return (
     <AppCtx.Provider value={value}>
+      <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <AppBar position="static" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
         <Toolbar sx={{ gap: 1.5, minHeight: 56 }}>
           <Tooltip title="所有出题">
@@ -243,7 +244,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         {busy !== '' && <LinearProgress />}
       </AppBar>
 
-      <Box sx={{ flexGrow: 1, height: 'calc(100vh - 57px)', minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
         {page === 'paper' ? (
           <PaperPage />
         ) : page === 'check' ? (
@@ -265,6 +266,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
           {error}
         </Alert>
       </Snackbar>
+      </Box>
     </AppCtx.Provider>
   )
 }

@@ -210,7 +210,15 @@ export function Timeline({
     if (stickRef.current) endRef.current?.scrollIntoView({ block: 'end' })
   }, [entries.length])
 
-  const blocks = useMemo(() => groupRuns(entries), [entries])
+  const blocks = useMemo(
+    () =>
+      groupRuns(entries).map((block) => ({
+        ...block,
+        entries: collapseSame(block.entries),
+        children: block.children.map((child) => ({ ...child, entries: collapseSame(child.entries) })),
+      })),
+    [entries],
+  )
 
   if (blocks.length === 0) {
     return (
@@ -367,6 +375,20 @@ function groupRuns(entries: readonly LogEntryView[]): readonly RunBlock[] {
   return roots.map((entry) => entry.block)
 }
 
+/** 连着几行一模一样就合成一行（×N）：记录要能读，不是流水账 */
+function collapseSame(entries: readonly LogEntryView[]): readonly LogEntryView[] {
+  const out: LogEntryView[] = []
+  for (const entry of entries) {
+    const previous = out.at(-1)
+    if (previous !== undefined && previous.text === entry.text && previous.kind === entry.kind) {
+      out[out.length - 1] = { ...previous, repeat: (previous.repeat ?? 1) + 1 }
+      continue
+    }
+    out.push(entry)
+  }
+  return out
+}
+
 /**
  * 一步：**一行，但会自己换行**。
  *
@@ -415,6 +437,11 @@ function StepRow({ entry, translate }: { entry: LogEntryView; translate?: (text:
         >
           {entry.kind === 'tool' && entry.tool !== undefined ? `${toolLabel(entry.tool)}：` : ''}
           {text}
+          {(entry.repeat ?? 1) > 1 && (
+            <Box component="span" sx={{ ml: 0.75, color: 'text.disabled' }}>
+              ×{String(entry.repeat ?? 1)}
+            </Box>
+          )}
         </Typography>
       </Stack>
     </Box>
@@ -960,7 +987,16 @@ function QuestionBlock({
   }
 
   return (
-    <Box id={`q-${binding.slot}`} sx={{ position: 'relative', scrollMarginTop: 16, '&:hover .q-actions': { opacity: 1 } }}>
+    <Box
+      id={`q-${binding.slot}`}
+      sx={{
+        position: 'relative',
+        scrollMarginTop: 16,
+        // 悬停时那一排动作**浮在题面右上角**，不占版面：
+        // 以前它是 flex 里的一列（宽度常驻），题面被挤成左边一条（用户："题目文字被挤到左边去了"）。
+        '&:hover .q-actions': { opacity: 1, pointerEvents: 'auto' },
+      }}
+    >
       {/* 卷面左侧的题号（真卷子就是这样）：分值跟在题号后 */}
       <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
         <Typography component="span" sx={{ fontWeight: 600, minWidth: 26 }}>
@@ -1084,13 +1120,29 @@ function QuestionBlock({
           )}
         </Box>
 
-        {/* 老师才能看到的操作：藏在悬停里，不占卷面 */}
+        {/* 老师才能看到的操作：**浮在题面右上角**（悬停出现），绝不占题面的宽度 */}
         <Stack
           className="q-actions"
           direction="row"
           spacing={0.5}
           data-print-hide
-          sx={{ opacity: 0, transition: 'opacity .15s', alignItems: 'center', pl: 1 }}
+          sx={{
+            position: 'absolute',
+            top: -6,
+            right: 0,
+            opacity: 0,
+            pointerEvents: 'none',
+            transition: 'opacity .12s',
+            alignItems: 'center',
+            px: 0.75,
+            py: 0.25,
+            borderRadius: 1,
+            bgcolor: 'background.paper',
+            boxShadow: 1,
+            border: 1,
+            borderColor: 'divider',
+            zIndex: 2,
+          }}
         >
           {mark !== '' && <Chip size="small" color="info" variant="outlined" label={mark} />}
           {binding.chosenBy !== undefined && binding.confirmedBy === null && (

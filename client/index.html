@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>命题组</title>
+<style>
+  /* 整屏就是布局本身：不许出现页面级滚动条（卷面自己的滚动在它那一栏里）。
+     用 flex 撑满而不是 calc(100vh - 头部高度)——后者一改头部高度就多出一条滚动条（真实踩过）。 */
+  html, body, #root { height: 100%; margin: 0; overflow: hidden; }
+</style>
 </head>
 <body>
 <div id="root"></div>
