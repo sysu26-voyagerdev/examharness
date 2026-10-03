@@ -1,4 +1,5 @@
 import type { Blueprint, BlueprintRow, FigureArtifact, FigureSpec, Item, SlotSpec, Verdict } from './types.js'
+import type { KnowledgeDiagnostic, KnowledgeNote } from './knowledge-note.js'
 
 // 必须真实导入被增强的模块：TS 只在模块已进入程序时才认这条声明合并
 import '@deepseek-ai/cordis'
@@ -56,6 +57,35 @@ export interface BankApi {
   confirm(id: string, by: string): Item | undefined
 }
 
+/** 知识点在界面上的样子：连线**两头都要**，所以既有前置也有后继 */
+export interface GraphNodeView {
+  key: string
+  title: string
+  order: number
+  group: string
+  aliases: readonly string[]
+  prerequisites: readonly string[]
+  /** 谁拿它当前置（反向连线，界面上画箭头用） */
+  dependents: readonly string[]
+  /** 备注正文 */
+  note: string
+  /** 不在图谱里的前置：这条线画不通 */
+  dangling: readonly string[]
+  /** 前置闭包大小（不含自己） */
+  depth: number
+  /** 文件真名（改名/定位用） */
+  file: string
+}
+
+/** 整棵树的一次性快照，给界面读 */
+export interface KnowledgeTreeView {
+  /** 这棵树是从哪儿来的（Markdown 目录 / 兜底 JSON），界面上要如实说 */
+  origin: { kind: 'dir' | 'json'; path: string }
+  learned: readonly string[]
+  nodes: readonly GraphNodeView[]
+  diagnostics: readonly KnowledgeDiagnostic[]
+}
+
 /** 知识点图谱：既是 agent 的设计工具（引导），也是闸门（越界检测） */
 export interface GraphApi {
   prerequisites(keys: readonly string[]): string[]
@@ -64,6 +94,27 @@ export interface GraphApi {
   missing(keys: readonly string[]): string[]
   nodes(): readonly string[]
   learnedKeys(): readonly string[]
+  /** 整棵树（界面用） */
+  tree(): KnowledgeTreeView
+  /** 文件被改过之后重载 */
+  reload(): void
+  /** 写一个知识点（新建或改）；连线的增删改都走这里 */
+  save(input: KnowledgeNodeInput): KnowledgeNote
+  /** 删一个知识点；谁还在引它一并返回 */
+  remove(key: string): { removed: boolean; stillReferencedBy: readonly string[] }
+  /** 磁盘上的原始文本 */
+  sourceOf(key: string): string | undefined
+}
+
+/** 写一个知识点时的输入：只给要改的字段，其余保持原样 */
+export interface KnowledgeNodeInput {
+  key: string
+  title?: string
+  order?: number
+  group?: string
+  aliases?: readonly string[]
+  prerequisites?: readonly string[]
+  note?: string
 }
 
 /** 构造器：题位 + 种子 → 一道题（同种子必须复现同一道题） */

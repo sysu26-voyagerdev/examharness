@@ -1,5 +1,6 @@
 export * from './types.js'
 export * from './graph.js'
+export * from './knowledge-note.js'
 export * from './hash.js'
 export * from './json.js'
 export * from './math.js'

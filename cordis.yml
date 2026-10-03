@@ -31,8 +31,12 @@
 - id: graph
   name: '@examharness/plugin-graph'
   config:
+    # 知识树的**真相**：一个知识点一个 .md（ADR-0033）。
+    # 老师在界面（#/graph）或 Obsidian 里改的都是这些文件，服务读目录。
+    dir: 知识
+    # 下面这个 JSON 只在 `dir` 不存在时兜底（迁移期兼容），平时不读
     path: seed/knowledge.json
-    # 追加知识点清单（课标/教材目录整理件，可放多份）
+    # 追加的 **JSON** 图谱文件（课标/教材目录整理件，可放多份）；Markdown 不走这里
     paths: []
     # 已学集合：不在其中的前置知识 = 超纲（本卷只讲到「最值」）
     # 已学集合：不在其中的前置知识 = 超纲（这一卷讲到哪儿，就列到哪儿）

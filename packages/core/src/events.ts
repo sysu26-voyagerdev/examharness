@@ -63,5 +63,10 @@ declare module '@deepseek-ai/cordis' {
     'kb:changed'(payload: { batchId: string; status: string; records?: number }): void
     /** 工作区变了（agent 写了文件 / 跑了命令；界面可以刷新"这一轮留下了什么"） */
     'workspace:changed'(payload: { name: string; files: number }): void
+    /**
+     * 知识树被改了（界面保存 / agent 写文件后重载）。
+     * **改了树不影响已经组好的卷子**：闸门不重跑、结论不回溯（ADR-0033）。
+     */
+    'graph:changed'(payload: { action: 'saved' | 'removed' | 'reloaded'; key: string; nodes: number }): void
   }
 }

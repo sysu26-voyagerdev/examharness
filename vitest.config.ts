@@ -10,6 +10,7 @@ export default defineConfig({
     alias: {
       '@examharness/core': pkg('core'),
       '@examharness/plugin-bank': pkg('plugin-bank'),
+      '@examharness/plugin-graph': pkg('plugin-graph'),
       '@examharness/plugin-verify-scope': pkg('plugin-verify-scope'),
       '@examharness/plugin-verify-symbolic': pkg('plugin-verify-symbolic'),
       '@examharness/plugin-verify-dedup': pkg('plugin-verify-dedup'),
