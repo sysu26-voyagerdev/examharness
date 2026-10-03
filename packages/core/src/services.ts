@@ -777,6 +777,13 @@ export interface SessionLogEntry {
   workspace?: string
   /** 工具名（界面自己翻译成人话，正文里不再重复工具名） */
   tool?: string
+  /**
+   * 这一行是**谁做的**（agent 的 runId）。子任务的记录因此能挂回自己的块里——
+   * 以前主线与子任务混成一条流，界面上一片"串"（用户当场点过两次）。
+   */
+  agent?: string
+  /** 起一轮的那一行带它：这一轮是谁派的（空 = 老师直接起的） */
+  parent?: string
 }
 
 export interface SessionApi {

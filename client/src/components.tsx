@@ -168,10 +168,31 @@ export function DoingRow({ doing, since }: { doing: { what: string; agent: strin
   )
 }
 
-export function Timeline({ entries, running }: { entries: readonly LogEntryView[]; running: boolean }): React.JSX.Element {
+/**
+ * agent 的工作记录：**DSH 式的一块一块**。
+ *
+ * 为什么是这样：老师要看着它干活（那才是控制感），所以它必须常驻、可读、能插话；
+ * 但一条平铺的流水账会"串"——主线、子任务、几轮之间分不开。
+ * 所以按**轮**分块：块头是老师那句话，块内一行一步，子任务缩进嵌在自己的块里；
+ * 过去跑完的块折成一行，正在跑的那块展开。没有装饰动画，没有转圈。
+ */
+export function Timeline({
+  entries,
+  running,
+  runningId,
+  translate,
+}: {
+  entries: readonly LogEntryView[]
+  running: boolean
+  /** 正在跑的那一轮（哪一块展开） */
+  runningId?: string
+  /** 把系统题号翻成人话（S3-1 → 第 3 题） */
+  translate?: (text: string) => string
+}): React.JSX.Element {
   const endRef = useRef<HTMLDivElement | null>(null)
   const boxRef = useRef<HTMLDivElement | null>(null)
   const stickRef = useRef(true)
+  const [open, setOpen] = useState<readonly string[]>([])
 
   useEffect(() => {
     const box = boxRef.current
@@ -179,101 +200,177 @@ export function Timeline({ entries, running }: { entries: readonly LogEntryView[
     if (stickRef.current) endRef.current?.scrollIntoView({ block: 'end' })
   }, [entries.length])
 
-  if (entries.length === 0) {
+  const blocks = useMemo(() => groupRuns(entries), [entries])
+
+  if (blocks.length === 0) {
     return (
-      <Box sx={{ p: 4, maxWidth: 520, mx: 'auto', textAlign: 'center' }}>
-        <Avatar sx={{ bgcolor: 'grey.200', color: 'grey.600', width: 48, height: 48, mx: 'auto', mb: 2 }}>
-          <AutoAwesomeIcon />
-        </Avatar>
-        <Typography variant="subtitle1" gutterBottom>
-          还没有开始
-        </Typography>
+      <Box sx={{ p: 3, textAlign: 'center' }}>
         <Typography variant="body2" color="text.secondary">
-          说一句你想要什么样的卷子，例如「初三(2)班，二次函数最值，一道大题两道小题」。
+          说一句你要什么——出题、改哪一道、换个难度，都是这一句。
         </Typography>
       </Box>
     )
   }
 
   return (
-    <Box ref={boxRef} sx={{ height: '100%', overflowY: 'auto', px: { xs: 1.5, md: 2 }, py: 1.5 }}>
-      <List disablePadding>
-        {collapseRepeats(entries).map((entry) => (
-          <Row key={entry.id} entry={entry} />
-        ))}
-        {running && (
-          <ListItem>
-            <ListItemAvatar>
-              <Avatar sx={{ bgcolor: 'primary.main' }}>
-                <CircularProgress size={16} color="inherit" />
-              </Avatar>
-            </ListItemAvatar>
-            <ListItemText primary="正在做…" secondary="可以直接说一句，它下一步会看到" />
-          </ListItem>
-        )}
-      </List>
+    <Box ref={boxRef} sx={{ height: '100%', overflowY: 'auto', px: 1.25, py: 1 }}>
+      {blocks.map((block) => {
+        const current = running && block.id === runningId
+        const expanded = current || open.includes(block.id) || block.parent === undefined && blocks.length === 1
+        return (
+          <Box key={block.id} sx={{ mb: 1.25 }}>
+            <Stack
+              direction="row"
+              spacing={1}
+              onClick={() => setOpen((previous) => (previous.includes(block.id) ? previous.filter((id) => id !== block.id) : [...previous, block.id]))}
+              sx={{ alignItems: 'center', cursor: 'pointer', px: 0.5, py: 0.5, borderRadius: 1, '&:hover': { bgcolor: 'action.hover' } }}
+            >
+              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                {block.parent === undefined ? '老师' : '子任务'}
+              </Typography>
+              <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 0 }} noWrap>
+                {plain(block.title)}
+              </Typography>
+              {current && <Chip size="small" color="primary" label="在做" />}
+              <Box sx={{ flex: 1 }} />
+              <Typography variant="caption" color="text.disabled">
+                {new Date(block.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
+              </Typography>
+            </Stack>
+            {expanded && (
+              <Stack spacing={0.25} sx={{ pl: block.parent === undefined ? 1 : 2.5, mt: 0.25 }}>
+                {block.entries.map((entry) => (
+                  <StepRow key={entry.id} entry={entry} {...(translate === undefined ? {} : { translate })} />
+                ))}
+                {block.children.map((child) => (
+                  <Box key={child.id} sx={{ borderLeft: 2, borderColor: 'divider', pl: 1 }}>
+                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', py: 0.25 }}>
+                      <Typography variant="caption" color="secondary.main">
+                        {plain(child.title)}
+                      </Typography>
+                      <Typography variant="caption" color="text.disabled">
+                        {String(child.entries.length)} 步
+                      </Typography>
+                    </Stack>
+                    <Stack spacing={0.25} sx={{ pl: 1.5 }}>
+                      {child.entries.map((entry) => (
+                        <StepRow key={entry.id} entry={entry} {...(translate === undefined ? {} : { translate })} />
+                      ))}
+                    </Stack>
+                  </Box>
+                ))}
+              </Stack>
+            )}
+          </Box>
+        )
+      })}
       <div ref={endRef} />
     </Box>
   )
 }
 
-function Row({ entry }: { entry: LogEntryView }): React.JSX.Element {
-  const repeat = entry.repeat ?? 1
-  if (entry.kind === 'user') {
-    return (
-      <ListItem sx={{ justifyContent: 'flex-end', pr: 0.5 }}>
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, maxWidth: '85%' }}>
-          <Box sx={{ bgcolor: 'primary.main', color: 'primary.contrastText', borderRadius: 2.5, px: 2, py: 1 }}>
-            <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
-              {plain(entry.text)}
-            </Typography>
-          </Box>
-          <Avatar sx={{ width: 28, height: 28, bgcolor: 'secondary.main' }}>
-            <PersonIcon fontSize="small" />
-          </Avatar>
-        </Box>
-      </ListItem>
-    )
+interface RunBlock {
+  id: string
+  title: string
+  at: string
+  parent?: string
+  entries: readonly LogEntryView[]
+  children: readonly RunBlock[]
+}
+
+/** 按"轮"分块：起一轮的那一行是块头，其余挂到自己的 runId 下，子任务嵌在父块里 */
+function groupRuns(entries: readonly LogEntryView[]): readonly RunBlock[] {
+  const starters = new Map<string, { title: string; at: string; parent?: string }>()
+  for (const entry of entries) {
+    if (entry.kind !== 'user' || entry.runId === undefined) continue
+    if (!starters.has(entry.runId)) {
+      starters.set(entry.runId, { title: entry.text, at: entry.at, ...(entry.parent === undefined ? {} : { parent: entry.parent }) })
+    }
   }
+  const blocks = new Map<string, { entries: LogEntryView[] }>()
+  const loose: LogEntryView[] = []
+  for (const entry of entries) {
+    const id = entry.agent ?? entry.runId
+    if (id === undefined || !starters.has(id)) {
+      // 没有归属的行（早先的记录、判定行）单独兜住，不硬塞进谁的块里
+      loose.push(entry)
+      continue
+    }
+    const bucket = blocks.get(id) ?? { entries: [] }
+    bucket.entries.push(entry)
+    blocks.set(id, bucket)
+  }
+  const built: { block: RunBlock; parent?: string }[] = [...starters.entries()].map(([id, starter]) => ({
+    block: {
+      id,
+      title: starter.title,
+      at: starter.at,
+      ...(starter.parent === undefined ? {} : { parent: starter.parent }),
+      entries: (blocks.get(id)?.entries ?? []).filter((entry) => !(entry.kind === 'user' && entry.runId === id && entry.text === starter.title)),
+      children: [],
+    },
+    ...(starter.parent === undefined ? {} : { parent: starter.parent }),
+  }))
+  const roots = built.filter((entry) => entry.parent === undefined || !built.some((other) => other.block.id === entry.parent))
+  for (const entry of built) {
+    if (entry.parent === undefined) continue
+    const parent = roots.find((root) => root.block.id === entry.parent)
+    if (parent !== undefined) (parent.block.children as RunBlock[]).push(entry.block)
+  }
+  if (loose.length > 0) {
+    roots.unshift({
+      block: {
+        id: 'earlier',
+        title: '早先的记录',
+        at: loose[0]?.at ?? new Date().toISOString(),
+        entries: loose,
+        children: [],
+      },
+    })
+  }
+  return roots.map((entry) => entry.block)
+}
 
-  const failed = entry.kind === 'gate' && /没通过|失败|拦下|不一致|过于相似|读不了|不能|还缺/.test(entry.text)
-  const tone = failed ? 'error.main' : entry.kind === 'verdict' ? 'success.main' : 'primary.main'
-  const label = entry.kind === 'tool' ? toolLabel(entry.tool) : entry.kind === 'assistant' ? '命题组' : '检查'
-
+/** 一步：一行说清"做了什么、结果是什么"，点开才看全文 */
+function StepRow({ entry, translate }: { entry: LogEntryView; translate?: (text: string) => string }): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const text = translate === undefined ? entry.text : translate(entry.text)
+  const failed = /没通过|失败|拦下|不一致|过于相似|读不了|不能|还缺|出不了/.test(text)
+  const done = entry.kind === 'verdict' || entry.kind === 'gate'
+  const oneLine = text.split('\n')[0] ?? ''
+  const more = text.includes('\n') || text.length > 120
   return (
-    <ListItem alignItems="flex-start" sx={{ px: 0.5 }}>
-      <ListItemAvatar sx={{ minWidth: 40 }}>
-        <Avatar sx={{ width: 28, height: 28, bgcolor: failed ? 'error.main' : entry.kind === 'verdict' ? 'success.main' : 'grey.500' }}>
-          {failed ? <ErrorIcon fontSize="small" /> : entry.kind === 'tool' ? <BuildOutlinedIcon fontSize="small" /> : entry.kind === 'verdict' ? <CheckCircleIcon fontSize="small" /> : <AutoAwesomeIcon fontSize="small" />}
-        </Avatar>
-      </ListItemAvatar>
-      <ListItemText
-        sx={{ my: 0 }}
-        primary={
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
-            <Typography variant="caption" color="text.secondary">
-              {label}
-            </Typography>
-            {repeat > 1 && <Chip size="small" variant="outlined" label={`×${String(repeat)}`} />}
-          </Stack>
-        }
-        secondary={
-          entry.kind === 'assistant' ? (
-            <Box sx={{ color: 'text.primary' }}>
-              <MarkdownText>{entry.text}</MarkdownText>
-            </Box>
+    <Box sx={{ px: 0.5 }}>
+      <Stack direction="row" spacing={0.75} sx={{ alignItems: 'flex-start' }}>
+        <Box sx={{ mt: 0.4, flexShrink: 0 }}>
+          {failed ? (
+            <ErrorIcon sx={{ fontSize: 14, color: 'error.main' }} />
+          ) : done ? (
+            <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main' }} />
           ) : (
-            <Typography variant="body2" sx={{ color: failed ? tone : 'text.primary', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {plain(entry.text)}
-            </Typography>
-          )
-        }
-        slotProps={{ secondary: { component: 'div' } }}
-      />
-      <Typography variant="caption" color="text.disabled" sx={{ mt: 0.5, ml: 1, whiteSpace: 'nowrap' }}>
-        {new Date(entry.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-      </Typography>
-    </ListItem>
+            <BuildOutlinedIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
+          )}
+        </Box>
+        <Typography
+          variant="body2"
+          onClick={() => (more ? setOpen((value) => !value) : undefined)}
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            color: failed ? 'error.main' : 'text.primary',
+            whiteSpace: open ? 'pre-wrap' : 'nowrap',
+            overflow: 'hidden',
+            textOverflow: open ? 'clip' : 'ellipsis',
+            cursor: more ? 'pointer' : 'default',
+            wordBreak: 'break-word',
+          }}
+          title={more ? '点开看全文' : undefined}
+        >
+          {entry.kind === 'tool' && entry.tool !== undefined ? `${toolLabel(entry.tool)}：` : ''}
+          {open ? text : oneLine}
+        </Typography>
+      </Stack>
+    </Box>
   )
 }
 
@@ -458,10 +555,25 @@ function statusOf(item: ItemView, binding: SlotBindingView): { text: string; ton
  * 缺口的说法**给老师看**：服务端那句是给 agent 看的（带内部题型名与闸门名），
  * 界面上要把它们换成"哪一项检查没过 + 为什么"。
  */
+/** 闸门名 → 老师能判断的风险（说"这意味着什么"，不说闸门叫什么） */
+export const RISK: Readonly<Record<string, string>> = {
+  scope: '有知识点超出已学范围',
+  symbolic: '答案没能独立复算',
+  roundtrip: '题面与构造对不上（数字/答案/分问）',
+  dedup: '与已有题目太像',
+  originality: '与真题/教材太像',
+  parts: '分值与分问数不匹配',
+  options: '选项有问题（数量、重复或答案不在选项里）',
+  question: '题面缺了要求或作答空位',
+  figure: '图形与条件对不上',
+}
+
 function humanGap(reason: string): string {
   const stripped = reason
-    .replace(/^\S+\s*被\s*([a-z-]+)\s*拦下：/u, (_all, gate: string) => `${gateLabel(gate)}没过：`)
-    .replace(/构造器不覆盖该题位：.*$/u, '还没有能出这个题位的题型')
+    // 缺口原因里可能列了几个题型各为什么不行：**每一处**都要翻成人话
+    .replace(/\S+\s*被\s*verify-([a-z-]+)\s*拦下：/gu, (_all, gate: string) => `${RISK[gate] ?? gateLabel(`verify-${gate}`)}：`)
+    .replace(/与已入库题目结构完全相同（\S+）/gu, '与我已经出过的一道题完全相同')
+    .replace(/构造器不覆盖该题位：.*$/u, '还没有能出这道题的题型')
   return stripped.length > 120 ? `${stripped.slice(0, 118)}…` : stripped
 }
 
@@ -471,7 +583,7 @@ function changeMark(change: SlotChangeView | undefined): string {
 }
 
 /** 卷面分组：真卷子是"一、选择题（每题 3 分）二、填空题…"，不是一题一张卡片 */
-function groupByType(rows: readonly { binding: SlotBindingView; item: ItemView }[]): readonly {
+export function groupByType(rows: readonly { binding: SlotBindingView; item: ItemView }[]): readonly {
   type: string
   heading: string
   rows: readonly { binding: SlotBindingView; item: ItemView }[]
@@ -511,6 +623,8 @@ export function PaperView({
   onConfirm,
   onAssemble,
   onSyncHeader,
+  answers,
+  chrome = 'full',
 }: {
   version: VersionView | undefined
   /** 卷名（来自会话的蓝图） */
@@ -527,25 +641,33 @@ export function PaperView({
   onRevise: (slotKey: string, item: ItemView) => void
   onConfirm: (itemId: string) => void
   onAssemble: () => void
+  /** 由外面控制"要不要连着答案看"（底栏的 试卷|答案 视图标签） */
+  answers?: boolean
+  /**
+   * 'full'：卷面 + 它自己的工具条（够用，但工具条与顶栏重复）；
+   * 'doc'：只有卷面（还有两条如实说明的提示），按钮都在顶栏功能区——一屏只有一套动词。
+   */
+  chrome?: 'full' | 'doc'
 }): React.JSX.Element {
-  const [showAnswers, setShowAnswers] = useState(false)
+  const [ownAnswers, setOwnAnswers] = useState(false)
+  const showAnswers = answers ?? ownAnswers
 
   if (version === undefined) {
     return (
-      <Box sx={{ p: 4, textAlign: 'center' }}>
+      <Box sx={{ p: 4, textAlign: 'center', maxWidth: 460, mx: 'auto' }}>
         <Typography variant="subtitle1" gutterBottom>
-          还没有试卷
+          还是空的
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           {frozen
             ? '这份卷子已经定稿。'
-            : bankSize === 0
-              ? '题库还是空的：让 agent 出题，它会先过一遍检查再入库。'
-              : `题库里已经有 ${String(bankSize)} 道题。按蓝图组卷，把够格的题排成一份卷子。`}
+            : '在右边那一栏说一句你要什么——它会先给设计和题，你再一句句改。'}
         </Typography>
-        <Button variant="contained" disableElevation disabled={busy || frozen} onClick={onAssemble}>
-          按蓝图出一份
-        </Button>
+        {!frozen && (
+          <Button variant="outlined" disabled={busy} onClick={onAssemble}>
+            先按设定出一版
+          </Button>
+        )}
       </Box>
     )
   }
@@ -554,12 +676,12 @@ export function PaperView({
 
   return (
     <Box sx={{ px: { xs: 1, md: 2.5 }, py: 2 }}>
-      {/* 工具条：卷面之外的操作都收在这里，别混进卷子里 */}
+      {/* 工具条：卷面之外的操作都收在这里，别混进卷子里（chrome='doc' 时这些都在顶栏） */}
       <Stack
         direction="row"
         spacing={1}
         data-print-hide
-        sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 1.5 }}
+        sx={{ alignItems: 'center', flexWrap: 'wrap', mb: 1.5, display: chrome === 'doc' ? 'none' : 'flex' }}
       >
         <Typography variant="subtitle2">第 {version.version} 版</Typography>
         <Typography variant="caption" color="text.secondary">
@@ -571,7 +693,7 @@ export function PaperView({
           size="small"
           variant={showAnswers ? 'contained' : 'outlined'}
           disableElevation
-          onClick={() => setShowAnswers((previous) => !previous)}
+          onClick={() => setOwnAnswers((previous) => !previous)}
         >
           {showAnswers ? '只看卷面' : '答案与解析'}
         </Button>
@@ -601,7 +723,8 @@ export function PaperView({
 
       {version.gaps.length > 0 && (
         <Alert severity="warning" icon={<ReportOutlinedIcon />} data-print-hide sx={{ mb: 1.5 }}>
-          有 {String(version.gaps.length)} 个题位没凑齐：{version.gaps.map((gap) => `${gap.slot}（${humanGap(gap.reason)}）`).join('；')}
+          还有 {String(version.gaps.length)} 道没凑齐：{version.gaps.map((gap) => `${gap.slot.replace(/-\d+$/, '')}（${humanGap(gap.reason)}）`).join('；')}
+          <Box sx={{ mt: 0.5 }}>说一句「把缺的补上」，它会想办法（必要时现写一个新题型）。</Box>
         </Alert>
       )}
 
@@ -660,6 +783,22 @@ export function PaperView({
 }
 
 /** 这一节之前已经排了几道题（题号要连着走，不能每组都从 1 开始） */
+/**
+ * **卷面上的"第 N 题"**：题号是按题型分段连着走的（一、选择 1–8；二、填空 9–14…）。
+ *
+ * 所以"第 3 题"是**视图产物**——界面、agent 说的话、工具参数都得用这一套编号，
+ * 界面里永远不出现 S3-1 这种系统编号（这是"术语统一"的一半）。
+ */
+export function questionNumbers(rows: readonly { binding: SlotBindingView; item: ItemView }[]): ReadonlyMap<string, number> {
+  const groups = groupByType(rows)
+  const numbers = new Map<string, number>()
+  for (const group of groups) {
+    const base = numberAfter(groups, group.type)
+    group.rows.forEach((row, index) => numbers.set(row.binding.slot, base + index + 1))
+  }
+  return numbers
+}
+
 function numberAfter(groups: readonly { type: string; rows: readonly unknown[] }[], type: string): number {
   let count = 0
   for (const group of groups) {
@@ -697,7 +836,7 @@ function QuestionBlock({
   const [detail, setDetail] = useState(false)
 
   return (
-    <Box sx={{ position: 'relative', '&:hover .q-actions': { opacity: 1 } }}>
+    <Box id={`q-${binding.slot}`} sx={{ position: 'relative', scrollMarginTop: 16, '&:hover .q-actions': { opacity: 1 } }}>
       {/* 卷面左侧的题号（真卷子就是这样）：分值跟在题号后 */}
       <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
         <Typography component="span" sx={{ fontWeight: 600, minWidth: 26 }}>

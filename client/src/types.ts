@@ -128,6 +128,10 @@ export interface LogEntryView {
   workspace?: string
   /** 工具名（界面翻译成人话） */
   tool?: string
+  /** 这一行是谁做的（agent 的 runId）：子任务的记录挂回自己的块 */
+  agent?: string
+  /** 起一轮的那一行带它：这一轮是谁派的（空 = 老师直接起的） */
+  parent?: string
   /** 界面上把连续重复的行合并时用的计数（服务端不存这个） */
   repeat?: number
 }

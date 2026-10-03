@@ -15,7 +15,8 @@ export interface Route {
 export function parseHash(hash: string): Route {
   const raw = hash.replace(/^#\/?/, '')
   const [page = '', ...rest] = raw.split('/')
-  return { page: page === '' ? 'work' : page, arg: rest.join('/') }
+  // 默认落在起始页（挑一张卷子 / 开一张新的）——不再有"工作台"这个需要解释的概念
+  return { page: page === '' ? 'start' : page, arg: rest.join('/') }
 }
 
 export function useRoute(): { route: Route; go: (path: string) => void } {

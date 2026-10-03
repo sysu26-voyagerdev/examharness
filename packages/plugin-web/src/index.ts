@@ -357,9 +357,15 @@ export function apply(ctx: Context, config: WebConfig): void {
     ctx.session.appendLog({ kind: 'verdict', text: `${by} 确认了第 ${item.slot.key} 题`, workspace: owner() })
     broadcast('confirmed', { ...summarize(item), by })
   })
-  ctx.on('run:started', ({ runId, goal, workspace, label }) => {
+  ctx.on('run:started', ({ runId, goal, workspace, label, parent }) => {
     activeWorkspace = workspace
-    ctx.session.appendLog({ kind: 'user', text: label ?? goal, runId, workspace: workspace === '' ? owner() : workspace })
+    ctx.session.appendLog({
+      kind: 'user',
+      text: label ?? goal,
+      runId,
+      workspace: workspace === '' ? owner() : workspace,
+      ...(parent === undefined ? {} : { parent }),
+    })
     broadcast('run:started', { runId, goal, workspace, ...(label === undefined ? {} : { label }) })
   })
   ctx.on('run:step', (payload) => {
@@ -372,6 +378,7 @@ export function apply(ctx: Context, config: WebConfig): void {
       runId: payload.runId,
       workspace: payload.workspace === '' ? owner() : payload.workspace,
       ...(tool === undefined || payload.kind !== 'tool' ? {} : { tool }),
+      ...(payload.agent === undefined ? {} : { agent: payload.agent }),
     })
     broadcast('run:step', payload)
   })
@@ -694,6 +701,11 @@ export function apply(ctx: Context, config: WebConfig): void {
       // 资料要**看得见**：优先用会话绑定的那批；没绑就把库里的资料都铺进来
       // （以前只在整理资料时才铺，结果主 agent 的工作区是空的，"我传的资料呢"就是这么来的）
       const seeded = seedFromKb(ctx, meta.id, meta.kbId) ?? seedAllKb(ctx, meta.id)
+      // 新会话按老师的第一句话命名：卷子是给人看的，"未命名会话 3" 谁也认不出是哪张
+      if (meta.title.startsWith('未命名') && (body.goal ?? '').trim() !== '') {
+        const goal = (body.goal ?? '').trim().replace(/\s+/gu, ' ')
+        ctx.session.update({ title: goal.length > 18 ? `${goal.slice(0, 18)}…` : goal })
+      }
       try {
         const brief = briefOf(ctx, blueprint)
         const started = ctx.workbench.start({
