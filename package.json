@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "初中数学原创命题与组卷 · 构造优先 · 闸门链 · 教师终审",
+  "description": "数学出题与组卷 · 构造优先 · 闸门链 · 教师终审（当前落地：初中学段）",
   "engines": {
     "node": ">=22.18"
   },

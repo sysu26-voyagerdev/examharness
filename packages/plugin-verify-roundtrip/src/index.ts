@@ -37,7 +37,7 @@ export interface RoundTripConfig {
 }
 
 const PARSER_PROMPT = [
-  '你是题面解析器。给你一段初中数学题的题干，把它还原成结构，只输出 JSON：',
+  '你是题面解析器。给你一段数学题的题干，把它还原成结构，只输出 JSON：',
   '{"goals": ["题面要求做的每一件事，一问一条"], "givensCount": 条件的条数,',
   ' "answer": "你解出的答案", "numbers": [题面里出现的每一个数字]}',
   '要求：',
