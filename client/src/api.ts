@@ -103,6 +103,14 @@ export const compose = (text: string): Promise<ComposeView> =>
 export const escalateCompose = (goal: string, label: string): Promise<{ runId: string }> =>
   send('POST', '/api/compose/escalate', { goal, label }).then((r) => json<{ runId: string }>(r))
 
+/** 退回某一版（撤回）：按那一版的题列表再出一版 */
+export const restoreVersion = (version: number): Promise<{ ok: boolean; reason?: string }> =>
+  send('POST', '/api/session/restore', { version }).then((r) => json<{ ok: boolean; reason?: string }>(r))
+
+/** 把某一道从卷子上拿掉（题位空着，底栏会说还缺几道） */
+export const clearSlot = (slot: string): Promise<{ ok: boolean; reason?: string }> =>
+  send('POST', '/api/session/clear', { slot }).then((r) => json<{ ok: boolean; reason?: string }>(r))
+
 /** 老师指定用这一道：把它放进某个题位 */
 export const placeItem = (slot: string, itemId: string): Promise<{ ok: boolean; reason?: string }> =>
   send('POST', '/api/session/place', { slot, itemId }).then((r) => json<{ ok: boolean; reason?: string }>(r))

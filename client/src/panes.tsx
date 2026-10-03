@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import Box from '@mui/material/Box'
+import useMediaQuery from '@mui/material/useMediaQuery'
 
 /**
  * 分栏（像 VS Code 那样）：可拖宽、双击复位、可折成窄条、位置可换、宽度记住。
@@ -13,12 +14,12 @@ import Box from '@mui/material/Box'
  *   · 窗口变窄时自动折起左右栏（但记住用户手动展开过，不跟他抢）。
  */
 
-const MIN_DOC = 700
 const MIN_SIDE = 200
-const MAX_SIDE = 720
+const MAX_SIDE = 760
+/** 卷面（中栏）的底线：这是**硬护栏**——文档不能被挤到读不了（专业软件的取舍） */
+const DOC_FLOOR = 520
 const DEFAULT_LEFT = 250
 const DEFAULT_RIGHT = 400
-const DEFAULT_BOTTOM = 320
 const STORE_KEY = 'examharness.panes.v1'
 /** 窗口窄于这个宽度：左栏自动折起；再窄：agent 栏也折起 */
 const NARROW_LEFT = 1180
@@ -27,22 +28,12 @@ const NARROW_RIGHT = 980
 export interface PaneState {
   left: number
   right: number
-  bottom: number
   leftOpen: boolean
   rightOpen: boolean
-  /** agent 栏放在右边还是底部（宽屏放下面读得顺，窄屏放右边不挤卷面） */
-  dock: 'right' | 'bottom'
 }
 
 function load(): PaneState {
-  const fallback: PaneState = {
-    left: DEFAULT_LEFT,
-    right: DEFAULT_RIGHT,
-    bottom: DEFAULT_BOTTOM,
-    leftOpen: true,
-    rightOpen: true,
-    dock: 'right',
-  }
+  const fallback: PaneState = { left: DEFAULT_LEFT, right: DEFAULT_RIGHT, leftOpen: true, rightOpen: true }
   try {
     const raw = window.localStorage.getItem(STORE_KEY)
     if (raw === null) return fallback
@@ -60,13 +51,22 @@ export function usePanes(): {
   toggleRight: () => void
   /** 拖动中（拖动时禁掉卷面的文字选择与过渡） */
   dragging: boolean
-  beginDrag: (which: 'left' | 'right' | 'bottom') => (event: React.PointerEvent) => void
-  reset: (which: 'left' | 'right' | 'bottom') => void
+  beginDrag: (which: 'left' | 'right') => (event: React.PointerEvent) => void
+  reset: (which: 'left' | 'right') => void
 } {
-  /** 存下来的只有**用户自己的偏好**（宽度、开合、位置） */
+  /** 存下来的只有**用户自己的偏好**（宽度、开合） */
   const [pref, setPref] = useState<PaneState>(load)
-  const [width, setWidth] = useState(() => window.innerWidth)
   const [dragging, setDragging] = useState(false)
+  /**
+   * 窗口够不够宽：**用媒体查询问**，不靠 resize 事件。
+   *
+   * 踩过两次：靠 resize/ResizeObserver 时，首屏（或截图环境的视口变化）拿到的宽度是旧的，
+   * 结果两栏一起被折成窄条，而它们再也回不来——用户看到的就是"分栏自己没了"。
+   * matchMedia 是浏览器自己维护的状态，首屏就是对的，视口一变就回调。
+   */
+  const wideLeft = useMediaQuery(`(min-width:${String(NARROW_LEFT)}px)`)
+  const wideRight = useMediaQuery(`(min-width:${String(NARROW_RIGHT)}px)`)
+  const width = typeof window === 'undefined' ? 1440 : window.innerWidth
   /** 用户手动开过的栏：自动折叠不跟他抢（这一窗口里有效） */
   const manual = useRef<{ left: boolean; right: boolean }>({ left: false, right: false })
 
@@ -75,10 +75,17 @@ export function usePanes(): {
    * 踩过：把"窗口小所以折起"写进偏好，窗口变大之后那两栏就再也回不来了
    *（截图里两栏一起变成窄条就是这么来的）。窗口宽度只影响"现在显不显示"。
    */
+  const leftOpen = manual.current.left ? pref.leftOpen : pref.leftOpen && wideLeft
+  const rightOpen = manual.current.right ? pref.rightOpen : pref.rightOpen && wideRight
+  /**
+   * 宽度也要**派生**：窗口变窄时，存下来的宽度可能已经超过窗口——
+   * 那就必须让位给卷面（真实踩过：把 agent 拉宽之后窗口一小，卷面被挤成一条）。
+   */
   const panes: PaneState = {
-    ...pref,
-    leftOpen: manual.current.left ? pref.leftOpen : pref.leftOpen && width >= NARROW_LEFT,
-    rightOpen: manual.current.right ? pref.rightOpen : pref.rightOpen && width >= NARROW_RIGHT,
+    left: leftOpen ? Math.min(pref.left, Math.max(MIN_SIDE, width - (rightOpen ? pref.right : 0) - DOC_FLOOR)) : pref.left,
+    right: rightOpen ? Math.min(pref.right, Math.max(MIN_SIDE, width - (leftOpen ? pref.left : 0) - DOC_FLOOR)) : pref.right,
+    leftOpen,
+    rightOpen,
   }
 
   const set = useCallback((patch: Partial<PaneState>) => {
@@ -93,39 +100,22 @@ export function usePanes(): {
     })
   }, [])
 
-  // 窗口宽度：resize + ResizeObserver 两条都听（投影切换、侧栏抽屉都可能改宽度）
-  useEffect(() => {
-    const onResize = (): void => setWidth(window.innerWidth)
-    onResize()
-    window.addEventListener('resize', onResize)
-    const observer = new ResizeObserver(onResize)
-    observer.observe(document.documentElement)
-    return () => {
-      window.removeEventListener('resize', onResize)
-      observer.disconnect()
-    }
-  }, [])
-
   const beginDrag = useCallback(
-    (which: 'left' | 'right' | 'bottom') => (event: React.PointerEvent) => {
+    (which: 'left' | 'right') => (event: React.PointerEvent) => {
       event.preventDefault()
       const startX = event.clientX
-      const startY = event.clientY
-      const start = which === 'left' ? panes.left : which === 'right' ? panes.right : panes.bottom
+      const start = which === 'left' ? panes.left : panes.right
       setDragging(true)
 
       const move = (moveEvent: PointerEvent): void => {
-        if (which === 'bottom') {
-          const next = Math.min(600, Math.max(140, start + (startY - moveEvent.clientY)))
-          set({ bottom: next })
-          return
-        }
         // 左栏往右拖变宽，右栏往左拖变宽（相对位移方向相反）
         const delta = which === 'left' ? moveEvent.clientX - startX : startX - moveEvent.clientX
-        // 上界还要看卷面：卷面不能被挤到 MIN_DOC 以下
-        const other = which === 'left' ? panes.rightOpen && panes.dock === 'right' ? panes.right : 0 : panes.leftOpen ? panes.left : 0
-        const room = window.innerWidth - other - MIN_DOC
-        const next = Math.min(Math.min(MAX_SIDE, room), Math.max(MIN_SIDE, start + delta))
+        const other = which === 'left' ? (panes.rightOpen ? panes.right : 0) : panes.leftOpen ? panes.left : 0
+        // **上界是硬的**：卷面留够 DOC_FLOOR 之后还有多少，就最多能拉多宽。
+        // 以前只做 Math.min，窗口窄的时候会把卷面继续挤小（用户："拉大时有问题"）。
+        const limit = Math.min(MAX_SIDE, window.innerWidth - other - DOC_FLOOR)
+        const next = Math.max(MIN_SIDE, Math.min(limit, start + delta))
+        if (next < MIN_SIDE) return
         set(which === 'left' ? { left: next } : { right: next })
       }
       const up = (): void => {
@@ -140,8 +130,8 @@ export function usePanes(): {
   )
 
   const reset = useCallback(
-    (which: 'left' | 'right' | 'bottom') => {
-      set(which === 'left' ? { left: DEFAULT_LEFT } : which === 'right' ? { right: DEFAULT_RIGHT } : { bottom: DEFAULT_BOTTOM })
+    (which: 'left' | 'right') => {
+      set(which === 'left' ? { left: DEFAULT_LEFT } : { right: DEFAULT_RIGHT })
     },
     [set],
   )

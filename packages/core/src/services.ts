@@ -843,6 +843,18 @@ export interface SessionApi {
     itemId: string,
     by?: string,
   ): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }>
+  /**
+   * **退回某一版**（撤回）：把那一版的题列表原样变成新的一版。
+   *
+   * 为什么不是"删掉后面的版本"：版本是留痕（谁在什么时候改了什么），历史不该被抹掉；
+   * 撤回是一次**新的改动**，它说的正是"我要回到第 N 版那样"。
+   */
+  restore?(version: number): PaperVersion
+  /**
+   * **把某一道从卷子上拿掉**（题位空着，底栏会如实显示"还缺几道"）。
+   * 想换回来就说一句"把第 3 题补上"——设计里的题位还在，缺了会说出来。
+   */
+  clear?(slotKey: string): PaperVersion
   /** 人工终审签字（R4）。签名与时间落入题目的 review 与会话轨迹 */
   confirm(itemId: string, by: string): SlotBinding | undefined
   freeze(): PaperVersion | undefined

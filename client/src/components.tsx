@@ -214,9 +214,11 @@ export function Timeline({
 
   return (
     <Box ref={boxRef} sx={{ height: '100%', overflowY: 'auto', px: 1.25, py: 1 }}>
-      {blocks.map((block) => {
+      {blocks.map((block, index) => {
         const current = running && block.id === runningId
-        const expanded = current || open.includes(block.id) || block.parent === undefined && blocks.length === 1
+        // 默认展开**最近那一块**（刚发生的事才是老师要看的），更早的折成一行
+        const latest = index === blocks.length - 1
+        const expanded = current || open.includes(block.id) || (block.parent === undefined && latest)
         return (
           <Box key={block.id} sx={{ mb: 1.25 }}>
             <Stack
@@ -228,7 +230,7 @@ export function Timeline({
               <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
                 {block.parent === undefined ? '老师' : '子任务'}
               </Typography>
-              <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 0 }} noWrap>
+              <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>
                 {plain(block.title)}
               </Typography>
               {current && <Chip size="small" color="primary" label="在做" />}
@@ -245,7 +247,7 @@ export function Timeline({
                 {block.children.map((child) => (
                   <Box key={child.id} sx={{ borderLeft: 2, borderColor: 'divider', pl: 1 }}>
                     <Stack direction="row" spacing={1} sx={{ alignItems: 'center', py: 0.25 }}>
-                      <Typography variant="caption" color="secondary.main">
+                      <Typography variant="caption" color="secondary.main" sx={{ overflowWrap: 'anywhere' }}>
                         {plain(child.title)}
                       </Typography>
                       <Typography variant="caption" color="text.disabled">
@@ -331,14 +333,18 @@ function groupRuns(entries: readonly LogEntryView[]): readonly RunBlock[] {
   return roots.map((entry) => entry.block)
 }
 
-/** 一步：一行说清"做了什么、结果是什么"，点开才看全文 */
+/**
+ * 一步：**一行，但会自己换行**。
+ *
+ * 踩过：以前用 nowrap + 省略号，栏一窄就成了一条横线（用户："agent 输出没有自动换行"）。
+ * 记录是给人读的，宁可折行也不裁字；实在长的（超过 6 行）折起一半，点一下看全文。
+ */
 function StepRow({ entry, translate }: { entry: LogEntryView; translate?: (text: string) => string }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const text = translate === undefined ? entry.text : translate(entry.text)
   const failed = /没通过|失败|拦下|不一致|过于相似|读不了|不能|还缺|出不了/.test(text)
   const done = entry.kind === 'verdict' || entry.kind === 'gate'
-  const oneLine = text.split('\n')[0] ?? ''
-  const more = text.includes('\n') || text.length > 120
+  const long = text.length > 260 || text.split('\n').length > 6
   return (
     <Box sx={{ px: 0.5 }}>
       <Stack direction="row" spacing={0.75} sx={{ alignItems: 'flex-start' }}>
@@ -353,21 +359,28 @@ function StepRow({ entry, translate }: { entry: LogEntryView; translate?: (text:
         </Box>
         <Typography
           variant="body2"
-          onClick={() => (more ? setOpen((value) => !value) : undefined)}
+          onClick={() => (long ? setOpen((value) => !value) : undefined)}
           sx={{
             flex: 1,
             minWidth: 0,
             color: failed ? 'error.main' : 'text.primary',
-            whiteSpace: open ? 'pre-wrap' : 'nowrap',
-            overflow: 'hidden',
-            textOverflow: open ? 'clip' : 'ellipsis',
-            cursor: more ? 'pointer' : 'default',
+            whiteSpace: 'pre-wrap',
+            overflowWrap: 'anywhere',
             wordBreak: 'break-word',
+            cursor: long ? 'pointer' : 'default',
+            ...(long && !open
+              ? {
+                  display: '-webkit-box',
+                  WebkitLineClamp: 6,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                }
+              : {}),
           }}
-          title={more ? '点开看全文' : undefined}
+          title={long ? (open ? '收起' : '点开看全文') : undefined}
         >
           {entry.kind === 'tool' && entry.tool !== undefined ? `${toolLabel(entry.tool)}：` : ''}
-          {open ? text : oneLine}
+          {text}
         </Typography>
       </Stack>
     </Box>
@@ -568,6 +581,20 @@ export const RISK: Readonly<Record<string, string>> = {
   figure: '图形与条件对不上',
 }
 
+/**
+ * 把一行记录翻成人话：闸门名 → 风险说法，系统题号 → "第 N 题"。
+ * 日志是给人看的（老师要看着 agent 干活），系统词一个都不该露出来。
+ */
+export function humanLine(text: string, number?: (slot: string) => string | undefined): string {
+  // "被 verify-x 拦下"先说成人话（否则会变成"被与已有题目太像 拦下"这种别扭句子）
+  let out = text.replace(/\S*\s*被\s*verify-([a-z-]+)\s*拦下[：:]/gu, (_all, gate: string) => `${RISK[gate] ?? gateLabel(`verify-${gate}`)}：`)
+  out = out.replace(/verify-([a-z-]+)/gu, (_all, gate: string) => RISK[gate] ?? gateLabel(`verify-${gate}`))
+  out = out.replace(/it-[\w-]+/gu, '这道题')
+  out = out.replace(/口述出题/g, '这道题')
+  out = out.replace(/\bS(\d+)-(\d+)\b/gu, (all: string) => number?.(all) ?? '这道题')
+  return out
+}
+
 function humanGap(reason: string): string {
   const stripped = reason
     // 缺口原因里可能列了几个题型各为什么不行：**每一处**都要翻成人话
@@ -623,6 +650,8 @@ export function PaperView({
   onConfirm,
   onAssemble,
   onSyncHeader,
+  onPatchText,
+  onDelete,
   answers,
   chrome = 'full',
 }: {
@@ -641,6 +670,10 @@ export function PaperView({
   onRevise: (slotKey: string, item: ItemView) => void
   onConfirm: (itemId: string) => void
   onAssemble: () => void
+  /** 就地改题面（改说法） */
+  onPatchText: (itemId: string, stem: string) => Promise<{ ok: boolean; reason?: string; gate?: string }>
+  /** 从卷子上拿掉这一道 */
+  onDelete: (slotKey: string) => void
   /** 由外面控制"要不要连着答案看"（底栏的 试卷|答案 视图标签） */
   answers?: boolean
   /**
@@ -723,7 +756,15 @@ export function PaperView({
 
       {version.gaps.length > 0 && (
         <Alert severity="warning" icon={<ReportOutlinedIcon />} data-print-hide sx={{ mb: 1.5 }}>
-          还有 {String(version.gaps.length)} 道没凑齐：{version.gaps.map((gap) => `${gap.slot.replace(/-\d+$/, '')}（${humanGap(gap.reason)}）`).join('；')}
+          还缺 {String(version.gaps.length)} 道：{version.gaps.map((gap) => `${gap.slot.replace(/-\d+$/, '')}`).join('、')}
+          （设定里的编号）
+          <Box sx={{ mt: 0.5, color: 'text.secondary' }}>
+            {(() => {
+              // 同一句原因重复三遍是最烦的（每个题型各报一次）——去重后只留不同的话
+              const reasons = [...new Set(version.gaps.flatMap((gap) => humanGap(gap.reason).split('；')))]
+              return reasons.slice(0, 2).join('；')
+            })()}
+          </Box>
           <Box sx={{ mt: 0.5 }}>说一句「把缺的补上」，它会想办法（必要时现写一个新题型）。</Box>
         </Alert>
       )}
@@ -770,6 +811,8 @@ export function PaperView({
                       onRegenerate={onRegenerate}
                       onRevise={onRevise}
                       onConfirm={onConfirm}
+                      onPatchText={onPatchText}
+                      onDelete={onDelete}
                     />
                   )
                 })}
@@ -820,6 +863,8 @@ function QuestionBlock({
   onRegenerate,
   onRevise,
   onConfirm,
+  onPatchText,
+  onDelete,
 }: {
   number: number
   binding: SlotBindingView
@@ -831,9 +876,25 @@ function QuestionBlock({
   onRegenerate: (slotKey: string) => void
   onRevise: (slotKey: string, item: ItemView) => void
   onConfirm: (itemId: string) => void
+  /** 就地改题面（改的是说法；改了数字就得重造——见编辑器里的说明） */
+  onPatchText: (itemId: string, stem: string) => Promise<{ ok: boolean; reason?: string; gate?: string }>
+  onDelete: (slotKey: string) => void
 }): React.JSX.Element {
   const status = statusOf(item, binding)
   const [detail, setDetail] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [stem, setStem] = useState(item.stem)
+  const [note, setNote] = useState('')
+
+  const save = async (): Promise<void> => {
+    const result = await onPatchText(item.id, stem.trim())
+    if (!result.ok) {
+      setNote(`${gateLabel(result.gate ?? '')}：${result.reason ?? '没通过'}`)
+      return
+    }
+    setNote('')
+    setEditing(false)
+  }
 
   return (
     <Box id={`q-${binding.slot}`} sx={{ position: 'relative', scrollMarginTop: 16, '&:hover .q-actions': { opacity: 1 } }}>
@@ -843,9 +904,62 @@ function QuestionBlock({
           {number}.
         </Typography>
         <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography component="span" sx={{ fontSize: 15.5, lineHeight: 1.9 }}>
-            <MathText html={item.stemHtml} />
-          </Typography>
+          {editing ? (
+            // **就地改，没有"编辑模式"**：点一下就改，Ctrl+Enter 保存、Esc 取消
+            <Box data-print-hide>
+              <TextField
+                autoFocus
+                fullWidth
+                multiline
+                minRows={2}
+                maxRows={10}
+                value={stem}
+                onChange={(event) => setStem(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault()
+                    void save()
+                  }
+                  if (event.key === 'Escape') setEditing(false)
+                }}
+              />
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
+                <Button size="small" variant="contained" disableElevation disabled={busy} onClick={() => void save()}>
+                  保存并检查
+                </Button>
+                <Button
+                  size="small"
+                  onClick={() => {
+                    setStem(item.stem)
+                    setEditing(false)
+                    setNote('')
+                  }}
+                >
+                  取消
+                </Button>
+                <Typography variant="caption" color="text.secondary">
+                  公式照 $…$ 写。改说法随便改；**数字、条件、答案别动**——那等于换了一道题，用「改这一道…」。
+                </Typography>
+              </Stack>
+              {note !== '' && (
+                <Alert severity="warning" sx={{ mt: 1 }}>
+                  {note}
+                </Alert>
+              )}
+            </Box>
+          ) : (
+            <Typography
+              component="span"
+              onDoubleClick={() => {
+                if (busy || frozen) return
+                setStem(item.stem)
+                setEditing(true)
+              }}
+              sx={{ fontSize: 15.5, lineHeight: 1.9 }}
+            >
+              <MathText html={item.stemHtml} />
+            </Typography>
+          )}
           {item.options.length > 0 && (
             <Box
               sx={{
@@ -929,12 +1043,27 @@ function QuestionBlock({
               }}
             />
           </Tooltip>
-          <Button size="small" disabled={busy || frozen} onClick={() => onRevise(binding.slot, item)}>
-            改这道题…
+          <Button
+            size="small"
+            disabled={busy || frozen || editing}
+            onClick={() => {
+              setStem(item.stem)
+              setEditing(true)
+            }}
+          >
+            改文字
           </Button>
-          <Button size="small" disabled={busy || frozen} onClick={() => onRegenerate(binding.slot)}>
+          <Button size="small" disabled={busy || frozen || editing} onClick={() => onRevise(binding.slot, item)}>
+            改这一道…
+          </Button>
+          <Button size="small" disabled={busy || frozen || editing} onClick={() => onRegenerate(binding.slot)}>
             换一道
           </Button>
+          <Tooltip title="从卷子上拿掉（题位空着，底栏会说还缺几道）">
+            <Button size="small" disabled={busy || frozen || editing} onClick={() => onDelete(binding.slot)}>
+              删掉
+            </Button>
+          </Tooltip>
           {item.lifecycle === 'needs_review' && binding.confirmedBy === null && (
             <Button size="small" variant="contained" disableElevation disabled={busy || frozen} onClick={() => onConfirm(item.id)}>
               确认

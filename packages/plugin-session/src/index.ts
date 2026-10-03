@@ -396,6 +396,31 @@ export class SessionService extends Service implements SessionApi {
     return updated
   }
 
+  /**
+   * 退回某一版：把那一版的题列表原样变成新的一版（历史不抹掉，撤回本身也是一次改动）。
+   */
+  restore(version: number): PaperVersion {
+    const record = this.record()
+    if (record.meta.frozen) throw new Error('本会话已冻结：冻结后不可改动（R3）')
+    const target = record.versions.find((entry) => entry.version === version)
+    if (target === undefined) throw new Error(`没有第 ${String(version)} 版`)
+    const blueprint = this.blueprintOf(record.meta)
+    // 只带回购库里仍在的题（题被删了就如实少一道，不假装）
+    const bindings = target.bindings.filter((binding) => this.ctx.bank.get(binding.itemId) !== undefined)
+    return this.push(record, `退回第 ${String(version)} 版`, bindings, 0, target.gaps, blueprint.paper.totalScore)
+  }
+
+  /** 把某一道从卷子上拿掉：题位空着，缺口如实报出来 */
+  clear(slotKey: string): PaperVersion {
+    const record = this.record()
+    if (record.meta.frozen) throw new Error('本会话已冻结：冻结后不可改动（R3）')
+    const blueprint = this.blueprintOf(record.meta)
+    const previous = this.latest()
+    const bindings = (previous?.bindings ?? []).filter((binding) => binding.slot !== slotKey)
+    if (bindings.length === (previous?.bindings ?? []).length) throw new Error(`这份卷子上没有 ${slotKey}`)
+    return this.push(record, `去掉 ${slotKey}`, bindings, 0, previous?.gaps ?? [], blueprint.paper.totalScore)
+  }
+
   freeze(): PaperVersion | undefined {
     const record = this.record()
     record.meta = { ...record.meta, frozen: true }

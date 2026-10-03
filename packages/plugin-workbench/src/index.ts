@@ -191,6 +191,19 @@ const TOOLS: readonly LlmToolSpec[] = [
     },
   },
   {
+    name: "quick_question",
+    description:
+      "**老师口头要一道题时的快路**：把他的话一次性变成一道题（认知识点 → 用现有题型现造 → 过闸门 → 收下）。" +
+      "返回 items（已入库的题，含 id）、alternatives（换个相近知识点就能出的那些）、reason（出不了的原因）。" +
+      "走它比一步步 construct_item 快得多；拿到 items 之后用 place_item 放进题位。" +
+      "它造不出来（没有题型覆盖、参数空间用尽）时，你再上手写题型。",
+    parameters: {
+      type: "object",
+      properties: { text: { type: "string", description: "老师原话，例如「出一道二次函数的解答题，求最大高度，8 分」" } },
+      required: ["text"],
+    },
+  },
+  {
     name: "place_item",
     description:
       "**把这道题放到卷子的这个题位上**（老师看到的就是卷子，不是题库）：" +
@@ -1520,6 +1533,58 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       };
     }
 
+    if (tool === "quick_question") {
+      const text = String(args.text ?? "").trim();
+      if (text === "") {
+        return { kind: "tool", text: "quick_question：没说想要什么题", payload: { error: "空的一句话" } };
+      }
+      const result = await this.compose(text);
+      const items = result.items.map((item) => {
+        this.counter += 1;
+        const candidateId = `cand-${String(this.counter)}`;
+        // 候选题表用的是"蓝图行"（带 count）：SlotSpec 差一个 count，这里补上
+        state.candidates.set(candidateId, { id: candidateId, slot: { ...item.slot, count: 1 }, item });
+        return {
+          candidateId,
+          id: item.id,
+          stem: item.prose.stem,
+          answer: item.prose.answerText,
+          knowledge: item.slot.knowledge,
+          score: item.slot.score,
+          type: item.slot.type,
+        };
+      });
+      if (items.length > 0) {
+        return {
+          kind: "tool",
+          text:
+            `quick_question：现造了一道（${items[0]?.type ?? ""}·${String(items[0]?.score ?? 0)} 分，` +
+            `已过体检，${items[0]?.id ?? ""}）\n${items[0]?.stem ?? ""}` +
+            (result.adjusted === undefined ? "" : `\n（${result.adjusted}）`),
+          payload: { ok: true, items, adjusted: result.adjusted ?? null, spec: result.spec ?? null },
+          ...(items[0]?.id === undefined ? {} : { storedId: items[0].id }),
+        };
+      }
+      return {
+        kind: "tool",
+        text:
+          `quick_question：这道题现造不出来 —— ${result.reason ?? "说不清要什么"}。` +
+          (result.alternatives === undefined || result.alternatives.length === 0
+            ? ""
+            : `这些能出：${result.alternatives.join("、")}。`) +
+          (result.attempts === undefined || result.attempts.length === 0
+            ? ""
+            : `试过的：${result.attempts.slice(0, 3).join("；")}`),
+        payload: {
+          ok: false,
+          reason: result.reason ?? "",
+          alternatives: result.alternatives ?? [],
+          attempts: result.attempts ?? [],
+          spec: result.spec ?? null,
+        },
+      };
+    }
+
     if (tool === "place_item") {
       const candidateId = String(args.candidateId ?? "");
       const slotKey = String(args.slotKey ?? "");
@@ -1528,27 +1593,37 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         return { kind: "tool", text: `place_item：没有候选题 ${candidateId}`, payload: { error: "未知候选" } };
       }
       let item = candidate.item;
-      if (item.prose.serializer.model === "template" && this.ctx.llm.configured) {
+      // **已经在库里、而且每道现役闸门都签过字的题不必再交一遍**：
+      // 快路（quick_question）造出来的题本来就已经入库了，再 submit 会被去重闸门
+      // 当成"重复提交"拦下，agent 于是白跑一轮（真实踩过）。
+      const stored = this.ctx.bank.get(item.id);
+      const gates = this.ctx.bank.gates?.() ?? [];
+      const signed = stored !== undefined && gates.every((gate) => stored.evidence[gate] !== undefined);
+      if (signed) {
+        item = stored;
+      }
+      if (item.prose.serializer.model === "template" && !signed && this.ctx.llm.configured) {
         const written = await this.serialize(item);
         if (typeof written === "string") {
           return { kind: "tool", text: `place_item：题面没写成（${written}）`, payload: { error: written } };
         }
         item = written;
       }
-      const result = await this.ctx.bank.submit(item);
-      if (!result.ok) {
+      const submitted = signed ? { ok: true as const, id: item.id } : await this.ctx.bank.submit(item);
+      if (!submitted.ok) {
         return {
           kind: "gate",
-          text: `place_item：被 ${result.verdict.gate} 拦下 —— ${result.verdict.reason}`,
+          text: `place_item：被 ${submitted.verdict.gate} 拦下 —— ${submitted.verdict.reason}`,
           payload: {
             ok: false,
-            gate: result.verdict.gate,
-            reason: result.verdict.reason,
-            fixable: result.verdict.fixable,
-            hint: result.verdict.hint ?? null,
+            gate: submitted.verdict.gate,
+            reason: submitted.verdict.reason,
+            fixable: submitted.verdict.fixable,
+            hint: submitted.verdict.hint ?? null,
           },
         };
       }
+      const result = submitted;
       // 过闸门之后**写进卷子**：这一步才是老师看得见的（R2 没被绕过：仍然是唯一写入口 + 闸门裁决）
       const session = this.ctx.get("session");
       if (session === undefined) {
@@ -2541,6 +2616,8 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     .join("\n");
   return [
     "你是 AI 命题组的组长。你的产出必须是**能过闸门**的原创题。",
+    "**老师口头要一道题时先走快路**：quick_question 一次就能造出来（认知识点 → 现造 → 过闸门），" +
+    "   比一步步 construct_item 快得多；拿到题就用 place_item 放到题位（他没说题位就挑最合适的一个）。",
     "**但产物是卷子**：老师只认卷子上第几题是什么。题库是留档（临时堆栈），往库里加题不是成果——",
     "   submit_item 之后卷子还没变；要让某一题变成新出的那道，必须 place_item <题位> <候选题>。",
     "   收尾时说的是\"卷子第 N 版、第 X 题变成了……\"，不是\"库里多了一道\"。",

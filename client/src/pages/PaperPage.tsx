@@ -20,7 +20,7 @@ import Typography from '@mui/material/Typography'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import { BlueprintDialog } from '../blueprint-dialog.js'
-import { PaperView, ReviseDialog, Timeline, questionNumbers } from '../components.js'
+import { PaperView, ReviseDialog, Timeline, humanLine, questionNumbers } from '../components.js'
 import { forWorkspace } from '../log.js'
 import { Rail, Sash, usePanes } from '../panes.js'
 import { IndexPane } from '../index-pane.js'
@@ -88,12 +88,10 @@ export function PaperPage(): React.JSX.Element {
   const numbers = useMemo(() => questionNumbers(rows), [rows])
   const translate = useCallback(
     (text: string): string =>
-      text
-        .replace(/it-[\w-]+/gu, '这道题')
-        .replace(/\bS?(\d+)-(\d+)\b/gu, (all: string, row: string, index: string) => {
-          const number = numbers.get(`${all.startsWith('S') ? all : `S${row}-${index}`}`) ?? numbers.get(`S${row}-${index}`)
-          return number === undefined ? `第 ${row} 组第 ${index} 道` : `第 ${String(number)} 题`
-        }),
+      humanLine(text, (slot) => {
+        const number = numbers.get(slot)
+        return number === undefined ? undefined : `第 ${String(number)} 题`
+      }),
     [numbers],
   )
   const entries = useMemo(() => forWorkspace(log, session?.meta.id ?? ''), [log, session?.meta.id])
@@ -165,6 +163,13 @@ export function PaperPage(): React.JSX.Element {
         onConfirm={(itemId) =>
           void app.guard(`confirm:${itemId}`, async () => {
             await api.confirmItem(itemId, '老师')
+            await app.reload()
+          })
+        }
+        onPatchText={(itemId, stem) => api.patchItem(itemId, { stem })}
+        onDelete={(slotKey) =>
+          void app.guard(`clear:${slotKey}`, async () => {
+            await api.clearSlot(slotKey)
             await app.reload()
           })
         }
@@ -319,12 +324,30 @@ export function PaperPage(): React.JSX.Element {
                 </MenuItem>
               ))}
           </TextField>
-          {viewingOld && <Chip size="small" variant="outlined" label="回到最新" onClick={() => setViewVersion(null)} />}
+          {viewingOld && (
+            <>
+              <Chip size="small" variant="outlined" label="回到最新" onClick={() => setViewVersion(null)} />
+              <Button
+                size="small"
+                variant="outlined"
+                disabled={busy !== '' || frozen}
+                onClick={() =>
+                  void app.guard('restore', async () => {
+                    await api.restoreVersion(shown?.version ?? 0)
+                    setViewVersion(null)
+                    await app.reload()
+                  })
+                }
+              >
+                退回这一版
+              </Button>
+            </>
+          )}
         </Stack>
       )}
 
-      {/* 三栏：索引 | 卷子 | agent（可拖、可折、可换到下面） */}
-      <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: panes.panes.dock === 'bottom' ? 'column' : 'row' }}>
+      {/* 三栏：索引 | 卷子 | agent（可拖宽、双击复位、可折成窄条） */}
+      <Box sx={{ flex: 1, minHeight: 0, display: 'flex' }}>
         {panes.panes.leftOpen ? (
           <>
             <IndexPane
@@ -333,35 +356,28 @@ export function PaperPage(): React.JSX.Element {
               onClose={panes.toggleLeft}
               onRevise={(slot, item) => setRevising({ slot, item })}
             />
-            {panes.panes.dock === 'right' && <Sash orientation="vertical" onPointerDown={panes.beginDrag('left')} onDoubleClick={() => panes.reset('left')} />}
+            <Sash orientation="vertical" onPointerDown={panes.beginDrag('left')} onDoubleClick={() => panes.reset('left')} />
           </>
         ) : (
           <Rail title="索引" side="left" onClick={panes.toggleLeft} />
         )}
 
-        <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          {document}
-          {panes.panes.dock === 'bottom' && panes.panes.rightOpen && (
-            <>
-              <Sash orientation="horizontal" onPointerDown={panes.beginDrag('bottom')} onDoubleClick={() => panes.reset('bottom')} />
-              <Box sx={{ height: panes.panes.bottom, minHeight: 140, flexShrink: 0, borderTop: 1, borderColor: 'divider', display: 'flex', minWidth: 0 }}>
-                {agent}
-              </Box>
-            </>
-          )}
-        </Box>
+        {/*
+          卷面：文档占主位。除了拖动的护栏（panes.tsx），这里再兜一道 CSS 底线——
+          宁可整屏出现横向滚动，也不把卷子挤成一条（用户："拉大时有问题"）。
+        */}
+        <Box sx={{ flex: 1, minWidth: 'min(100%, 520px)', minHeight: 0, display: 'flex', flexDirection: 'column' }}>{document}</Box>
 
-        {panes.panes.dock === 'right' &&
-          (panes.panes.rightOpen ? (
-            <>
-              <Sash orientation="vertical" onPointerDown={panes.beginDrag('right')} onDoubleClick={() => panes.reset('right')} />
-              <Box sx={{ width: panes.panes.right, flexShrink: 0, borderLeft: 1, borderColor: 'divider', display: 'flex', minWidth: 0 }}>
-                {agent}
-              </Box>
-            </>
-          ) : (
-            <Rail title="agent" side="right" onClick={panes.toggleRight} />
-          ))}
+        {panes.panes.rightOpen ? (
+          <>
+            <Sash orientation="vertical" onPointerDown={panes.beginDrag('right')} onDoubleClick={() => panes.reset('right')} />
+            <Box sx={{ width: panes.panes.right, flexShrink: 0, borderLeft: 1, borderColor: 'divider', display: 'flex', minWidth: 0 }}>
+              {agent}
+            </Box>
+          </>
+        ) : (
+          <Rail title="agent" side="right" onClick={panes.toggleRight} />
+        )}
       </Box>
 
       {/* 底栏：左边是这张卷子的两种视图，右边是一直要看的事实 */}
@@ -373,12 +389,6 @@ export function PaperPage(): React.JSX.Element {
       >
         <Chip size="small" variant={answers ? 'outlined' : 'filled'} color={answers ? 'default' : 'primary'} label="试卷" onClick={() => setAnswers(false)} />
         <Chip size="small" variant={answers ? 'filled' : 'outlined'} color={answers ? 'primary' : 'default'} label="答案与解析" onClick={() => setAnswers(true)} />
-        <Chip
-          size="small"
-          variant="outlined"
-          label={panes.panes.dock === 'right' ? 'agent 移到下面' : 'agent 移到右边'}
-          onClick={() => panes.set({ dock: panes.panes.dock === 'right' ? 'bottom' : 'right', rightOpen: true })}
-        />
         <Box sx={{ flex: 1 }} />
         <Typography variant="caption" color="text.secondary">
           {facts.count} 题 · {String(shown?.totalScore ?? 0)} 分 · {String(session?.blueprint.paper.minutes ?? 0)} 分钟

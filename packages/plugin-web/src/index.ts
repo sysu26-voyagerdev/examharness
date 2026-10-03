@@ -350,7 +350,12 @@ export function apply(ctx: Context, config: WebConfig): void {
   /** 记录一定有归属：没有正在跑的轮次，就归当前会话。**没有"两边都显示"这种中间态。** */
   const owner = (): string => (activeWorkspace === '' ? ctx.session.current().id : activeWorkspace)
   ctx.on('item:stored', ({ item }) => {
-    ctx.session.appendLog({ kind: 'verdict', text: `入库：第 ${item.slot.key} 题`, workspace: owner() })
+    ctx.session.appendLog({
+      kind: 'verdict',
+      // 不写系统题名（S3-1 这种是内部编号，老师认的是卷面上的"第 N 题"）
+      text: `收下一道新题（${item.slot.knowledge.join('、') || item.slot.type}｜${item.slot.type} ${String(item.slot.score)} 分）`,
+      workspace: owner(),
+    })
     broadcast('stored', summarize(item))
   })
   ctx.on('item:confirmed', ({ item, by }) => {
@@ -559,6 +564,38 @@ export function apply(ctx: Context, config: WebConfig): void {
           label: `改 ${slotKey}`,
         })
         send(res, 202, { runId: started.runId, slot: slotKey })
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    /** 退回某一版（撤回）：按那一版的题列表再出一版，历史留着 */
+    if (method === 'POST' && path === '/api/session/restore') {
+      const body = (await readBody(req)) as { version?: number }
+      const restore = ctx.session.restore?.bind(ctx.session)
+      if (restore === undefined) {
+        send(res, 200, { ok: false, reason: '会话没有接入版本退回' })
+        return
+      }
+      try {
+        send(res, 200, { ok: true, version: restore(Number(body.version ?? 0)) })
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    /** 把某一道从卷子上拿掉（题位空着，底栏如实显示还缺几道） */
+    if (method === 'POST' && path === '/api/session/clear') {
+      const body = (await readBody(req)) as { slot?: string }
+      const clear = ctx.session.clear?.bind(ctx.session)
+      if (clear === undefined) {
+        send(res, 200, { ok: false, reason: '会话没有接入删除' })
+        return
+      }
+      try {
+        send(res, 200, { ok: true, version: clear(String(body.slot ?? '')) })
       } catch (error) {
         send(res, 409, { error: error instanceof Error ? error.message : String(error) })
       }
