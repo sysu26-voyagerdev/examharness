@@ -6,6 +6,7 @@ import type {
   BlueprintRowView,
   BlueprintView,
   CredentialInfoView,
+  GraphView,
   KbBatchView,
   KbListView,
   LiveEvent,
@@ -59,6 +60,9 @@ const send = (method: string, path: string, body?: unknown): Promise<Response> =
 
 export const getSession = (): Promise<SessionView> => fetch('/api/session').then((r) => json<SessionView>(r))
 export const getState = (): Promise<StateView> => fetch('/api/state').then((r) => json<StateView>(r))
+
+/** 知识图谱：整张图一次拿走（只读——图是脚本算出来的产物，见 docs/知识图谱构建报告.md） */
+export const getGraph = (): Promise<GraphView> => fetch('/api/graph').then((r) => json<GraphView>(r))
 
 /** 题库：按条件筛（题库是老师手里的存货，得看得见、挑得动） */
 export const getBank = (query: BankQuery = {}): Promise<BankView> => {

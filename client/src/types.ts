@@ -150,6 +150,44 @@ export interface KnowledgeView {
   learned: readonly string[]
 }
 
+/** 知识点在图谱页上的样子（`GET /api/graph`）——可选字段缺了就不画，不要编 */
+export interface GraphNodeView {
+  key: string
+  prerequisites: readonly string[]
+  /** 谁拿它当前置 */
+  successors: readonly string[]
+  /** 前置闭包大小（不含自己） */
+  depth: number
+  /** 同年级同章节里的第几个 */
+  chapterIndex: number
+  /** 已学（含前置闭包，与超纲闸门同一份语义） */
+  learned: boolean
+  grade?: string
+  chapter?: string
+  domain?: string
+  kind?: string
+  aliases?: readonly string[]
+  /** 存在依据：课标条目原文、教材章节、真题统计 */
+  sources?: readonly string[]
+  /** 每一条前置凭什么成立 */
+  prerequisiteBasis?: Readonly<Record<string, string>>
+  evidenceLevel?: string
+  zhenti?: { papers: number; questions: number }
+  /** 常见问法（人工归纳，不是统计出来的） */
+  ask?: string
+}
+
+export interface GraphView {
+  total: number
+  edges: number
+  learned: readonly string[]
+  nodes: readonly GraphNodeView[]
+  /** 指向图里不存在的知识点的前置边 */
+  dangling: readonly { key: string; missing: string }[]
+  /** 这张图是脚本从哪些材料算出来的 */
+  generatedBy?: Readonly<Record<string, unknown>>
+}
+
 export interface StateView {
   blueprint: BlueprintView
   items: readonly ItemView[]
