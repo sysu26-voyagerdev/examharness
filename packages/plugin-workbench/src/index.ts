@@ -2753,7 +2753,9 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       };
     }
 
-    return { kind: "tool", text: `未知工具 ${tool}`, payload: { error: "未知工具" } };
+    // 这一行是**给老师看的**（模型拿的是 payload，不知道名字也无所谓）：
+    // 记录里露一个英文工具名，等于把内部实现摊在老师面前（截图里见过 `未知工具 change_setting`）
+    return { kind: "tool", text: "它想用一个这里没有的能力，这一步没做成", payload: { error: `未知工具 ${tool}` } };
   }
 }
 

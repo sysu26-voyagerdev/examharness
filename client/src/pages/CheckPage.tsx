@@ -6,7 +6,8 @@ import Chip from '@mui/material/Chip'
 import Stack from '@mui/material/Stack'
 import Typography from '@mui/material/Typography'
 import { useApp } from '../app-context.js'
-import { RISK, gateLabel, questionNumbers } from '../components.js'
+import { questionNumbers } from '../components.js'
+import { RISK, gateLabel } from '../log.js'
 import type { ItemView } from '../types.js'
 
 /**

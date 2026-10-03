@@ -43,7 +43,7 @@ import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import * as api from './api.js'
 import { useApp } from './app-context.js'
-import { toolLabel } from './log.js'
+import { RISK, TOOL_LABEL, gateLabel, toolLabel } from './log.js'
 import { MarkdownText } from './markdown.js'
 import { MathText } from './math-text.js'
 import type { ItemView, KnowledgeView, LogEntryView, SlotBindingView, SlotChangeView, VersionView } from './types.js'
@@ -279,7 +279,7 @@ export function Timeline({
                   {block.id === 'earlier' ? '卷子' : block.parent === undefined ? '老师' : '子任务'}
                 </Typography>
                 <Typography variant="body2" sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
-                  {plain(block.title)}
+                  {titleLine(block.title, translate)}
                 </Typography>
                 {current && <Chip size="small" color="primary" label="在做" />}
                 {!current && <Chip size="small" variant="outlined" label="做完了" />}
@@ -333,6 +333,16 @@ function resultLine(block: RunBlock, translate?: (text: string) => string): stri
   const text = translate === undefined ? last.text : translate(last.text)
   const first = (text.split('\n')[0] ?? '').trim()
   return first.length > 40 ? `${first.slice(0, 40)}…` : first
+}
+
+/**
+ * 块头那一行：老师说的话（或"改第 3 道题"这种派活）**也要翻译**。
+ *
+ * "改 S3-1"里的题号是内部编号，直接显示出来就是个系统词（真实踩过）。
+ */
+function titleLine(title: string, translate?: (text: string) => string): string {
+  const cleaned = plain(title)
+  return translate === undefined ? cleaned : translate(cleaned)
 }
 
 interface RunBlock {
@@ -608,27 +618,6 @@ export function ReviseDialog({
   )
 }
 
-/**
- * 闸门名说人话。**不许把内部名字摊在老师面前**（roundtrip / scope / symbolic …），
- * 他要看的是"题面有没有写歪、算式对不对"这件事本身。
- */
-const GATE_LABEL: Readonly<Record<string, string>> = {
-  scope: '不超纲',
-  symbolic: '算式核对',
-  dedup: '不与旧题重复',
-  originality: '不是抄原题',
-  figure: '图形自洽',
-  roundtrip: '题面忠实',
-  parts: '分量够',
-  options: '选项可判',
-}
-
-export function gateLabel(gate: string): string {
-  // 闸门有两个名字：插件名（verify-options）与证据键（options）。两个都要认。
-  const key = gate.replace(/^verify-/, '')
-  return GATE_LABEL[key] ?? GATE_LABEL[gate] ?? gate
-}
-
 /** 难度按人话显示：0.855 不是给人看的，0.86 或"较易"才是 */
 export function formatDifficulty(range: readonly [number, number] | undefined): string {
   if (range === undefined) return ''
@@ -663,62 +652,6 @@ function statusOf(item: ItemView, binding: SlotBindingView): { text: string; ton
  * 缺口的说法**给老师看**：服务端那句是给 agent 看的（带内部题型名与闸门名），
  * 界面上要把它们换成"哪一项检查没过 + 为什么"。
  */
-/** 正文里出现的工具名 → 人话（记录是给老师看的，工具名只该出现在它自己的标签上） */
-const TOOL_IN_PROSE: Readonly<Record<string, string>> = {
-  assemble_paper: '出一版',
-  construct_item: '造一道',
-  submit_item: '收下',
-  place_item: '放到卷子上',
-  quick_question: '现造一道',
-  gap_report: '缺口',
-  item_read: '看这一道',
-  bank_stats: '看看做过的题',
-  material_search: '找素材',
-  corpus_search: '找素材',
-  constructor_write: '写题型',
-  blueprint_list: '看设定',
-  blueprint_use: '换设定',
-  blueprint_create: '建设定',
-  derive_concepts: '梳理知识点',
-  satisfy_dependencies: '补前置知识',
-  list_concepts: '看知识点',
-  figure_render: '画图',
-  known_concepts: '看知识点',
-  paper_read: '看卷子',
-}
-
-/** 闸门名 → 老师能判断的风险（说"这意味着什么"，不说闸门叫什么） */
-export const RISK: Readonly<Record<string, string>> = {
-  scope: '有知识点超出已学范围',
-  symbolic: '答案没能独立复算',
-  roundtrip: '题面与构造对不上（数字/答案/分问）',
-  dedup: '与已有题目太像',
-  originality: '与真题/教材太像',
-  parts: '分值与分问数不匹配',
-  options: '选项有问题（数量、重复或答案不在选项里）',
-  question: '题面缺了要求或作答空位',
-  figure: '图形与条件对不上',
-}
-
-/**
- * 把一行记录翻成人话：闸门名 → 风险说法，系统题号 → "第 N 题"。
- * 日志是给人看的（老师要看着 agent 干活），系统词一个都不该露出来。
- */
-export function humanLine(text: string, number?: (slot: string) => string | undefined): string {
-  // "某题型 被 verify-x 拦下："先说成人话
-  // （`[^：\s]+` 而不是 `\S+`：否则会把"3 分｜原因：parabola/roots"整段吃掉，真实踩过）
-  let out = text.replace(/[^：:\s]+\s*被\s*verify-([a-z-]+)\s*拦下[：:]/gu, (_all, gate: string) => `${RISK[gate] ?? gateLabel(`verify-${gate}`)}：`)
-  out = out.replace(/verify-([a-z-]+)/gu, (_all, gate: string) => RISK[gate] ?? gateLabel(`verify-${gate}`))
-  out = out.replace(/it-[\w-]+/gu, '这道题')
-  out = out.replace(/口述出题/g, '这道题')
-  out = out.replace(/\bS(\d+)-(\d+)\b/gu, (all: string, row: string) => number?.(all) ?? `设定里的第 ${row} 个题位`)
-  // 光秃秃的组号（S15 这种）也要说人话：它是"设定里的第几个题位"
-  out = out.replace(/\bS(\d+)\b/gu, '设定里的第 $1 个题位')
-  // 工具名不该出现在人看的正文里
-  for (const [tool, human] of Object.entries(TOOL_IN_PROSE)) out = out.split(tool).join(human)
-  return out
-}
-
 function humanGap(reason: string): string {
   const stripped = reason
     // 缺口原因里可能列了几个题型各为什么不行：**每一处**都要翻成人话
