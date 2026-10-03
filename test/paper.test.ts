@@ -93,16 +93,30 @@ describe('组卷', () => {
     expect(paper.gaps[0]?.reason).toContain('verify')
   })
 
-  it('组卷幂等：同蓝图同种子，不重复入库', async () => {
+  it('同一次组卷可复现（给同一个 nonce，出同一张卷、不重复入库）', async () => {
     const ctx = await boot()
     const seeds = { 'S1-1': [11], 'S2-1': [21] }
-    const first = await ctx.paper.assemble(blueprint, { seeds })
+    const first = await ctx.paper.assemble(blueprint, { seeds, nonce: 'fixed' })
     const countAfterFirst = ctx.bank.all().length
-    const second = await ctx.paper.assemble(blueprint, { seeds })
+    const second = await ctx.paper.assemble(blueprint, { seeds, nonce: 'fixed' })
 
     expect(first.order).toEqual(second.order)
     expect(ctx.bank.all()).toHaveLength(countAfterFirst)
     expect(second.gaps).toHaveLength(0)
+  })
+
+  it('再出一版要**现造新题**，不是把上次那批捞回来（这是"原创卷"的底线）', async () => {
+    const ctx = await boot()
+    const first = await ctx.paper.assemble(blueprint, { nonce: 'round-1' })
+    const second = await ctx.paper.assemble(blueprint, { nonce: 'round-2' })
+
+    expect(first.gaps).toHaveLength(0)
+    expect(second.gaps).toHaveLength(0)
+    // 两次组卷的题目不能是同一批
+    const sameIds = first.order.filter((id) => second.order.includes(id))
+    expect(sameIds).toHaveLength(0)
+    // 卷子里的每一道都是**各自那次**造的，题库随之长大（历史留痕，不当零件仓库）
+    expect(ctx.bank.all().length).toBe(first.order.length + second.order.length)
   })
 })
 

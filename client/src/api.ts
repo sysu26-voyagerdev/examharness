@@ -69,6 +69,27 @@ export const getBank = (query: BankQuery = {}): Promise<BankView> => {
   return fetch(`/api/bank${suffix}`).then((r) => json<BankView>(r))
 }
 
+/** 改这道题：把老师的意图交给 agent 重造（数值与答案仍由构造给出） */
+export const reviseItem = (slot: string, instruction: string): Promise<{ runId: string; slot: string }> =>
+  send('POST', '/api/session/revise', { slot, instruction }).then((r) => json<{ runId: string; slot: string }>(r))
+
+/** 改文字：老师直接改题面/答案/解析（改的是说法，不是数学） */
+export const patchItem = (
+  itemId: string,
+  patch: { stem?: string; answerText?: string; solution?: readonly string[] },
+): Promise<{ ok: boolean; gate?: string; reason?: string; hint?: string }> =>
+  fetch(`/api/item/${encodeURIComponent(itemId)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
+  }).then((r) => json<{ ok: boolean; gate?: string; reason?: string; hint?: string }>(r))
+
+/** 让 agent 按一句话改题面（只动说法与情境） */
+export const polishItem = (itemId: string, instruction: string): Promise<{ ok: boolean; gate?: string; reason?: string; hint?: string; stem?: string }> =>
+  send('POST', `/api/item/${encodeURIComponent(itemId)}/polish`, { instruction }).then((r) =>
+    json<{ ok: boolean; gate?: string; reason?: string; hint?: string; stem?: string }>(r),
+  )
+
 /** 老师指定用这一道：把它放进某个题位 */
 export const placeItem = (slot: string, itemId: string): Promise<{ ok: boolean; reason?: string }> =>
   send('POST', '/api/session/place', { slot, itemId }).then((r) => json<{ ok: boolean; reason?: string }>(r))

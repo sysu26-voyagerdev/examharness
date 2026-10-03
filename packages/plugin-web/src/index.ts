@@ -428,6 +428,121 @@ export function apply(ctx: Context, config: WebConfig): void {
       return
     }
 
+    /**
+     * **改这一道**（两条路，都走同一个收尾：重新过闸门）。
+     *
+     * - `PATCH /api/item/<id>`：老师直接改题面/答案/解析；
+     * - `POST /api/item/<id>/polish`：老师写一句要求，让 agent 改说法（数值不许动）。
+     *
+     * 为什么改完还要过闸门：改的是**语言层**，但语言层也得忠实于构造——
+     * 数字来自构造、答案对得上、题面问的还是那几问。闸门给的拒绝理由会原样回到界面。
+     */
+    const itemEdit = path.match(/^\/api\/item\/([^/]+)$/u)
+    const itemPolish = path.match(/^\/api\/item\/([^/]+)\/polish$/u)
+    if (method === 'PATCH' && itemEdit !== null) {
+      const item = ctx.bank.get(decodeURIComponent(itemEdit[1] ?? ''))
+      if (item === undefined) {
+        send(res, 404, { error: '题库里没有这道题' })
+        return
+      }
+      const body = (await readBody(req)) as { stem?: string; answerText?: string; solution?: string[] }
+      const solution = Array.isArray(body.solution) ? body.solution.map(String).filter((step) => step.trim() !== '') : item.prose.solution
+      const revised: Item = {
+        ...item,
+        prose: {
+          ...item.prose,
+          stem: (body.stem ?? item.prose.stem).trim(),
+          answerText: (body.answerText ?? item.prose.answerText).trim(),
+          solution,
+          serializer: { model: 'teacher', version: 1 },
+        },
+        review: { confirmedBy: null, confirmedAt: null },
+      }
+      const result = await ctx.bank.submit(revised)
+      if (!result.ok) {
+        send(res, 200, { ok: false, gate: result.verdict.gate, reason: result.verdict.reason, hint: result.verdict.hint ?? '' })
+        return
+      }
+      send(res, 200, { ok: true, id: result.id })
+      return
+    }
+
+    if (method === 'POST' && itemPolish !== null) {
+      const item = ctx.bank.get(decodeURIComponent(itemPolish[1] ?? ''))
+      if (item === undefined) {
+        send(res, 404, { error: '题库里没有这道题' })
+        return
+      }
+      const body = (await readBody(req)) as { instruction?: string }
+      const polish = ctx.workbench.polish?.bind(ctx.workbench)
+      if (polish === undefined) {
+        send(res, 200, { ok: false, reason: '工作台没有接入改写能力' })
+        return
+      }
+      const polished = await polish(item, String(body.instruction ?? '').trim())
+      if (typeof polished === 'string') {
+        send(res, 200, { ok: false, reason: polished })
+        return
+      }
+      const result = await ctx.bank.submit(polished)
+      if (!result.ok) {
+        send(res, 200, { ok: false, gate: result.verdict.gate, reason: result.verdict.reason, hint: result.verdict.hint ?? '' })
+        return
+      }
+      send(res, 200, { ok: true, id: result.id, stem: result.ok ? polished.prose.stem : '' })
+      return
+    }
+
+    /**
+     * **改这道题**（不是改字）：老师指着卷子上某一题说"把 AB 改成 10""再加一问求面积""改成选择题"。
+     *
+     * 为什么走 agent 而不是让人直接改数值：数值与答案只能来自构造（R1）。
+     * agent 有写代码的本事——它可以换参数重造、换题型，甚至现写一个题型来满足要求；
+     * 重造出来的题照样要过闸门，过关了才放进那个题位。
+     */
+    if (method === 'POST' && path === '/api/session/revise') {
+      const body = (await readBody(req)) as { slot?: string; instruction?: string }
+      const slotKey = String(body.slot ?? '')
+      const instruction = String(body.instruction ?? '').trim()
+      const meta = ctx.session.current()
+      const live = sessionBlueprint(ctx)
+      const row = live.blueprint.find((entry) => entry.key === slotKey || slotKey.startsWith(`${entry.key}-`))
+      if (row === undefined) {
+        send(res, 409, { error: `蓝图里没有题位 ${slotKey}` })
+        return
+      }
+      if (instruction === '') {
+        send(res, 409, { error: '说说想怎么改（例如：把 AB 改成 10；再加一问求面积；改成选择题）' })
+        return
+      }
+      const binding = ctx.session.latest()?.bindings.find((entry) => entry.slot === slotKey)
+      const current = binding === undefined ? undefined : ctx.bank.get(binding.itemId)
+      const goal =
+        `老师要改卷子上的一整道题（题位 ${slotKey}：${row.knowledge.join('、')}｜${row.type}｜${String(row.score)} 分）。\n` +
+        `他的要求：${instruction}\n\n` +
+        (current === undefined
+          ? '这个题位现在还没有题。'
+          : `现在这道来自题型 ${current.instance.kind}（种子 ${String(current.provenance.seed)}），题面：${current.prose.stem}\n` +
+            `答案：${current.witness.answer}；参数：${JSON.stringify(current.instance.params)}。\n`) +
+        '\n请按他的要求重造这一道（可以换种子、换题型，必要时用 constructor_write 改题型或写新题型；' +
+        '数值与答案必须由构造给出，不要手改）。' +
+        '出好后用 submit_item 过闸门，再用 assemble_paper 组卷——让这一版卷子上就是改好的那道。' +
+        '做不到的（比如要求越过了已学范围）如实说。'
+      try {
+        const started = ctx.workbench.start({
+          goal,
+          brief: briefOf(ctx, live),
+          blueprint: live,
+          workspace: meta.id,
+          label: `改 ${slotKey}`,
+        })
+        send(res, 202, { runId: started.runId, slot: slotKey })
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
     if (method === 'POST' && path === '/api/session/place') {
       const body = (await readBody(req)) as { slot?: string; itemId?: string }
       try {

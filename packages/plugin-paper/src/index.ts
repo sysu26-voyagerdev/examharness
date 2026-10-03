@@ -9,7 +9,7 @@ import type {
   PaperSlot,
   SlotSpec,
 } from '@examharness/core'
-import { fnv1a } from '@examharness/core'
+import { fnv1a, shapeOf } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -55,6 +55,12 @@ export class PaperService extends Service implements PaperApi {
     const slots: PaperSlot[] = []
     const gaps: PaperGap[] = []
     let attempts = 0
+    // **这次组卷的身份**：不同次组卷派不同的种子 → "再出一版"是**现造**一批新题。
+    // （以前种子只由 (题位, 尝试) 决定，于是每次都派到同一个种子、把库里那批旧题捞回来，
+    //   卷子越出越像。R3 的"复用"是给已冻结/已导出的版本用的，不是给"再出一版"用的。）
+    const nonce = options.nonce ?? String(Date.now())
+    // 这张会话已经用过的结构：优先避开（新卷子在结构上也该是新的，不只是换数字）
+    const used = new Set(options.usedShapes ?? [])
 
     for (const row of blueprint.blueprint) {
       for (let index = 0; index < row.count; index += 1) {
@@ -67,8 +73,17 @@ export class PaperService extends Service implements PaperApi {
           difficulty: row.difficulty,
           score: row.score,
         }
+        // **钉住的题位**（老师签过字的那道）：直接用指定的题，不重造——
+        // 签的是那道题，重组卷不该把它换掉。
+        const pinnedId = options.pinned?.[key]
+        if (pinnedId !== undefined && this.ctx.bank.get(pinnedId) !== undefined) {
+          slots.push({ key, spec, itemId: pinnedId })
+          continue
+        }
         const seeds = options.seeds?.[key]
         let placed: PaperSlot | undefined
+        let fallback: PaperSlot | undefined
+        let fallbackShape: string | undefined
         let reason = '候选种子用尽，仍未凑到通过闸门的题'
 
         // **一个题位可以有几个题型**：入门小题过不了分量闸门时，接着试下一个题型
@@ -81,7 +96,7 @@ export class PaperService extends Service implements PaperApi {
         for (const kind of usable) {
           for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
             attempts += 1
-            const seed = seeds?.[attempt] ?? Number.parseInt(fnv1a(`${key}|${attempt}`), 16)
+            const seed = seeds?.[attempt] ?? Number.parseInt(fnv1a(`${key}|${attempt}|${nonce}`), 16)
             let item: Item
             try {
               item =
@@ -101,12 +116,23 @@ export class PaperService extends Service implements PaperApi {
               placed = { key, spec, itemId: item.id }
               break
             }
-            // 重试必须串行：下一次用什么种子，取决于上一次被哪道闸门拦下
+            // **结构偏好**：先攒下这一轮能过闸门的候选，优先挑这张会话没用过的结构；
+            // 都没过或都用过时，退回"第一个过的"。
+            // 为此把前几次尝试的通过项记下来，而不是一遇到通过就收手。
             // oxlint-disable-next-line no-await-in-loop
             const result = await this.ctx.bank.submit(item)
             if (result.ok) {
-              placed = { key, spec, itemId: result.id }
-              break
+              const shape = shapeOf(item)
+              if (!used.has(shape)) {
+                placed = { key, spec, itemId: result.id }
+                used.add(shape)
+                break
+              }
+              // 用过的结构：先放着当备选，继续试下一个种子
+              fallback ??= { key, spec, itemId: result.id }
+              fallbackShape ??= shape
+              reason = '这个题位的结构这张卷已经用过了，继续找新的'
+              continue
             }
             reason = kind === undefined ? `${result.verdict.gate}：${result.verdict.reason}` : `${kind} 被 ${result.verdict.gate} 拦下：${result.verdict.reason}`
             // fixable=false 是结构性违规（超纲等）：换种子没用，必须改蓝图
@@ -115,6 +141,11 @@ export class PaperService extends Service implements PaperApi {
           if (placed !== undefined) break
           // 结构性违规换题型也没用（超纲是题位本身的问题）
           if (kinds !== undefined && kinds.length > 1 && reason.includes('verify-scope')) break
+        }
+        // 新结构一个都没找到：用能过闸门的备选（宁可结构重复，也不要空题位）
+        if (placed === undefined && fallback !== undefined) {
+          placed = fallback
+          used.add(fallbackShape ?? '')
         }
 
         if (placed === undefined) gaps.push({ slot: key, missing: 1, reason })

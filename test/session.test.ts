@@ -119,9 +119,12 @@ describe('会话与版本', () => {
     ctx.session.update({ blueprintPath: extraPath })
     await ctx.session.assemble('换蓝图')
 
+    // **"再出一版"是现造**：同样的题位会换成新题，所以 diff 里是 replaced 而不是 same
+    //（这正是我们要的：新卷子不该是把上次那批从题库里捞回来）
     const diff = ctx.session.diff(1, 2)
     expect(diff.find((change) => change.slot === 'S99-1')?.change).toBe('added')
-    expect(diff.filter((change) => change.change === 'same').length).toBe(blueprint.blueprint.length)
+    expect(diff.filter((change) => change.change === 'replaced').length).toBe(blueprint.blueprint.length)
+    expect(diff.filter((change) => change.change === 'same')).toHaveLength(0)
   })
 
   it('改蓝图不会抹掉题位上的旁注（_evidence 是依据，不是垃圾）', async () => {

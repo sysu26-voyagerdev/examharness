@@ -93,13 +93,18 @@ export function BankPage(): React.JSX.Element {
     <Box sx={{ display: 'flex', height: '100%', minHeight: 0, gap: 2, p: 2 }}>
       {/* 左：筛选 + 列表 */}
       <Box sx={{ width: { xs: '100%', md: 430 }, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1.5 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
           <Typography variant="h5">题库</Typography>
           <Typography variant="caption" color="text.secondary">
             {data === null ? '读题库…' : `筛出 ${String(data.total)} 道`}
           </Typography>
           {loading && <CircularProgress size={14} />}
         </Stack>
+        {/* 题库是**全局**的（几个会话共用一份），所以"给哪张卷"必须说清是哪一张 */}
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+          所有会话共用的一份存货。当前这张卷：{session?.meta.title ?? '（没有会话）'}
+          {session === null ? '' : `　第 ${String(session.versions.at(-1)?.version ?? 0)} 版`}
+        </Typography>
 
         <Stack spacing={1} sx={{ mb: 1.5 }}>
           <TextField
@@ -282,30 +287,37 @@ export function BankPage(): React.JSX.Element {
             </Box>
 
             <Divider />
-            <Stack direction="row" spacing={1.5} sx={{ p: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-              <Typography variant="caption" color="text.secondary">
-                放进当前这张卷的
+            <Box sx={{ p: 2 }}>
+              <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                  {session?.meta.title ?? '当前卷'} 的
+                </Typography>
+                <TextField select size="small" value={target} onChange={(event) => setTarget(event.target.value)} sx={{ minWidth: 240 }} disabled={slots.length === 0}>
+                  {slots.length === 0 ? (
+                    <MenuItem value="">没有同题型的题位</MenuItem>
+                  ) : (
+                    slots.map((row) => (
+                      <MenuItem key={row.key} value={row.key}>
+                        {row.key}　{row.knowledge.join('、')}（{String(row.score)} 分）
+                      </MenuItem>
+                    ))
+                  )}
+                </TextField>
+                <Button variant="contained" disableElevation disabled={busy !== '' || target === ''} onClick={place}>
+                  用这一道
+                </Button>
+              </Stack>
+              {/* 说清这条路的性质：**这是复用库里已有的题**，不是造新题 */}
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+                这是把库里已有的一道**指给**这个题位（会重新过一遍检查）。要**现造**新题，用卷面上的
+                「改这道题…」，或者直接「再出一版」——每次组卷都是现造的。
               </Typography>
-              <TextField select size="small" value={target} onChange={(event) => setTarget(event.target.value)} sx={{ minWidth: 220 }} disabled={slots.length === 0}>
-                {slots.length === 0 ? (
-                  <MenuItem value="">没有同题型的题位</MenuItem>
-                ) : (
-                  slots.map((row) => (
-                    <MenuItem key={row.key} value={row.key}>
-                      {row.key}　{row.knowledge.join('、')}（{String(row.score)} 分）
-                    </MenuItem>
-                  ))
-                )}
-              </TextField>
-              <Button variant="contained" disableElevation disabled={busy !== '' || target === ''} onClick={place}>
-                用这一道
-              </Button>
               {note !== '' && (
-                <Typography variant="caption" color="text.secondary">
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
                   {note}
                 </Typography>
               )}
-            </Stack>
+            </Box>
           </>
         )}
       </Card>

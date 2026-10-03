@@ -20,6 +20,10 @@ import Chip from '@mui/material/Chip'
 import Paper from '@mui/material/Paper'
 import Tooltip from '@mui/material/Tooltip'
 import CircularProgress from '@mui/material/CircularProgress'
+import Dialog from '@mui/material/Dialog'
+import DialogActions from '@mui/material/DialogActions'
+import DialogContent from '@mui/material/DialogContent'
+import DialogTitle from '@mui/material/DialogTitle'
 import Collapse from '@mui/material/Collapse'
 import Divider from '@mui/material/Divider'
 import IconButton from '@mui/material/IconButton'
@@ -30,6 +34,9 @@ import ListItemIcon from '@mui/material/ListItemIcon'
 import ListItemButton from '@mui/material/ListItemButton'
 import ListItemText from '@mui/material/ListItemText'
 import Stack from '@mui/material/Stack'
+import Tab from '@mui/material/Tab'
+import Tabs from '@mui/material/Tabs'
+import TextField from '@mui/material/TextField'
 import Typography from '@mui/material/Typography'
 import * as api from './api.js'
 import { useApp } from './app-context.js'
@@ -273,6 +280,134 @@ function Row({ entry }: { entry: LogEntryView }): React.JSX.Element {
 /* ─────────────── 试卷 ─────────────── */
 
 /**
+ * 「改这道题」对话框：**把三个动作分清楚**。
+ *
+ *   · 改这道题：说一句要求（改条件、加一问、换题型、换情境），交给 agent 重造——
+ *     数值与答案仍由构造给出，改完照例过闸门；
+ *   · 改文字：老师直接改题面/答案/解析的说法（改不了数学：对不上会被闸门拦下）；
+ *   · 换一道：机器随机再造一道（原来的动作，保留在卷面上）。
+ */
+export function ReviseDialog({
+  slot,
+  item,
+  onClose,
+  onRevise,
+  onPatch,
+  busy,
+}: {
+  slot: string
+  item: ItemView
+  onClose: () => void
+  onRevise: (slot: string, instruction: string) => Promise<void>
+  onPatch: (
+    itemId: string,
+    patch: { stem: string; answerText: string; solution: readonly string[] },
+  ) => Promise<{ ok: boolean; reason?: string; gate?: string; hint?: string }>
+  busy: boolean
+}): React.JSX.Element {
+  const [mode, setMode] = useState<'revise' | 'text'>('revise')
+  const [instruction, setInstruction] = useState('')
+  const [stem, setStem] = useState(item.stem)
+  const [answer, setAnswer] = useState(item.answer)
+  const [solution, setSolution] = useState(item.solutionHtml.map((step) => step.replace(/<[^>]+>/g, '')).join('\n'))
+  const [note, setNote] = useState('')
+
+  const examples = ['把条件改简单一点', '再加一问求面积', '改成选择题（四个选项）', '情境换成测量教学楼', '数字换成整数、别太大']
+
+  return (
+    <Dialog open onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>改这道题（题位 {slot}）</DialogTitle>
+      <DialogContent>
+        <Tabs value={mode} onChange={(_event, next: 'revise' | 'text') => setMode(next)} sx={{ mb: 2 }}>
+          <Tab value="revise" label="改这道题" />
+          <Tab value="text" label="改文字" />
+        </Tabs>
+
+        {mode === 'revise' ? (
+          <Stack spacing={1.5}>
+            <Typography variant="body2" color="text.secondary">
+              说清楚你想怎么改。数值与答案由构造给出——agent 可以换参数重造、换题型，必要时现写一个题型；
+              重造出来的题照例过检查，过关才放进这个题位。
+            </Typography>
+            <TextField
+              autoFocus
+              multiline
+              minRows={3}
+              maxRows={8}
+              placeholder="例如：把 AB 改成 10，并再加一问求这个三角形的面积"
+              value={instruction}
+              onChange={(event) => setInstruction(event.target.value)}
+            />
+            <Stack direction="row" spacing={0.75} sx={{ flexWrap: 'wrap', gap: 0.75 }}>
+              {examples.map((example) => (
+                <Chip key={example} size="small" variant="outlined" label={example} onClick={() => setInstruction(example)} />
+              ))}
+            </Stack>
+          </Stack>
+        ) : (
+          <Stack spacing={1.5}>
+            <Typography variant="body2" color="text.secondary">
+              改的是说法，不是数学：数字、条件、答案对不上构造的话，会被检查拦下并告诉你原因。
+            </Typography>
+            <TextField label="题面" multiline minRows={3} maxRows={8} value={stem} onChange={(event) => setStem(event.target.value)} />
+            <TextField label="答案" value={answer} onChange={(event) => setAnswer(event.target.value)} />
+            <TextField
+              label="解析（一行一步）"
+              multiline
+              minRows={3}
+              maxRows={8}
+              value={solution}
+              onChange={(event) => setSolution(event.target.value)}
+            />
+          </Stack>
+        )}
+
+        {note !== '' && (
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            {note}
+          </Alert>
+        )}
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose}>算了</Button>
+        {mode === 'revise' ? (
+          <Button
+            variant="contained"
+            disableElevation
+            disabled={busy || instruction.trim() === ''}
+            onClick={() => {
+              setNote('')
+              void onRevise(slot, instruction.trim()).then(onClose)
+            }}
+          >
+            交给 agent 改
+          </Button>
+        ) : (
+          <Button
+            variant="contained"
+            disableElevation
+            disabled={busy}
+            onClick={() => {
+              setNote('')
+              void onPatch(item.id, {
+                stem,
+                answerText: answer,
+                solution: solution
+                  .split('\n')
+                  .map((line) => line.trim())
+                  .filter((line) => line !== ''),
+              }).then((result) => (result.ok ? onClose() : setNote(`${gateLabel(result.gate ?? '')}：${result.reason ?? '没通过'}`)))
+            }}
+          >
+            保存并重新检查
+          </Button>
+        )}
+      </DialogActions>
+    </Dialog>
+  )
+}
+
+/**
  * 闸门名说人话。**不许把内部名字摊在老师面前**（roundtrip / scope / symbolic …），
  * 他要看的是"题面有没有写歪、算式对不对"这件事本身。
  */
@@ -368,6 +503,7 @@ export function PaperView({
   busy,
   bankSize,
   onRegenerate,
+  onRevise,
   onConfirm,
   onAssemble,
   onSyncHeader,
@@ -383,6 +519,8 @@ export function PaperView({
   viewingOld: boolean
   busy: boolean
   onRegenerate: (slotKey: string) => void
+  /** 打开"改这道题"（说一句要求，交给 agent 重造） */
+  onRevise: (slotKey: string, item: ItemView) => void
   onConfirm: (itemId: string) => void
   onAssemble: () => void
 }): React.JSX.Element {
@@ -503,6 +641,7 @@ export function PaperView({
                       busy={busy}
                       frozen={frozen}
                       onRegenerate={onRegenerate}
+                      onRevise={onRevise}
                       onConfirm={onConfirm}
                     />
                   )
@@ -536,6 +675,7 @@ function QuestionBlock({
   busy,
   frozen,
   onRegenerate,
+  onRevise,
   onConfirm,
 }: {
   number: number
@@ -546,6 +686,7 @@ function QuestionBlock({
   busy: boolean
   frozen: boolean
   onRegenerate: (slotKey: string) => void
+  onRevise: (slotKey: string, item: ItemView) => void
   onConfirm: (itemId: string) => void
 }): React.JSX.Element {
   const status = statusOf(item, binding)
@@ -642,6 +783,9 @@ function QuestionBlock({
               }}
             />
           </Tooltip>
+          <Button size="small" disabled={busy || frozen} onClick={() => onRevise(binding.slot, item)}>
+            改这道题…
+          </Button>
           <Button size="small" disabled={busy || frozen} onClick={() => onRegenerate(binding.slot)}>
             换一道
           </Button>

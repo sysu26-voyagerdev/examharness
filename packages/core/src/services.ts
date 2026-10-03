@@ -137,6 +137,23 @@ export interface AssembleOptions {
   seeds?: Readonly<Record<string, readonly number[]>>
   /** 单题位最大尝试次数 */
   maxAttempts?: number
+  /**
+   * 这次的组卷标识。**不同次组卷必须给不同的值**（默认取当前时间）——
+   * 这样"再出一版"就是**现造**一批新题，而不是把上次那批从库里捞回来。
+   *
+   * 同一张卷内要能复现：同一次组卷的内部重试仍然按 (题位, 尝试, nonce) 派生种子。
+   */
+  nonce?: string
+  /**
+   * 已经有过的**结构指纹**：优先避开它们，让新卷子在结构上也是新的
+   * （不只是换数字）。都用过了就退回到能过闸门的那些。
+   */
+  usedShapes?: readonly string[]
+  /**
+   * **钉住的题位**（题位 → 题号）：这些题位不许重造，直接用指定的题。
+   * 老师签过字的那道题属于老师，重组卷不该把它换掉。
+   */
+  pinned?: Readonly<Record<string, string>>
 }
 
 /** 组卷：把蓝图变成一份卷子。**是约束求解，不是"生成 N 道题"** */
@@ -260,6 +277,11 @@ export interface WorkbenchApi {
   interject(runId: string, text: string): boolean
   /** 让它在下一步之前停下来 */
   stop(runId: string): boolean
+  /**
+   * **按老师的指示改题面**（"改这一道"里的"让 agent 改"）：只动语言层，
+   * 数值、条件、答案都不许改——改完仍要过闸门。
+   */
+  polish?(item: Item, instruction: string): Promise<Item | string>
   active(): readonly WorkbenchRunState[]
 }
 

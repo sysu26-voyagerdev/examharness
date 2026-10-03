@@ -22,7 +22,7 @@ import Typography from '@mui/material/Typography'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import { BlueprintDialog } from '../blueprint-dialog.js'
-import { DoingRow, EvidenceView, FilesView, KnowledgeView, PaperView, Timeline } from '../components.js'
+import { DoingRow, EvidenceView, FilesView, KnowledgeView, PaperView, ReviseDialog, Timeline } from '../components.js'
 import { forWorkspace } from '../log.js'
 import type { BlueprintInfoView, ItemView, SlotChangeView, VersionView } from '../types.js'
 
@@ -58,6 +58,8 @@ export function WorkPage(): React.JSX.Element {
   const [library, setLibrary] = useState<readonly BlueprintInfoView[]>([])
   /** 时间线看谁的活：默认主线；子任务单独看（不然两边的记录会串成一片） */
   const [focusAgent, setFocusAgent] = useState('')
+  /** 正在改哪一道（点"改这道题"之后弹出来的） */
+  const [revising, setRevising] = useState<{ slot: string; item: ItemView } | null>(null)
 
   const reloadLibrary = (): void => {
     void api
@@ -364,6 +366,7 @@ export function WorkPage(): React.JSX.Element {
                   await app.reload()
                 })
               }
+              onRevise={(slotKey, item) => setRevising({ slot: slotKey, item })}
               onConfirm={(itemId) =>
                 void app.guard(`confirm:${itemId}`, async () => {
                   await api.confirmItem(itemId, '老师')
@@ -378,6 +381,21 @@ export function WorkPage(): React.JSX.Element {
           {tab === 'files' && <FilesView name={session?.meta.id ?? ''} tick={entries.length} />}
         </Box>
       </Card>
+
+      {revising !== null && (
+        <ReviseDialog
+          slot={revising.slot}
+          item={revising.item}
+          busy={busy !== ''}
+          onClose={() => setRevising(null)}
+          onRevise={async (slotKey, instruction) => {
+            await api.reviseItem(slotKey, instruction)
+            setViewVersion(null)
+            await app.reload()
+          }}
+          onPatch={api.patchItem}
+        />
+      )}
 
       {editingBlueprint && (
         <BlueprintDialog

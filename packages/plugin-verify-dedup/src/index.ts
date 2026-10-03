@@ -10,6 +10,11 @@ import z from 'schemastery'
 
 export const name = 'verify-dedup'
 
+/** 题面层的指纹：用来区分"同一道题又提了一次"与"同一道题的修订" */
+function proseOf(entry: { prose: { stem: string; answerText: string; solution: readonly string[] } }): string {
+  return `${entry.prose.stem}|${entry.prose.answerText}|${entry.prose.solution.join('|')}`
+}
+
 /**
  * 证据键：写进 item.evidence 的名字，**也是向题库报到的名字**。
  * 两者必须一致——不然"每道现役闸门都签过字"永远对不上，旧题就没法复用（真踩过）。
@@ -76,7 +81,12 @@ export function apply(ctx: Context, config: DedupConfig): void {
             hint: '不要手改题目 id；局部重做应当生成新的构造参数',
           }
         }
-        // 看**库里那道题**签没签全（送进来的这次是新鲜构造的，证据当然是空的）
+        // 同 id + 同参数，还要看**文字**：
+        //   · 文字也一样 = 同一道题又提了一次 → 拦（避免手滑重复入库）；
+        //   · 文字变了 = **同一道题的修订**（老师改了题面、或让 agent 润色过）→ 放行，
+        //     让其它闸门去管语言层（题面忠实、数字来自构造、算式核对）。
+        //   以前这里一律拦，于是"改这一道"这条路根本走不通。
+        if (proseOf(other) !== proseOf(item)) continue
         const unsigned = (ctx.bank.gates?.() ?? []).filter((gate) => other.evidence[gate] === undefined)
         if (unsigned.length > 0) continue
         return {

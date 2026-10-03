@@ -214,3 +214,14 @@ export type Verdict =
   | { pass: false; gate: string; reason: string; fixable: boolean; hint?: string }
 
 export type MaybePromise<T> = T | Promise<T>
+
+/**
+ * 一道题的**结构指纹**：把它声明的条件与问法抹掉数字之后的样子。
+ *
+ * 用途：组卷时优先避开这张会话已经用过的结构——
+ * "原创"不只是换数字，新卷子应该在结构上也是新的（否则每次都是差不多的题拼来拼去）。
+ */
+export function shapeOf(item: { instance: { givens: readonly string[]; goal: string; goals?: readonly string[] } }): string {
+  const parts = [...item.instance.givens, ...(item.instance.goals ?? [item.instance.goal])]
+  return parts.join('|').replace(/\d+(?:\.\d+)?/g, '#')
+}

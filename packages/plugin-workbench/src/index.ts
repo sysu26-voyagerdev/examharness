@@ -312,6 +312,18 @@ function writeConstructor(kindName: string, code: string, temporary = false): st
 const COGNITIVE = new Set(["了解", "理解", "掌握", "灵活运用"]);
 const QUESTION_TYPE = new Set(["选择", "填空", "解答"]);
 
+const ITEM_TOOL: LlmToolSpec = {
+  name: "item_read",
+  description:
+    "看某个题位上**现在放的是哪道题**：题面、答案、来自哪个题型与什么参数、它声明了哪几问与哪些检验点。" +
+    "老师要「改这道题」时先调它——不知道现在是什么，就改不动。",
+  parameters: {
+    type: "object",
+    properties: { slotKey: { type: "string", description: "题位编号，例如 S17-1" } },
+    required: ["slotKey"],
+  },
+};
+
 const AGENT_TOOLS: readonly LlmToolSpec[] = [
   {
     name: "spawn_agent",
@@ -599,6 +611,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     if (this.ctx.get("constructDynamic") !== undefined) tools.push(CONSTRUCTOR_TOOL, GAP_TOOL);
     // 派子 agent：独立的事可以并行做（子任务看不到主对话，目标要写完整）
     tools.push(...AGENT_TOOLS);
+    // 看/改某一道题：老师指着卷子说"把这道题改成…"时，agent 得先看得见那道题
+    tools.push(ITEM_TOOL);
     return tools;
   }
 
@@ -680,6 +694,50 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     });
     state.done = this.loop(state);
     return { runId: id, workspace: workspace?.name ?? "", done: state.done };
+  }
+
+  /**
+   * **按老师的指示改题面**（"改这一道"里的"让 agent 改"）。
+   *
+   * 只动语言层：数值、条件、答案都不许改——那是构造给的，改了就过不了闸门。
+   * 返回改好的 Item；失败时返回一句给老师看的话。
+   */
+  async polish(item: Item, instruction: string): Promise<Item | string> {
+    const brief = {
+      老师的要求: instruction,
+      现在的题面: item.prose.stem,
+      条件: item.instance.givens,
+      问几问: (item.instance.goals ?? [item.instance.goal]).filter((goal) => goal !== ''),
+      答案: item.witness.answer,
+      解题步骤: item.prose.solution,
+      可以使用的数字: [...new Set(Object.values(item.instance.params))].map(String).join('、'),
+    }
+    const reply = await this.ctx.llm.chat([
+      { role: 'system', content: SERIALIZER_PROMPT },
+      {
+        role: 'user',
+        content:
+          JSON.stringify(brief) +
+          '\n\n注意：这次是**按老师的要求改一版**，只改说法与情境，数值/条件/答案一律不许动。',
+      },
+    ])
+    const parsed = parseJsonObject(reply.content)
+    const stem = typeof parsed?.stem === 'string' ? parsed.stem : undefined
+    if (stem === undefined || stem === '') return '执笔者没有按要求给出题面'
+    const answerText = typeof parsed?.answerText === 'string' ? parsed.answerText : item.prose.answerText
+    const solution = Array.isArray(parsed?.solution) ? parsed.solution.map(String) : item.prose.solution
+    return {
+      ...item,
+      prose: {
+        ...item.prose,
+        stem,
+        answerText,
+        solution,
+        // 老师改过/让 agent 改过：序列化者不再是模板，回译闸门会照常核对这版题面
+        serializer: { model: 'teacher', version: 1 },
+      },
+      review: { confirmedBy: null, confirmedAt: null },
+    }
   }
 
   /**
@@ -1299,6 +1357,44 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         kind: "tool",
         text: `kb_read：读到 ${String(chunk.text.length)} 字（共 ${String(chunk.total)}${chunk.next === undefined ? "，已到结尾" : `，下一个 offset=${String(chunk.next)}`}）`,
         payload: chunk,
+      };
+    }
+
+    if (tool === "item_read") {
+      const slotKey = String(args.slotKey ?? "");
+      const session = this.ctx.get("session");
+      const latest = session?.latest();
+      const binding = latest?.bindings.find((entry) => entry.slot === slotKey || entry.slot.startsWith(`${slotKey}-`));
+      if (binding === undefined) {
+        return {
+          kind: "tool",
+          text: `item_read：卷子上没有题位 ${slotKey}（先 assemble_paper 或者问老师是哪一个题位）`,
+          payload: { error: "题位上没有题" },
+        };
+      }
+      const item = this.ctx.bank.get(binding.itemId);
+      if (item === undefined) {
+        return { kind: "tool", text: `item_read：题位 ${slotKey} 的题不在题库里（${binding.itemId}）`, payload: { error: "找不到题" } };
+      }
+      return {
+        kind: "tool",
+        text:
+          `item_read：${slotKey} 上是 ${item.instance.kind} 造的一道${item.slot.type}题（种子 ${String(item.provenance.seed)}）\n` +
+          `题面：${item.prose.stem}\n` +
+          `答案：${item.witness.answer}\n` +
+          `分几问：${(item.instance.goals ?? [item.instance.goal]).filter((goal) => goal !== "").join("／")}\n` +
+          `条件：${item.instance.givens.join("；") || "（没声明）"}`,
+        payload: {
+          itemId: item.id,
+          kind: item.instance.kind,
+          seed: item.provenance.seed,
+          stem: item.prose.stem,
+          answer: item.witness.answer,
+          params: item.instance.params,
+          goals: item.instance.goals ?? [item.instance.goal],
+          givens: item.instance.givens,
+          checks: item.instance.checks ?? [],
+        },
       };
     }
 

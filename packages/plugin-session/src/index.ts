@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { fnv1a } from '@examharness/core'
+import { fnv1a, shapeOf } from '@examharness/core'
 import type {
   Blueprint,
   BlueprintInfo,
@@ -232,7 +232,18 @@ export class SessionService extends Service implements SessionApi {
     const record = this.record()
     if (record.meta.frozen) throw new Error('本会话已冻结：冻结后不可改动（R3）')
     const blueprint = this.blueprintOf(record.meta)
-    const paper = await this.ctx.paper.assemble(blueprint)
+    // **再出一版 = 现造**：给一个这次组卷专属的 nonce，并把这张会话用过的结构交给组卷去避开
+    const usedShapes = this.usedShapes(record)
+    // 老师签过字的那几道**钉住不动**：签的是那道题，重组卷不该把它换掉
+    const pinned: Record<string, string> = {}
+    for (const binding of this.latest()?.bindings ?? []) {
+      if (binding.confirmedBy !== null) pinned[binding.slot] = binding.itemId
+    }
+    const paper = await this.ctx.paper.assemble(blueprint, {
+      nonce: `${record.meta.id}|${String(Date.now())}`,
+      usedShapes,
+      pinned,
+    })
     const previous = this.latest()
 
     // 同一道题在重组卷后**保持原有签字**：签字是对题目的，不是对版本的
@@ -246,6 +257,24 @@ export class SessionService extends Service implements SessionApi {
       }
     })
     return this.push(record, reason, bindings, paper.attempts, paper.gaps, blueprint.paper.totalScore)
+  }
+
+  /**
+   * 这张会话**已经用过的结构**（最近几版卷子里题目的"条件+问法"指纹）。
+   *
+   * 组卷时拿它去避开：新卷子应该在**结构**上也是新的，而不只是换数字。
+   * 只用最近几版：太久以前的题忘掉没关系，重要的是"最近别老是那几种"。
+   */
+  private usedShapes(record: SessionRecord): string[] {
+    const recent = record.versions.slice(-3)
+    const shapes: string[] = []
+    for (const version of recent) {
+      for (const binding of version.bindings) {
+        const item = this.ctx.bank.get(binding.itemId)
+        if (item !== undefined) shapes.push(shapeOf(item))
+      }
+    }
+    return shapes
   }
 
   async regenerate(slotKey: string, seed?: number): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }> {
