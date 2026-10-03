@@ -7,9 +7,12 @@
  * 这里直接用 CDP：导航 → 等一会儿 → 抓图，自己控制节奏。
  *
  * 用法：node scripts/shot.mjs <url> <输出.png> [等多久毫秒] [宽] [高] [预置 JS]
+ *
+ * 浏览器：默认 `google-chrome-stable`（Linux）；别的机器上用 `EXAMHARNESS_CHROME` 指过去，
+ * 例如 Windows 的 Edge：`$env:EXAMHARNESS_CHROME='C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'`
  */
 import { spawn } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -19,10 +22,33 @@ if (url === undefined || out === undefined) {
   process.exit(2)
 }
 
+/** 找得到就用系统里现成的 Chromium 系浏览器，省得为了截图再装一个 */
+function findBrowser() {
+  const explicit = process.env.EXAMHARNESS_CHROME
+  if (explicit !== undefined && explicit !== '') return explicit
+  const candidates = [
+    'google-chrome-stable',
+    'google-chrome',
+    'chromium',
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ]
+  for (const candidate of candidates) {
+    if (candidate.includes('\\') || candidate.includes('/')) {
+      if (existsSync(candidate)) return candidate
+      continue
+    }
+    return candidate
+  }
+  return 'google-chrome-stable'
+}
+
 const PORT = 9333 + Math.floor(Math.random() * 200)
 const profile = mkdtempSync(join(tmpdir(), 'examharness-shot-'))
 const chrome = spawn(
-  'google-chrome-stable',
+  findBrowser(),
   [
     '--headless=new',
     '--no-sandbox',

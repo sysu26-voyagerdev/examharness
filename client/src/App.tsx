@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AddCommentOutlinedIcon from '@mui/icons-material/AddCommentOutlined'
+import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined'
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined'
 import DownloadOutlinedIcon from '@mui/icons-material/DownloadOutlined'
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined'
@@ -35,6 +36,7 @@ import { useTheme } from '@mui/material/styles'
 import * as api from './api.js'
 import { AppCtx, type AppValue } from './app-context.js'
 import { appendLive, appendSignal } from './log.js'
+import { GraphPage } from './pages/GraphPage.js'
 import { KnowledgePage } from './pages/KnowledgePage.js'
 import { SessionsPage } from './pages/SessionsPage.js'
 import { SettingsPage } from './pages/SettingsPage.js'
@@ -55,6 +57,7 @@ const NAV = [
   { key: 'work', label: '工作台', icon: <ScienceOutlinedIcon /> },
   { key: 'sessions', label: '会话', icon: <MenuBookOutlinedIcon /> },
   { key: 'materials', label: '资料', icon: <TuneOutlinedIcon /> },
+  { key: 'graph', label: '知识树', icon: <AccountTreeOutlinedIcon /> },
   { key: 'settings', label: '设置', icon: <SettingsOutlinedIcon /> },
 ] as const
 
@@ -379,6 +382,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         {page === 'work' && <WorkPage />}
         {page === 'sessions' && <SessionsPage />}
         {page === 'materials' && <KnowledgePage />}
+        {page === 'graph' && <GraphPage />}
         {page === 'settings' && <SettingsPage />}
       </Box>
 

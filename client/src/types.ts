@@ -144,6 +144,48 @@ export interface KnowledgeView {
   learned: readonly string[]
 }
 
+/** 知识树上一个知识点的样子（GET /api/graph） */
+export interface GraphNodeView {
+  key: string
+  title: string
+  order: number
+  group: string
+  aliases: readonly string[]
+  prerequisites: readonly string[]
+  /** 谁拿它当前置（反向连线） */
+  dependents: readonly string[]
+  note: string
+  /** 引了但树里没有的节点：这条线画不通 */
+  dangling: readonly string[]
+  depth: number
+  file: string
+}
+
+/** 树的健康检查：悬空引用 / 成环 / 重名。空数组表示干净 */
+export interface GraphDiagnosticView {
+  kind: 'dangling' | 'cycle' | 'duplicate'
+  key: string
+  detail: string
+}
+
+export interface GraphView {
+  /** 这棵树从哪儿来：`dir` = 一波 Markdown 文件（正常），`json` = 兜底的旧文件 */
+  origin: { kind: 'dir' | 'json'; path: string }
+  learned: readonly string[]
+  nodes: readonly GraphNodeView[]
+  diagnostics: readonly GraphDiagnosticView[]
+}
+
+export interface GraphSaveView {
+  key: string
+  title?: string
+  order?: number
+  group?: string
+  aliases?: readonly string[]
+  prerequisites?: readonly string[]
+  note?: string
+}
+
 export interface StateView {
   blueprint: BlueprintView
   items: readonly ItemView[]
@@ -289,9 +331,14 @@ export interface LiveEvent {
     | 'kb:changed'
     | 'settings:changed'
     | 'workspace:changed'
+    | 'graph:changed'
   batchId?: string
   status?: string
   records?: number
+  /** graph:changed 用 */
+  action?: 'saved' | 'removed' | 'reloaded'
+  key?: string
+  nodes?: number
   /** workspace:changed 用 */
   name?: string
   files?: number

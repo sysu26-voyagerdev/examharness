@@ -5,6 +5,8 @@ import type {
   CredentialInfoView,
   KbBatchView,
   KbListView,
+  GraphSaveView,
+  GraphView,
   LiveEvent,
   RunEventView,
   RunView,
@@ -209,6 +211,23 @@ export const stopRun = (runId: string): Promise<{ ok: boolean }> =>
 
 export const exportUrl = (format: 'html' | 'md'): string => `/api/export?format=${format}`
 
+// ── 知识树（真相是 `知识/*.md`，这里是它的读写口，ADR-0033）──────────────
+
+export const getGraph = (): Promise<GraphView> => fetch('/api/graph').then((r) => json<GraphView>(r))
+
+/** 新建与修改是同一个动作：树上的节点就是文件，没有草稿态 */
+export const saveGraphNode = (node: GraphSaveView): Promise<GraphView> =>
+  send('PUT', '/api/graph/node', node).then((r) => json<GraphView>(r))
+
+/** 删节点时服务端会一并告诉你**谁还在引它**，界面必须显示出来 */
+export const removeGraphNode = (key: string): Promise<{ tree: GraphView; stillReferencedBy: readonly string[] }> =>
+  send('DELETE', `/api/graph/node?key=${encodeURIComponent(key)}`).then((r) =>
+    json<{ tree: GraphView; stillReferencedBy: readonly string[] }>(r),
+  )
+
+export const getGraphSource = (key: string): Promise<{ key: string; source: string }> =>
+  fetch(`/api/graph/source?key=${encodeURIComponent(key)}`).then((r) => json<{ key: string; source: string }>(r))
+
 /** 订阅实时事件。返回退订函数——组件卸载时必须调用，否则 EventSource 泄漏 */
 export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: RunSignal) => void): () => void {
   const source = new EventSource('/api/stream')
@@ -261,6 +280,7 @@ export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: R
     ['rejected', simple('rejected')],
     ['confirmed', simple('confirmed')],
     ['kb:changed', simple('kb:changed')],
+    ['graph:changed', simple('graph:changed')],
     ['workspace:changed', simple('workspace:changed')],
     ['settings:changed', simple('settings:changed')],
     ['run:busy', busy],

@@ -367,6 +367,7 @@ export function apply(ctx: Context, config: WebConfig): void {
   ctx.on('run:done', (payload) => broadcast('run:done', payload))
   ctx.on('workspace:changed', (payload) => broadcast('workspace:changed', payload))
   ctx.on('kb:changed', (payload) => broadcast('kb:changed', payload))
+  ctx.on('graph:changed', (payload) => broadcast('graph:changed', payload))
   ctx.on('settings:changed', (payload) => broadcast('settings:changed', payload))
   ctx.on('item:rejected', ({ item, verdict }) => {
     // 判定联合类型：只有失败那一支带 gate/reason
@@ -759,6 +760,63 @@ export function apply(ctx: Context, config: WebConfig): void {
         send(res, 200, { models, source: body.apiKey === undefined ? ctx.settings.credentials.describe(live.apiKeyEnv).source : 'one-shot' })
       } catch (error) {
         send(res, 502, { error: `拉取失败：${error instanceof Error ? error.message : String(error)}` })
+      }
+      return
+    }
+
+    // ── 知识树：真相是 `知识/*.md`（ADR-0033），这里是它的读写口 ──────────
+    if (method === 'GET' && path === '/api/graph') {
+      send(res, 200, ctx.graph.tree())
+      return
+    }
+
+    if (method === 'GET' && path === '/api/graph/source') {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      const key = url.searchParams.get('key') ?? ''
+      const source = ctx.graph.sourceOf(key)
+      if (source === undefined) {
+        send(res, 404, { error: '没有这个知识点文件' })
+        return
+      }
+      send(res, 200, { key, source })
+      return
+    }
+
+    // 新建与修改是**同一个动作**：树上的节点就是文件，没有"草稿态"
+    if ((method === 'PUT' || method === 'PATCH') && path === '/api/graph/node') {
+      const body = (await readBody(req)) as Record<string, unknown>
+      try {
+        const note = ctx.graph.save({
+          key: String(body['key'] ?? ''),
+          ...(typeof body['title'] === 'string' ? { title: body['title'] } : {}),
+          ...(typeof body['order'] === 'number' ? { order: body['order'] } : {}),
+          ...(typeof body['group'] === 'string' ? { group: body['group'] } : {}),
+          ...(Array.isArray(body['aliases']) ? { aliases: body['aliases'].map(String) } : {}),
+          ...(Array.isArray(body['prerequisites']) ? { prerequisites: body['prerequisites'].map(String) } : {}),
+          ...(typeof body['note'] === 'string' ? { note: body['note'] } : {}),
+        })
+        broadcast('graph:changed', { action: 'saved', key: note.key, nodes: ctx.graph.nodes().length })
+        send(res, 200, ctx.graph.tree())
+      } catch (error) {
+        send(res, 400, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    if (method === 'DELETE' && path === '/api/graph/node') {
+      const url = new URL(req.url ?? '/', 'http://localhost')
+      const key = url.searchParams.get('key') ?? ''
+      try {
+        const result = ctx.graph.remove(key)
+        if (!result.removed) {
+          send(res, 404, { error: '没有这个知识点' })
+          return
+        }
+        broadcast('graph:changed', { action: 'removed', key, nodes: ctx.graph.nodes().length })
+        // 谁还在引它必须回给界面：删了节点不提醒，树上就多出一堆悬空线
+        send(res, 200, { tree: ctx.graph.tree(), stillReferencedBy: result.stillReferencedBy })
+      } catch (error) {
+        send(res, 400, { error: error instanceof Error ? error.message : String(error) })
       }
       return
     }
