@@ -96,6 +96,61 @@ export interface GraphApi {
    * 图谱本身必须能单独用。
    */
   fusion(key: string): FusionView
+  /** 整张图的一次性快照（界面用）：只读，**不参与引导与闸门** */
+  overview(): KnowledgeGraphView
+}
+
+/**
+ * 知识点在界面上的样子。
+ *
+ * 图谱的字段很厚（课标出处、教材章节、真题统计、前置依据…），但**算法只依赖前置**。
+ * 界面要读的是另外那些，所以这里如实把它们带出来，而不是让界面去猜 JSON 的形状。
+ */
+export interface KnowledgeNodeView {
+  key: string
+  prerequisites: readonly string[]
+  /** 谁拿它当前置（反向连线） */
+  successors: readonly string[]
+  /** 前置闭包大小（不含自己）：这条线上压着几层 */
+  depth: number
+  /** 在同年级同章节里的排序位置（界面按 `grade` → `chapter` → 这里铺开） */
+  chapterIndex: number
+  /** 已学（`learned` 补过闭包之后的判定，与超纲闸门同一份语义） */
+  learned: boolean
+  /** 以下都是图谱产物里的可选信息，缺了界面照常能画 */
+  grade?: string
+  chapter?: string
+  domain?: string
+  kind?: string
+  aliases?: readonly string[]
+  /** 存在依据：课标条目原文、教材章节、真题统计——**带页码与条目**，界面上要能读原文 */
+  sources?: readonly string[]
+  /** 每一条前置凭什么成立（教材章节先于 / 定义依赖 / 课标要求先于） */
+  prerequisiteBasis?: Readonly<Record<string, string>>
+  /** 证据分级：课标 / 教材 / 真题 / 推断 */
+  evidenceLevel?: string
+  /** 真题统计（支持卷数、命中题数） */
+  zhenti?: { papers: number; questions: number }
+  /** 常见问法（审定表里人工归纳的一句话，**不是统计出来的**） */
+  ask?: string
+}
+
+/** 整张图的快照：界面一次性拿走，别再逐个点着查 */
+export interface KnowledgeGraphView {
+  /** 知识点总数 */
+  total: number
+  /** 前置边总数 */
+  edges: number
+  /** 已学集合（含前置闭包） */
+  learned: readonly string[]
+  nodes: readonly KnowledgeNodeView[]
+  /** 有几条前置边指向图里不存在的知识点（图谱有问题时界面要说得出来） */
+  dangling: readonly { key: string; missing: string }[]
+  /**
+   * 图谱产物自带的生成信息（`generatedBy` / `inputs` / `version`）。
+   * 界面上要如实告诉老师"这张图是脚本从哪些材料算出来的"——它是产物，不是手写的。
+   */
+  generatedBy?: Readonly<Record<string, unknown>>
 }
 
 /** 构造器：题位 + 种子 → 一道题（同种子必须复现同一道题） */

@@ -7,8 +7,10 @@ import type {
   GraphApi,
   KnowledgeFusion,
   KnowledgeGraph,
+  KnowledgeGraphView,
   KnowledgeMatch,
   KnowledgeNeighbors,
+  KnowledgeNodeView,
 } from '@examharness/core'
 import {
   closureOf,
@@ -64,6 +66,7 @@ export class GraphService extends Service implements GraphApi {
   private readonly data: KnowledgeGraph
   private readonly learned: ReadonlySet<string>
   private readonly fusionData: KnowledgeFusion | undefined
+  private readonly generatedBy: Record<string, unknown> | undefined
 
   constructor(ctx: Context, config: GraphConfig) {
     super(ctx, 'graph')
@@ -71,9 +74,14 @@ export class GraphService extends Service implements GraphApi {
     // 多个文件合并：同名节点把前置关系并起来（不同来源对同一知识点的说法可能互补）；
     // 其余字段（年级/章节/依据…）以**先读到的**为准——主文件是权威。
     const nodes: Record<string, KnowledgeNodeRecord> = {}
+    let meta: Record<string, unknown> | undefined
     for (const relative of [config.path, ...config.paths]) {
       try {
-        const part = JSON.parse(readFileSync(resolve(base, relative), 'utf8')) as KnowledgeGraph
+        const part = JSON.parse(readFileSync(resolve(base, relative), 'utf8')) as KnowledgeGraph & {
+          generatedBy?: Record<string, unknown>
+        }
+        // 生成信息只在主文件上取一次：它是"这张图怎么来的"，追加文件不该覆盖它
+        if (meta === undefined) meta = part.generatedBy
         for (const [key, node] of Object.entries(part.nodes)) {
           const merged = new Set([...(nodes[key]?.prerequisites ?? []), ...(node.prerequisites ?? [])])
           nodes[key] = { ...node, ...nodes[key], prerequisites: [...merged] }
@@ -83,6 +91,7 @@ export class GraphService extends Service implements GraphApi {
       }
     }
     this.data = { nodes }
+    this.generatedBy = meta
     // 配置里写的是**前沿**：补上前置闭包才是"已学"。语义写在这里，别让每个调用方各补一次。
     this.learned = new Set(closureOf(this.data, config.learned))
     this.fusionData = this.loadFusion(base, config.fusionPath)
@@ -136,6 +145,124 @@ export class GraphService extends Service implements GraphApi {
   fusion(key: string): FusionView {
     return fusionViewOf(this.fusionData, key)
   }
+
+  /**
+   * 整张图的一次性快照（界面用）。
+   *
+   * 为什么放在服务里而不是让界面自己拼：反向连线、层数、章节内序号这三样都要通盘算一遍，
+   * 界面逐个节点去问会把同一件事算 N 遍（113 个节点就是 113 遍），而且算法散到两个地方。
+   * 这里算一次、按界面要读的顺序排好，界面只管画。
+   */
+  overview(): KnowledgeGraphView {
+    const keys = Object.keys(this.data.nodes)
+    const successors = new Map<string, string[]>()
+    const dangling: { key: string; missing: string }[] = []
+    let edges = 0
+    for (const [key, node] of Object.entries(this.data.nodes)) {
+      for (const prerequisite of node.prerequisites ?? []) {
+        edges += 1
+        if (this.data.nodes[prerequisite] === undefined) dangling.push({ key, missing: prerequisite })
+        const list = successors.get(prerequisite) ?? []
+        list.push(key)
+        successors.set(prerequisite, list)
+      }
+    }
+
+    const chapterIndex = new Map<string, number>()
+    {
+      const byChapter = new Map<string, string[]>()
+      for (const key of keys) {
+        const record = this.data.nodes[key] ?? {}
+        const chapter = `${textOf(record['grade'])}\u0000${textOf(record['chapter'])}`
+        const list = byChapter.get(chapter) ?? []
+        list.push(key)
+        byChapter.set(chapter, list)
+      }
+      for (const list of byChapter.values()) {
+        list.toSorted((a, b) => a.localeCompare(b, 'zh-Hans-CN')).forEach((key, index) => chapterIndex.set(key, index + 1))
+      }
+    }
+
+    const nodes: KnowledgeNodeView[] = keys.toSorted((a, b) => a.localeCompare(b, 'zh-Hans-CN')).map((key) => {
+      const record = this.data.nodes[key] ?? {}
+      const view: KnowledgeNodeView = {
+        key,
+        prerequisites: [...(record.prerequisites ?? [])],
+        successors: (successors.get(key) ?? []).toSorted((a, b) => a.localeCompare(b, 'zh-Hans-CN')),
+        depth: Math.max(0, closureOf(this.data, [key]).length - 1),
+        chapterIndex: chapterIndex.get(key) ?? 0,
+        learned: this.learned.has(key),
+      }
+      // 可选字段逐个赋值（不用展开）：少了就不带，界面按"缺了就不画"处理。
+      // 展开写法在这里既慢又难看懂哪个字段来自哪儿。
+      const optional: [keyof KnowledgeNodeView, unknown][] = [
+        ['grade', record['grade']],
+        ['chapter', record['chapter']],
+        ['domain', record['domain']],
+        ['kind', record['kind']],
+        ['evidenceLevel', this.evidenceOf(record)['level']],
+        // 常见问法是**人工归纳**的，来自融合统计那份产物（不是现算的）
+        ['ask', this.fusionData?.nodes[key]?.ask],
+      ]
+      const aliases = record['aliases']
+      if (Array.isArray(aliases)) view.aliases = aliases.map(String)
+      const sources = record['sources']
+      if (Array.isArray(sources)) view.sources = sources.map(String)
+      const basis = this.basisOf(record)
+      if (basis !== undefined) view.prerequisiteBasis = basis
+      const zhenti = this.zhentiOf(record)
+      if (zhenti !== undefined) view.zhenti = zhenti
+      for (const [field, raw] of optional) {
+        if (typeof raw === 'string' && raw !== '') Object.assign(view, { [field]: raw })
+      }
+      return view
+    })
+
+    return {
+      total: nodes.length,
+      edges,
+      learned: [...this.learned],
+      nodes,
+      dangling,
+      ...(this.generatedBy === undefined ? {} : { generatedBy: this.generatedBy }),
+    }
+  }
+
+  /** `evidence` 是个对象（层级/课标条目/真题统计都在这儿），不是就直接当空 */
+  private evidenceOf(record: Record<string, unknown>): Record<string, unknown> {
+    const evidence = record['evidence']
+    return typeof evidence === 'object' && evidence !== null ? (evidence as Record<string, unknown>) : {}
+  }
+
+  /**
+   * 前置依据：值必须是「知识点名 → 一句话依据」的字典。
+   * 这里**逐条挑字符串**而不是整体塞进去：产物里混进一个非字符串，整个卡片就画不出来，
+   * 而它只是图谱的一个注释字段——不该有这种权力。
+   */
+  private basisOf(record: Record<string, unknown>): Record<string, string> | undefined {
+    const basis = record['prerequisiteBasis']
+    if (typeof basis !== 'object' || basis === null) return undefined
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(basis)) {
+      if (typeof value === 'string' && value !== '') out[key] = value
+    }
+    return Object.keys(out).length === 0 ? undefined : out
+  }
+
+  /** 真题统计藏在 `evidence.zhenti` 里（构建脚本写的），没有就返回 undefined */
+  private zhentiOf(record: Record<string, unknown>): { papers: number; questions: number } | undefined {
+    const zhenti = this.evidenceOf(record)['zhenti']
+    if (typeof zhenti !== 'object' || zhenti === null) return undefined
+    const papers = (zhenti as Record<string, unknown>)['papers']
+    if (typeof papers !== 'number') return undefined
+    const questions = (zhenti as Record<string, unknown>)['questions']
+    return { papers, questions: typeof questions === 'number' ? questions : 0 }
+  }
+}
+
+/** 取字符串，不是字符串就当空——图谱允许缺字段 */
+function textOf(value: unknown): string {
+  return typeof value === 'string' ? value : ''
 }
 
 /** 合并时用的形状：图谱文件里除 prerequisites 之外还有一批构建脚本写入的字段 */

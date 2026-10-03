@@ -713,6 +713,12 @@ export function apply(ctx: Context, config: WebConfig): void {
       return
     }
 
+    // 知识图谱页：整张图一次拿走（只读；图上每一个结论都要能追到出处）
+    if (method === 'GET' && path === '/api/graph') {
+      send(res, 200, ctx.graph.overview())
+      return
+    }
+
     if (method === 'GET' && path === '/api/stream') {
       res.writeHead(200, {
         'content-type': 'text/event-stream; charset=utf-8',

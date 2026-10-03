@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined'
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined'
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined'
@@ -17,6 +18,7 @@ import * as api from './api.js'
 import { AppCtx, type AppValue } from './app-context.js'
 import { appendLive, appendSignal } from './log.js'
 import { CheckPage } from './pages/CheckPage.js'
+import { KnowledgeGraphPage } from './pages/KnowledgeGraphPage.js'
 import { PaperPage } from './pages/PaperPage.js'
 import { SettingsPage } from './pages/SettingsPage.js'
 import { StartPage } from './pages/StartPage.js'
@@ -271,6 +273,11 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
           <Tooltip title={dark ? '浅色' : '深色'}>
             <IconButton onClick={onToggleDark}>{dark ? <LightModeOutlinedIcon /> : <DarkModeOutlinedIcon />}</IconButton>
           </Tooltip>
+          <Tooltip title="知识图谱">
+            <IconButton onClick={() => goTo('graph')}>
+              <AccountTreeOutlinedIcon />
+            </IconButton>
+          </Tooltip>
           <Tooltip title="设置">
             <IconButton onClick={() => goTo('settings')}>
               <SettingsOutlinedIcon />
@@ -283,6 +290,8 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
         {page === 'paper' ? (
           <PaperPage />
+        ) : page === 'graph' ? (
+          <KnowledgeGraphPage />
         ) : page === 'check' ? (
           <CheckPage />
         ) : page === 'settings' ? (
