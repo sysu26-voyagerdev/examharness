@@ -17,6 +17,7 @@ import * as workbenchPlugin from '@examharness/plugin-workbench'
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { buildSearchRequest, parseSearchResults } from '@examharness/plugin-websearch'
+import { learnedClosure } from './helpers/learned.js'
 
 /**
  * 检索能力测试。
@@ -29,7 +30,7 @@ import { buildSearchRequest, parseSearchResults } from '@examharness/plugin-webs
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const LEARNED = ['一次函数', '配方', '图象平移', '二次函数图象', '顶点式', '对称轴', '与坐标轴交点', '最值']
+const LEARNED = learnedClosure(['一次函数', '配方', '图象平移', '二次函数图象', '顶点式', '对称轴', '与坐标轴交点', '最值'])
 const blueprint = JSON.parse(readFileSync(join(ROOT, 'seed/blueprint.json'), 'utf8')) as Blueprint
 const CORPUS_STEM = '已知抛物线 y = x² - 4x + 3 与 x 轴交于 A、B 两点，求线段 AB 的长。'
 

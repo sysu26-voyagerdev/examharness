@@ -16,6 +16,7 @@ import * as figureGate from '@examharness/plugin-verify-figure'
 import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { learnedClosure } from './helpers/learned.js'
 
 /**
  * 新构造器（代数与统计）的验收测试。**这里是"严格验收"的落点**：
@@ -26,13 +27,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const LEARNED = [
+const LEARNED = learnedClosure([
   '实数运算', '实数与二次根式', '整式运算', '整式与因式分解', '一元一次不等式',
   '一次函数', '配方', '图象平移', '二次函数图象', '顶点式', '对称轴', '与坐标轴交点',
   '最值', '一元二次方程', '反比例函数', '统计与概率',
   // 几何题位要用的（含它们的前置：图谱会算前置闭包）
   '三角形与全等', '相似三角形', '锐角三角函数', '四边形与特殊平行四边形', '圆的性质',
-]
+])
 const blueprint = JSON.parse(readFileSync(join(ROOT, 'seed/blueprints/作业-二次函数.json'), 'utf8')) as Blueprint
 
 const fibers: Fiber[] = []

@@ -17,6 +17,7 @@ import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
 import { renderPaperHtml, renderPaperMarkdown } from '@examharness/plugin-web'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { learnedClosure } from './helpers/learned.js'
 
 /**
  * 会话与版本测试。盯住四件事：
@@ -27,7 +28,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const LEARNED = ['一次函数', '配方', '图象平移', '二次函数图象', '顶点式', '对称轴', '与坐标轴交点', '最值']
+const LEARNED = learnedClosure(['一次函数', '配方', '图象平移', '二次函数图象', '顶点式', '对称轴', '与坐标轴交点', '最值'])
 const blueprint = JSON.parse(readFileSync(join(ROOT, 'seed/blueprint.json'), 'utf8')) as Blueprint
 
 /** 取蓝图第一行（不让类型检查被 `!` 绕过） */

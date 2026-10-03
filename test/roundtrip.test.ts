@@ -16,6 +16,7 @@ import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
 import * as workbenchPlugin from '@examharness/plugin-workbench'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { learnedClosure } from './helpers/learned.js'
 
 /**
  * 回译闸门测试 —— **H2 的雏形**：回译能不能抓住序列化错误。
@@ -31,7 +32,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const LEARNED = ['一次函数', '配方', '图象平移', '二次函数图象', '顶点式', '对称轴', '与坐标轴交点', '最值']
+const LEARNED = learnedClosure(['一次函数', '配方', '图象平移', '二次函数图象', '顶点式', '对称轴', '与坐标轴交点', '最值'])
 const blueprint = JSON.parse(readFileSync(join(ROOT, 'seed/blueprint.json'), 'utf8')) as Blueprint
 const SLOT = blueprint.blueprint[0] as BlueprintRow
 const SEED = 42

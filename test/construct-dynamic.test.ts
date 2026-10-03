@@ -14,6 +14,7 @@ import * as figureGate from '@examharness/plugin-verify-figure'
 import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { learnedClosure } from './helpers/learned.js'
 
 /**
  * **agent 在运行时制作新题型**的验收测试。
@@ -25,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const LEARNED = ['一元一次不等式', '整式运算', '整式与因式分解', '一元二次方程', '对称轴', '与坐标轴交点', '二次函数图象', '配方']
+const LEARNED = learnedClosure(['一元一次不等式', '整式运算', '整式与因式分解', '一元二次方程', '对称轴', '与坐标轴交点', '二次函数图象', '配方'])
 
 const fibers: Fiber[] = []
 let workdir = ''

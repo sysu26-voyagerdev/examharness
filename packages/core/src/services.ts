@@ -1,4 +1,5 @@
 import type { Blueprint, BlueprintRow, FigureArtifact, FigureSpec, Item, SlotSpec, Verdict } from './types.js'
+import type { FusionView, KnowledgeMatch, KnowledgeNeighbors } from './graph.js'
 
 // 必须真实导入被增强的模块：TS 只在模块已进入程序时才认这条声明合并
 import '@deepseek-ai/cordis'
@@ -64,6 +65,20 @@ export interface GraphApi {
   missing(keys: readonly string[]): string[]
   nodes(): readonly string[]
   learnedKeys(): readonly string[]
+  /**
+   * 按名字/别名模糊找知识点。
+   * 为什么要有：图谱有一百多个知识点，逼 agent 一字不差地写对名字，
+   * 结果是它写错一个字就白跑一轮——这是它的高频痛点，不该靠提示词解决。
+   */
+  search(text: string, limit?: number): readonly KnowledgeMatch[]
+  /** 前置与后继（图谱是双向看的：命题时要看"学过什么"，也要看"接下来能学什么"） */
+  neighbors(key: string): KnowledgeNeighbors | undefined
+  /**
+   * 多知识点融合的证据：在真题里常和谁一起考、支持卷数、题型分布、常见分值。
+   * 没有融合数据（seed/knowledge-fusion.json 缺失）时返回空统计，而不是抛错——
+   * 图谱本身必须能单独用。
+   */
+  fusion(key: string): FusionView
 }
 
 /** 构造器：题位 + 种子 → 一道题（同种子必须复现同一道题） */

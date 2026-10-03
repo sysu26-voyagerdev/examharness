@@ -16,6 +16,7 @@ import * as questionGate from '@examharness/plugin-verify-question'
 import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { learnedClosure } from './helpers/learned.js'
 
 /**
  * **分量闸门**与**选择题闸门**。
@@ -30,7 +31,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const LEARNED = ['一次函数', '配方', '二次函数图象', '顶点式', '对称轴', '与坐标轴交点', '最值']
+const LEARNED = learnedClosure(['一次函数', '配方', '二次函数图象', '顶点式', '对称轴', '与坐标轴交点', '最值'])
 const SEED = 42
 
 const slot = (type: BlueprintRow['type'], score: number): BlueprintRow => ({

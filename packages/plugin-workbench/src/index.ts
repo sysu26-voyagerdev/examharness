@@ -120,6 +120,28 @@ const TOOLS: readonly LlmToolSpec[] = [
     },
   },
   {
+    name: "knowledge_lookup",
+    description:
+      "按关键词找一个知识点（模糊匹配，不用一字不差写对名字），一次给全四样东西：" +
+      "命中的知识点、它的前置与后继、它在真题里的样子（多少份卷考过、常见题型与分值、常见分问数）、" +
+      "以及常和哪些知识点一起考（支持卷数）。" +
+      "什么时候用它：①不确定知识点叫什么、或者写错了名字被拒时；" +
+      "②想把两个知识点凑成一道综合题，想知道它们在真题里是不是真的一起考过；" +
+      "③想知道某类题在真题里通常分几问、多少分，好定题位。" +
+      "查完之后用 graph_query 确认这个组合超没超纲（它管合法性，这里管「这道题长什么样」）。",
+    parameters: {
+      type: "object",
+      properties: {
+        keyword: {
+          type: "string",
+          description: "关键词或知识点名，例如「抛物线」「二次函数图象」「切线」「中位数」",
+        },
+        limit: { type: "number", description: "最多返回几个候选知识点（默认 5，最多 12）" },
+      },
+      required: ["keyword"],
+    },
+  },
+  {
     name: "construct_item",
     description:
       "按题位构造一道候选题（按构造为真）。返回 candidateId，此时还没入库。" +
@@ -932,6 +954,62 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         text: `graph_query：闭包 ${closure.length} 项，越界 ${missing.length} 项`,
         payload: { closure, missing },
       };
+    }
+
+    if (tool === "knowledge_lookup") {
+      const keyword = String(args.keyword ?? "").trim();
+      if (keyword === "") {
+        return {
+          kind: "tool",
+          text: "knowledge_lookup：给一个关键词我才好找（例如「抛物线」「中位数」）",
+          payload: { error: "缺少关键词" },
+        };
+      }
+      const asked = typeof args.limit === "number" ? Math.trunc(args.limit) : 5;
+      const limit = Math.min(Math.max(asked, 1), 12);
+      const matches = this.ctx.graph.search(keyword, limit);
+      if (matches.length === 0) {
+        return {
+          kind: "tool",
+          text: `knowledge_lookup：「${keyword}」在图谱里没找到——换个说法再试，或先用 graph_query 核对已学范围`,
+          payload: { keyword, matches: [] },
+        };
+      }
+      const entries = matches.map((match) => {
+        const neighbors = this.ctx.graph.neighbors(match.key);
+        const fusion = this.ctx.graph.fusion(match.key);
+        const stat = fusion.stat;
+        return {
+          knowledge: match.key,
+          // 把"你写的是哪个别名"回给模型：写错了也能自己发现
+          matchedBy: match.matchedBy,
+          matchedLiteral: match.literal,
+          prerequisites: neighbors?.prerequisites ?? [],
+          successors: neighbors?.successors ?? [],
+          ask: stat?.ask ?? "",
+          zhenti:
+            stat === undefined
+              ? undefined
+              : {
+                  supportPapers: stat.supportPapers,
+                  questions: stat.questions,
+                  typeDist: stat.typeDist,
+                  commonScores: stat.score.common,
+                  commonParts: stat.subQuestions.common,
+                },
+          togetherWith: fusion.together,
+          triples: fusion.triples.map((triple) => ({ nodes: triple.nodes, papers: triple.papers })),
+          note: stat?.note ?? "",
+        };
+      });
+      const first = entries[0];
+      const text =
+        first === undefined
+          ? `knowledge_lookup：「${keyword}」没有命中`
+          : `knowledge_lookup：「${keyword}」命中 ${entries.length} 个知识点；最贴近的是「${first.knowledge}」` +
+            `（前置 ${first.prerequisites.length} 个，真题里 ${first.zhenti?.supportPapers ?? 0} 份卷考过，` +
+            `常一起考：${first.togetherWith.map((item) => item.with).join("、") || "无记录"}）`;
+      return { kind: "tool", text, payload: { keyword, matches: entries } };
     }
 
     if (tool === "construct_item") {

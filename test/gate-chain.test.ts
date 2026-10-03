@@ -11,6 +11,7 @@ import * as dedupPlugin from '@examharness/plugin-verify-dedup'
 import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { learnedClosure } from './helpers/learned.js'
 
 /**
  * 闸门链的集成测试。AGENTS.md：**闸门逻辑必须有测试**——它是本项目的正确性所在。
@@ -20,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
  */
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const LEARNED = [
+const LEARNED = learnedClosure([
   '一次函数',
   '配方',
   '图象平移',
@@ -29,7 +30,7 @@ const LEARNED = [
   '对称轴',
   '与坐标轴交点',
   '最值',
-]
+])
 
 const blueprint = JSON.parse(readFileSync(join(ROOT, 'seed/blueprint.json'), 'utf8')) as Blueprint
 
