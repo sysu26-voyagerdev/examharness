@@ -6,6 +6,7 @@ import ErrorIcon from '@mui/icons-material/Error'
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined'
 import FolderOutlinedIcon from '@mui/icons-material/FolderOutlined'
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
+import MoreVertIcon from '@mui/icons-material/MoreVert'
 import PersonIcon from '@mui/icons-material/Person'
 import ReportOutlinedIcon from '@mui/icons-material/ReportOutlined'
 import Alert from '@mui/material/Alert'
@@ -17,6 +18,8 @@ import CardActions from '@mui/material/CardActions'
 import CardContent from '@mui/material/CardContent'
 import CardHeader from '@mui/material/CardHeader'
 import Chip from '@mui/material/Chip'
+import Menu from '@mui/material/Menu'
+import MenuItem from '@mui/material/MenuItem'
 import Paper from '@mui/material/Paper'
 import Tooltip from '@mui/material/Tooltip'
 import CircularProgress from '@mui/material/CircularProgress'
@@ -863,7 +866,11 @@ export function PaperView({
       <Paper
         elevation={0}
         sx={{
-          p: { xs: 2.5, md: 5 },
+          // 左边距留出 46px 给"这一道"的按钮（Word 的批注按钮也在边距里）；
+          // 边距是纸上本来就有的空白，拿它放操作既不占文字宽度、也不遮挡
+          py: { xs: 2.5, md: 5 },
+          pl: { xs: 3.5, md: 7.5 },
+          pr: { xs: 2.5, md: 5 },
           border: 1,
           borderColor: 'divider',
           borderRadius: 1,
@@ -975,6 +982,7 @@ function QuestionBlock({
   const [editing, setEditing] = useState(false)
   const [stem, setStem] = useState(item.stem)
   const [note, setNote] = useState('')
+  const [menuAt, setMenuAt] = useState<HTMLElement | null>(null)
 
   const save = async (): Promise<void> => {
     const result = await onPatchText(item.id, stem.trim())
@@ -1120,35 +1128,27 @@ function QuestionBlock({
           )}
         </Box>
 
-        {/* 老师才能看到的操作：**浮在题面右上角**（悬停出现），绝不占题面的宽度 */}
+        {/*
+          **操作放进左边距**（Word 的批注按钮就在这儿）：不占题面宽度、不遮挡文字。
+          之前两版都不对——常驻一排会挤窄题面，浮在右上角又会盖住题干；
+          边距是纸上本来就有的空白，正好放这些只有老师才用的按钮。
+        */}
         <Stack
           className="q-actions"
-          direction="row"
-          spacing={0.5}
           data-print-hide
           sx={{
             position: 'absolute',
-            top: -6,
-            right: 0,
+            left: -40,
+            top: -2,
             opacity: 0,
             pointerEvents: 'none',
             transition: 'opacity .12s',
             alignItems: 'center',
-            px: 0.75,
-            py: 0.25,
-            borderRadius: 1,
-            bgcolor: 'background.paper',
-            boxShadow: 1,
-            border: 1,
-            borderColor: 'divider',
-            zIndex: 2,
+            gap: 0.25,
+            width: 34,
           }}
         >
-          {mark !== '' && <Chip size="small" color="info" variant="outlined" label={mark} />}
-          {binding.chosenBy !== undefined && binding.confirmedBy === null && (
-            <Chip size="small" variant="outlined" label={binding.chosenBy === 'agent' ? 'agent 放的' : '我指定的'} />
-          )}
-          <Tooltip title={`${status.hint}｜${item.knowledge.join('、')}｜难度 ${formatDifficulty(item.difficulty)}`}>
+          <Tooltip title={`${status.text}｜${status.hint}`}>
             <Box
               sx={{
                 width: 8,
@@ -1158,33 +1158,89 @@ function QuestionBlock({
               }}
             />
           </Tooltip>
-          <Button
-            size="small"
-            disabled={busy || frozen || editing}
+          <Tooltip title="这一道：改文字 / 改这一道 / 换一道 / 删掉">
+            <IconButton
+              size="small"
+              disabled={busy || frozen}
+              onClick={(event) => setMenuAt(event.currentTarget)}
+              sx={{ p: 0.25 }}
+            >
+              <MoreVertIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
+          {mark !== '' && (
+            <Tooltip title={mark}>
+              <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'info.main' }} />
+            </Tooltip>
+          )}
+        </Stack>
+
+        {/* 这一道的菜单：动词都在这儿，卷面上只留一个边距按钮 */}
+        <Menu
+          anchorEl={menuAt}
+          open={menuAt !== null}
+          onClose={() => setMenuAt(null)}
+          anchorOrigin={{ vertical: 'top', horizontal: 'right' }}
+          transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+        >
+          <MenuItem disabled sx={{ opacity: '1 !important' }}>
+            <Typography variant="caption" color="text.secondary">
+              {item.knowledge.join('、') || item.type}｜{String(item.score)} 分｜难度 {formatDifficulty(item.difficulty)}
+              ｜{status.text}
+              {binding.chosenBy === undefined ? '' : binding.chosenBy === 'agent' ? '｜agent 放的' : '｜我指定的'}
+            </Typography>
+          </MenuItem>
+          <Divider />
+          <MenuItem
+            disabled={busy || frozen}
             onClick={() => {
+              setMenuAt(null)
               setStem(item.stem)
               setEditing(true)
             }}
           >
-            改文字
-          </Button>
-          <Button size="small" disabled={busy || frozen || editing} onClick={() => onRevise(binding.slot, item)}>
-            改这一道…
-          </Button>
-          <Button size="small" disabled={busy || frozen || editing} onClick={() => onRegenerate(binding.slot)}>
-            换一道
-          </Button>
-          <Tooltip title="从卷子上拿掉（题位空着，底栏会说还缺几道）">
-            <Button size="small" disabled={busy || frozen || editing} onClick={() => onDelete(binding.slot)}>
-              删掉
-            </Button>
-          </Tooltip>
+            改文字（就地改说法）
+          </MenuItem>
+          <MenuItem
+            disabled={busy || frozen}
+            onClick={() => {
+              setMenuAt(null)
+              onRevise(binding.slot, item)
+            }}
+          >
+            改这一道…（说一句要求，交给 agent 重造）
+          </MenuItem>
+          <MenuItem
+            disabled={busy || frozen}
+            onClick={() => {
+              setMenuAt(null)
+              onRegenerate(binding.slot)
+            }}
+          >
+            换一道（机器再出一道）
+          </MenuItem>
           {item.lifecycle === 'needs_review' && binding.confirmedBy === null && (
-            <Button size="small" variant="contained" disableElevation disabled={busy || frozen} onClick={() => onConfirm(item.id)}>
-              确认
-            </Button>
+            <MenuItem
+              disabled={busy || frozen}
+              onClick={() => {
+                setMenuAt(null)
+                onConfirm(item.id)
+              }}
+            >
+              我确认这道题
+            </MenuItem>
           )}
-        </Stack>
+          <Divider />
+          <MenuItem
+            disabled={busy || frozen}
+            onClick={() => {
+              setMenuAt(null)
+              onDelete(binding.slot)
+            }}
+          >
+            从卷子上拿掉
+          </MenuItem>
+        </Menu>
       </Stack>
     </Box>
   )
