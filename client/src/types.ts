@@ -272,6 +272,8 @@ export type RunSignal =
       label?: string
       parent?: string
     }
+  /** 模型正在写什么（流式，一小段一小段来）：只用于"实时浅字"那一块 */
+  | { kind: 'delta'; runId: string; label: string; text: string; workspace: string }
 
 /** 题库页的投影：筛出来的题 + 分面（各知识点/题型/状态各有多少道） */
 export interface BankView {

@@ -28,6 +28,32 @@ export interface KnowledgeGraph {
   readonly nodes: Readonly<Record<string, KnowledgeNode>>
 }
 
+/**
+ * **卷面上的"第 N 题"**：按题型分段连着走（一、选择 1–8；二、填空 9–14…）。
+ *
+ * 这是**唯一的一套编号**：界面显示它、agent 说话用它、`change_setting` 收"第 2 题"也按它认。
+ * 界面里不出现内部编号（S3-1 那种），否则老师说的"第 2 题"和系统说的会不是一个东西。
+ */
+export function numberSlots(entries: readonly { slot: string; type: string }[]): ReadonlyMap<string, number> {
+  const order = ['选择', '填空', '解答']
+  const numbers = new Map<string, number>()
+  let running = 0
+  for (const type of order) {
+    for (const entry of entries) {
+      if (entry.type !== type) continue
+      running += 1
+      numbers.set(entry.slot, running)
+    }
+  }
+  // 别的题型按出现顺序接在后面：不静默丢掉（丢一个，编号就全错了）
+  for (const entry of entries) {
+    if (numbers.has(entry.slot)) continue
+    running += 1
+    numbers.set(entry.slot, running)
+  }
+  return numbers
+}
+
 /** 直接前置（去重、保序） */
 export function prerequisitesOf(graph: KnowledgeGraph, knowledge: readonly string[]): string[] {
   const out: string[] = []

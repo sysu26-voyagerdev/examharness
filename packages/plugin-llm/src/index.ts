@@ -153,7 +153,11 @@ export class LlmService extends Service implements LlmApi {
     }
   }
 
-  async chat(messages: readonly LlmMessage[], tools?: readonly LlmToolSpec[]): Promise<LlmReply> {
+  async chat(
+    messages: readonly LlmMessage[],
+    tools?: readonly LlmToolSpec[],
+    onDelta?: (text: string) => void,
+  ): Promise<LlmReply> {
     if (!this.configured) throw new Error('未配置模型密钥：在设置页填，或设环境变量 EXAMHARNESS_API_KEY')
     const active = this.effective()
     const attempts = Math.max(1, this.config.retries + 1)
@@ -161,7 +165,7 @@ export class LlmService extends Service implements LlmApi {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
         // eslint-disable-next-line no-await-in-loop -- 重试必须串行
-        return await this.once(active.baseUrl, active.model, messages, tools)
+        return await this.once(active.baseUrl, active.model, messages, tools, onDelta)
       } catch (error) {
         lastError = error
         // 只重试**暂时性**失败（超时、网络抖动、5xx）：真实的错（密钥、参数、余额）重试也没用，
@@ -175,17 +179,21 @@ export class LlmService extends Service implements LlmApi {
     throw lastError instanceof Error ? lastError : new Error(String(lastError))
   }
 
-  /** 一次调用（不带重试） */
+  /** 一次调用（不带重试）：要流式就带 onDelta */
   private async once(
     baseUrl: string,
     model: string,
     messages: readonly LlmMessage[],
     tools?: readonly LlmToolSpec[],
+    onDelta?: (text: string) => void,
   ): Promise<LlmReply> {
+    const payload = buildPayload({ ...this.config, model }, messages, tools)
+    // 有人在看就流式：一次调用常常十几秒没输出，那段时间界面不该是死的
+    if (onDelta !== undefined) payload.stream = true
     const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.key()}` },
-      body: JSON.stringify(buildPayload({ ...this.config, model }, messages, tools)),
+      body: JSON.stringify(payload),
       signal: AbortSignal.timeout(this.config.timeoutMs),
     })
     if (!response.ok) {
@@ -194,7 +202,76 @@ export class LlmService extends Service implements LlmApi {
       ;(error as Error & { status?: number }).status = response.status
       throw error
     }
-    return parseReply(await response.json())
+    if (onDelta === undefined || response.body === null) return parseReply(await response.json())
+    return readStream(response.body, onDelta)
+  }
+}
+
+/**
+ * 读 SSE 流，边读边回调**模型正在写的字**。
+ *
+ * 只认 `data:` 行，遇到 `[DONE]` 收工；工具调用的参数是**分片**来的，
+ * 必须按 index 拼回去（拼错了工具就带着半截 JSON 被调用——这是流式最容易踩的坑）。
+ */
+export async function readStream(
+  body: ReadableStream<Uint8Array>,
+  onDelta: (text: string) => void,
+): Promise<LlmReply> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let content = ''
+  const calls = new Map<number, { id: string; name: string; args: string }>()
+
+  const handle = (chunk: string): void => {
+    const choice = (JSON.parse(chunk) as {
+      choices?: {
+        delta?: { content?: string | null; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] }
+      }[]
+    }).choices?.[0]
+    const delta = choice?.delta
+    if (delta?.content !== undefined && delta.content !== null && delta.content !== '') {
+      content += delta.content
+      onDelta(delta.content)
+    }
+    for (const call of delta?.tool_calls ?? []) {
+      const index = call.index ?? 0
+      const current = calls.get(index) ?? { id: '', name: '', args: '' }
+      calls.set(index, {
+        id: call.id ?? current.id,
+        name: call.function?.name ?? current.name,
+        args: current.args + (call.function?.arguments ?? ''),
+      })
+    }
+  }
+
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- 流就是这样读的：一段一段来
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() ?? ''
+    for (const line of lines) {
+      const text = line.trim()
+      if (!text.startsWith('data:')) continue
+      const data = text.slice(5).trim()
+      if (data === '' || data === '[DONE]') continue
+      try {
+        handle(data)
+      } catch {
+        /* 半截 JSON（跨块断开）留给下一轮 buffer 拼 */
+      }
+    }
+  }
+
+  return {
+    content: content === '' ? null : content,
+    toolCalls: [...calls.entries()]
+      .toSorted((left, right) => left[0] - right[0])
+      .flatMap(([index, call]) =>
+        call.name === '' ? [] : [{ id: call.id === '' ? `call_${String(index)}` : call.id, name: call.name, arguments: call.args === '' ? '{}' : call.args }],
+      ),
   }
 }
 

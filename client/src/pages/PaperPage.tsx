@@ -20,7 +20,8 @@ import Typography from '@mui/material/Typography'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import { BlueprintDialog } from '../blueprint-dialog.js'
-import { PaperView, ReviseDialog, Timeline, humanLine, questionNumbers } from '../components.js'
+import { AgentComposer, AgentPane } from '../agent-pane.js'
+import { PaperView, ReviseDialog, humanLine, questionNumbers } from '../components.js'
 import { forWorkspace } from '../log.js'
 import { Rail, Sash, usePanes } from '../panes.js'
 import { IndexPane } from '../index-pane.js'
@@ -53,7 +54,7 @@ function diffVersions(before: VersionView | undefined, after: VersionView): read
 
 export function PaperPage(): React.JSX.Element {
   const app = useApp()
-  const { session, state, log, running, agents, elsewhere, doing, busy } = app
+  const { session, state, log, running, elsewhere, doing, stream } = app
   const panes = usePanes()
 
   const [draft, setDraft] = useState('')
@@ -106,15 +107,10 @@ export function PaperPage(): React.JSX.Element {
     return { unconfirmed, gaps, low, high, count: rows.length }
   }, [rows, shown])
 
+  /** 说了就办：它空闲就开一轮；它正忙就插进去（不挡老师，也不打断它） */
   const send = (): void => {
     const text = draft.trim()
-    if (running !== null) {
-      if (text === '') return
-      void app.interject(text)
-      setDraft('')
-      return
-    }
-    void app.startRun(text === '' ? '按设定出一份卷子' : text)
+    void app.ask(text === '' ? '按设定出一份卷子' : text)
     setDraft('')
     setViewVersion(null)
   }
@@ -140,7 +136,7 @@ export function PaperPage(): React.JSX.Element {
         changes={shown === undefined ? [] : diffVersions(versions[shown.version - 2], shown)}
         frozen={frozen}
         viewingOld={viewingOld}
-        busy={busy !== ''}
+        busy={app.busyWith('regen') || app.busyWith('confirm')}
         bankSize={state?.items.length ?? 0}
         answers={answers}
         chrome="doc"
@@ -179,73 +175,25 @@ export function PaperPage(): React.JSX.Element {
   )
 
   const agent = (
-    // width:'100%' 不能省：父容器是**横向** flex，子元素默认按内容宽度排（量过：栏宽 400，
-    // 内容只有 330，右边空出一条灰的——用户截图里那条就是它）
-    <Box sx={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
-      {/* 谁在干活：主线 + 子任务（子任务是与主线并排的，但只在这一栏里，绝不与别的出题串流） */}
-      {(running !== null || agents.length > 1) && (
-        <Stack direction="row" spacing={1} sx={{ px: 1.5, py: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-          {running !== null && <Chip size="small" color="primary" label={`在做 · ${String(running.steps)} 步`} />}
-          {agents
-            .filter((entry) => entry.parent !== undefined)
-            .map((entry) => (
-              <Tooltip key={entry.id} title={entry.goal}>
-                <Chip size="small" variant="outlined" color="secondary" label={entry.label ?? '子任务'} />
-              </Tooltip>
-            ))}
-        </Stack>
-      )}
+    <Box sx={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ flex: 1, minHeight: 0 }}>
-        <Timeline
+        <AgentPane
           entries={entries}
-          running={running !== null}
-          {...(running === null ? {} : { runningId: running.id })}
+          running={running}
+          doing={doing}
+          stream={stream}
           translate={translate}
           onExample={(example) => setDraft(example)}
+          onStop={() => void app.stopRun()}
         />
       </Box>
-      {doing !== null && (
-        // 「正在做」是一行事实：做什么 + 已用多久。**没有转圈动画。**
-        <Stack direction="row" spacing={1} sx={{ px: 1.5, py: 0.5, alignItems: 'center' }}>
-          <Typography variant="caption" color="text.secondary">
-            正在{doing.what}…（已 {String(Math.max(0, Math.round((Date.now() - doing.at) / 1000)))} 秒）
-          </Typography>
-          <Box sx={{ flex: 1 }} />
-          {running !== null && (
-            <Button size="small" startIcon={<StopCircleOutlinedIcon />} disabled={busy !== ''} onClick={() => void app.stopRun()}>
-              按停
-            </Button>
-          )}
-        </Stack>
-      )}
-      {/* **唯一的入口**：想什么就说什么——出题、改卷子、问为什么，都是这一句 */}
-      <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
-        {elsewhere.length > 0 && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 0.5 }}>
-            别的出题也在跑（{elsewhere.map((run) => run.label ?? run.goal.slice(0, 10)).join('、')}）——这里不受影响。
-          </Typography>
-        )}
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-end' }}>
-          <TextField
-            fullWidth
-            multiline
-            maxRows={6}
-            size="small"
-            value={draft}
-            placeholder={running === null ? '说一句你要什么——例如「再加一道圆的，4 分」「第 3 题换个情境」' : '插一句话，它下一步就看得见'}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault()
-                if (busy === '') send()
-              }
-            }}
-          />
-          <IconButton color="primary" disabled={busy !== '' || (running !== null && draft.trim() === '')} onClick={send}>
-            <SendIcon />
-          </IconButton>
-        </Stack>
-      </Box>
+      <AgentComposer
+        draft={draft}
+        onDraft={setDraft}
+        onSend={send}
+        running={running}
+        elsewhere={elsewhere}
+      />
     </Box>
   )
 
@@ -260,10 +208,10 @@ export function PaperPage(): React.JSX.Element {
           <Chip size="small" color="info" variant="outlined" label={`在看第 ${String(shown?.version ?? 0)} 版`} onClick={() => setViewVersion(null)} />
         )}
         <Box sx={{ flex: 1 }} />
-        <Button size="small" startIcon={<SettingsOutlinedIcon />} disabled={busy !== ''} onClick={() => setEditingBlueprint(true)}>
+        <Button size="small" startIcon={<SettingsOutlinedIcon />} onClick={() => setEditingBlueprint(true)}>
           设定
         </Button>
-        <Button size="small" variant="outlined" disabled={busy !== '' || frozen} onClick={regenerateAll}>
+        <Button size="small" variant="outlined" disabled={frozen || app.busyWith('assemble')} onClick={regenerateAll}>
           再出一版
         </Button>
         <Button size="small" startIcon={<HistoryOutlinedIcon />} disabled={versions.length === 0} onClick={() => setVersionsOpen((value) => !value)}>
@@ -333,7 +281,7 @@ export function PaperPage(): React.JSX.Element {
               <Button
                 size="small"
                 variant="outlined"
-                disabled={busy !== '' || frozen}
+                disabled={frozen || app.busyWith('restore')}
                 onClick={() =>
                   void app.guard('restore', async () => {
                     await api.restoreVersion(shown?.version ?? 0)
@@ -436,7 +384,7 @@ export function PaperPage(): React.JSX.Element {
         <ReviseDialog
           slot={revising.slot}
           item={revising.item}
-          busy={busy !== ''}
+          busy={app.busyWith('regen') || app.busyWith('confirm')}
           onClose={() => setRevising(null)}
           onRevise={async (slotKey, instruction) => {
             await api.reviseItem(slotKey, instruction)

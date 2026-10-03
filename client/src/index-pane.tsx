@@ -143,7 +143,7 @@ export function IndexPane({
             ))}
           </Stack>
           <Divider sx={{ my: 1.5 }} />
-          <Button size="small" variant="outlined" disabled={app.busy !== ''} onClick={() => setMaterials(true)}>
+          <Button size="small" variant="outlined" onClick={() => setMaterials(true)}>
             打开资料库
           </Button>
         </Box>

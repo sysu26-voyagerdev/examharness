@@ -309,34 +309,51 @@ export class SessionService extends Service implements SessionApi {
     const row = blueprint.blueprint.find((entry) => entry.key === slotKey || slotKey.startsWith(`${entry.key}-`))
     if (row === undefined) return { ok: false, reason: `蓝图里没有题位 ${slotKey}` }
 
-    const attemptSeed = seed ?? Math.floor(Math.random() * 1_000_000)
-    let item: Item
-    try {
-      item = this.ctx.construct.generate({ ...row, key: slotKey, count: 1 }, attemptSeed)
-    } catch (error) {
-      return { ok: false, reason: `构造器不覆盖该题位：${error instanceof Error ? error.message : String(error)}` }
+    const base = seed ?? Math.floor(Math.random() * 1_000_000)
+    /**
+     * **换一道不许因为"摇到同一组数字"而失败**。
+     *
+     * 真实踩过（测试里偶发、20 次里挂 2 次）：随机种子偶尔落回库里已有的那组参数，
+     * 去重闸门判"与已入库题目结构完全相同"，于是老师点"换一道"得到一句报错——
+     * 那明明不是他的错，重摇一次就好了。所以这里换几个种子接着试。
+     */
+    let item: Item | undefined
+    let reason = ''
+    for (const attempt of [0, 1, 2, 3, 5, 8]) {
+      try {
+        item = this.ctx.construct.generate({ ...row, key: slotKey, count: 1 }, base + attempt)
+      } catch (error) {
+        return { ok: false, reason: `构造器不覆盖该题位：${error instanceof Error ? error.message : String(error)}` }
+      }
+      // **局部重做必须守住蓝图约束**：构造器不许偷偷换知识点/题型/分值
+      if (
+        !sameKnowledge(item.slot.knowledge, row.knowledge) ||
+        item.slot.type !== row.type ||
+        item.slot.score !== row.score
+      ) {
+        return { ok: false, reason: '新题的分类信息与蓝图不符，已放弃这次重做' }
+      }
+      // oxlint-disable-next-line no-await-in-loop -- 一道一道试：摇到重复的参数就换下一个种子
+      const tried = await this.ctx.bank.submit(item)
+      if (tried.ok) return this.placeRegenerated(record, blueprint, slotKey, item)
+      reason = `${tried.verdict.gate}：${tried.verdict.reason}`
+      // 结构性违规（超纲之类）换种子没用
+      if (!tried.verdict.fixable) break
     }
+    return { ok: false, reason }
 
-    // **局部重做必须守住蓝图约束**：构造器不许偷偷换知识点/题型/分值
-    if (
-      !sameKnowledge(item.slot.knowledge, row.knowledge) ||
-      item.slot.type !== row.type ||
-      item.slot.score !== row.score
-    ) {
-      return { ok: false, reason: '新题的分类信息与蓝图不符，已放弃这次重做' }
-    }
+  }
 
-    const result = await this.ctx.bank.submit(item)
-    if (!result.ok) return { ok: false, reason: `${result.verdict.gate}：${result.verdict.reason}` }
-
+  /** 重做成功之后：把这一道换进卷子，出一版新的 */
+  private placeRegenerated(
+    record: SessionRecord,
+    blueprint: Blueprint,
+    slotKey: string,
+    item: Item,
+  ): { ok: boolean; version?: PaperVersion; reason?: string } {
     const previous = this.latest()
     const bindings = (previous?.bindings ?? []).filter((binding) => binding.slot !== slotKey)
-    bindings.push({
-      slot: slotKey,
-      itemId: result.id,
-      confirmedBy: null,
-      confirmedAt: null,
-    })
+    bindings.push({ slot: slotKey, itemId: item.id, confirmedBy: null, confirmedAt: null })
     const version = this.push(record, `重做 ${slotKey}`, bindings, 1, previous?.gaps ?? [], blueprint.paper.totalScore)
     return { ok: true, version }
   }
@@ -512,6 +529,36 @@ export class SessionService extends Service implements SessionApi {
     const after = normalizeBlueprint(JSON.parse(readFileSync(file, 'utf8')) as Blueprint, patch)
     writeFileSync(file, JSON.stringify(after, null, 2), 'utf8')
     return after
+  }
+
+  /**
+   * **这份卷子的设定是它自己的**：先复制一份再改。
+   *
+   * 什么时候复制：当前用着的设定不是"这一张卷子自己的"（例如直接用的是仓库里内置的模板）。
+   * 复制到 `data/blueprints/<卷名>·<会话短号>.json`，之后这张卷子改设定都只动它自己那一份。
+   */
+  settingOwn(): { name: string; path: string; cloned: boolean } {
+    const meta = this.current()
+    const want = safeName(`${meta.title}·${meta.id.slice(-4)}`)
+    const path = `data/blueprints/${want}.json`
+    if (meta.blueprintPath === path) return { name: want, path, cloned: false }
+
+    const file = resolve(this.base, path)
+    const existed = existsSync(file)
+    if (!existed) {
+      // 从当前这一份复制过来（agent 建的草稿、仓库里的模板都行）
+      const current = JSON.parse(readFileSync(resolve(this.base, meta.blueprintPath), 'utf8')) as Blueprint
+      mkdirSync(dirname(file), { recursive: true })
+      writeFileSync(file, JSON.stringify({ ...current, createdBy: 'teacher' }, null, 2), 'utf8')
+    }
+    this.update({ blueprintPath: path })
+    return { name: want, path, cloned: !existed }
+  }
+
+  /** 改**这一张卷子**的设定（先确保是它自己的一份，再改） */
+  settingPatch(patch: BlueprintPatch): Blueprint {
+    this.settingOwn()
+    return this.updateBlueprint(patch)
   }
 
   /** 这个会话就用这份蓝图（题位随之变化；已出的题留在题库里，不会丢） */

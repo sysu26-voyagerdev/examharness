@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context } from '@deepseek-ai/cordis'
-import { normalize, optionDisplayText, renderMathInText } from '@examharness/core'
+import { normalize, numberSlots, optionDisplayText, renderMathInText } from '@examharness/core'
 import type {
   Blueprint,
   BlueprintPatch,
@@ -337,8 +337,21 @@ export function apply(ctx: Context, config: WebConfig): void {
   const clients = new Set<ServerResponse>()
   const blueprint = sessionBlueprint(ctx)
   /** 图由 spec 现渲染（骨架阶段不做文件缓存） */
+  /**
+   * 「第 N 题」的编号表：按卷面上现在这一版的题与题型算（与 agent 用的是同一个函数）。
+   * 服务端算一次，界面直接用——编号只有一套，老师说的和 agent 说的才是同一个东西。
+   */
+  const numbersNow = (): ReadonlyMap<string, number> => {
+    const latest = ctx.session.latest()
+    if (latest === undefined) return new Map()
+    const entries = latest.bindings.flatMap((binding) => {
+      const item = ctx.bank.get(binding.itemId)
+      return item === undefined ? [] : [{ slot: binding.slot, type: item.slot.type }]
+    })
+    return numberSlots(entries)
+  }
   const summarize = (item: Item): Record<string, unknown> =>
-    summarizeWith(item, ctx.figure.renderItem(item)?.svg ?? '')
+    summarizeWith(item, ctx.figure.renderItem(item)?.svg ?? '', numbersNow().get(item.slot.key))
 
   const broadcast = (event: string, data: unknown): void => {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
@@ -372,6 +385,10 @@ export function apply(ctx: Context, config: WebConfig): void {
       ...(parent === undefined ? {} : { parent }),
     })
     broadcast('run:started', { runId, goal, workspace, ...(label === undefined ? {} : { label }) })
+  })
+  /** 模型正在写什么：只推给界面实时显示，**不进记录**（记录只认走完的那一步） */
+  ctx.on('llm:delta', ({ runId, label, text, workspace }) => {
+    broadcast('delta', { runId, label, text, workspace: workspace === '' ? owner() : workspace })
   })
   ctx.on('run:step', (payload) => {
     // 正文里的 `工具名：` 前缀拆出来单独存：界面用人话显示工具，正文不再重复一遍
@@ -565,6 +582,13 @@ export function apply(ctx: Context, config: WebConfig): void {
         })
         send(res, 202, { runId: started.runId, slot: slotKey })
       } catch (error) {
+        // **它正忙的时候，老师的"改这一道"不该被拒绝**：把要求插进正在跑的那一轮
+        // （下一步它就看得见）。以前这里直接报"已经有一轮在跑"，等于老师被自己的 agent 挡住。
+        const active = ctx.workbench.active().find((run) => run.workspace === meta.id || run.workspace === '')
+        if (active !== undefined && ctx.workbench.interject(active.id, goal)) {
+          send(res, 202, { runId: active.id, slot: slotKey, interjected: true })
+          return
+        }
         send(res, 409, { error: error instanceof Error ? error.message : String(error) })
       }
       return
@@ -903,9 +927,13 @@ export function apply(ctx: Context, config: WebConfig): void {
     if (method === 'PATCH' && path === '/api/session/blueprint') {
       const body = (await readBody(req)) as BlueprintPatch & { expectedRevision?: string }
       try {
-        const next = ctx.session.updateBlueprint(body, body.expectedRevision)
+        // **改的是这一张卷子的设定**：先把它变成自己的那份（复制），再改——
+        // 以前直接改共享文件，一个老师改"第 2 题考圆"会把另一张卷子也改了
+        const next = ctx.session.settingPatch?.(body) ?? ctx.session.updateBlueprint(body, body.expectedRevision)
         const source = ctx.session.blueprintSource()
-        send(res, 200, { blueprint: next, path: source.path, revision: source.revision })
+        const meta = ctx.session.current()
+        const own = source.path.startsWith('data/blueprints/') && source.path.includes(meta.id.slice(-4))
+        send(res, 200, { blueprint: next, path: source.path, revision: source.revision, own })
       } catch (error) {
         send(res, 409, { error: error instanceof Error ? error.message : String(error) })
       }
@@ -1321,10 +1349,12 @@ function optionViews(item: Item): readonly Record<string, unknown>[] {
 }
 
 /** 推给界面的最小投影：不要整个 Item 糊过去 */
-function summarizeWith(item: Item, figureSvg: string): Record<string, unknown> {
+function summarizeWith(item: Item, figureSvg: string, number?: number): Record<string, unknown> {
   return {
     id: item.id,
     slot: item.slot.key,
+    /** 卷面上的"第 N 题"（服务端算：界面显示它、agent 也说它） */
+    ...(number === undefined ? {} : { number }),
     knowledge: item.slot.knowledge,
     type: item.slot.type,
     score: item.slot.score,

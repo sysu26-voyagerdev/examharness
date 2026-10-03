@@ -180,17 +180,28 @@ describe('会话与版本', () => {
     // 造一道别的题，指到 S1-1 上（等价于 agent 的 place_item / 老师点"用这一道"）
     const row = blueprint.blueprint.find((entry) => entry.key === 'S1')
     if (row === undefined) throw new Error('蓝图里没有 S1')
-    const fresh = ctx.construct.generate({ ...row, key: 'S1-1', count: 1 }, 4242)
-    const submitted = await ctx.bank.submit(fresh)
-    expect(submitted.ok).toBe(true)
-    const placed = await ctx.session.place('S1-1', submitted.ok ? submitted.id : '', 'agent')
+    // 多试几个种子：题型参数空间小的时候，"再摇一个"经常撞上库里已有的那组数字（去重闸门拦下）
+    let id = ''
+    let why = ''
+    for (const seed of [4242, 4243, 4245, 4247, 4249, 4253]) {
+      const fresh = ctx.construct.generate({ ...row, key: 'S1-1', count: 1 }, seed)
+      // oxlint-disable-next-line no-await-in-loop -- 一个一个试，撞上重复就换种子
+      const submitted = await ctx.bank.submit(fresh)
+      if (submitted.ok) {
+        id = submitted.id
+        break
+      }
+      why = `${submitted.verdict.gate}：${submitted.verdict.reason}`
+    }
+    expect(id === '' ? why : 'ok').toBe('ok')
+    const placed = await ctx.session.place('S1-1', id, 'agent')
     expect(placed.ok).toBe(true)
     expect(ctx.session.latest()?.bindings.find((b) => b.slot === 'S1-1')?.chosenBy).toBe('agent')
 
     // 重组一次：这一版**不许**把指定过的那道换掉（其余题位照旧现造）
     await ctx.session.assemble()
     const binding = ctx.session.latest()?.bindings.find((b) => b.slot === 'S1-1')
-    expect(binding?.itemId).toBe(submitted.ok ? submitted.id : '')
+    expect(binding?.itemId).toBe(id)
     expect(binding?.chosenBy).toBe('agent')
   })
 

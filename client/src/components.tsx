@@ -548,7 +548,7 @@ export function ReviseDialog({
           <Button
             variant="contained"
             disableElevation
-            disabled={busy || instruction.trim() === ''}
+            disabled={instruction.trim() === ''}
             onClick={() => {
               setNote('')
               void onRevise(slot, instruction.trim()).then(onClose)
@@ -560,7 +560,7 @@ export function ReviseDialog({
           <Button
             variant="contained"
             disableElevation
-            disabled={busy}
+            disabled={false}
             onClick={() => {
               setNote('')
               void onPatch(item.id, {
@@ -790,7 +790,7 @@ export function PaperView({
             : '在右边那一栏说一句你要什么——它会先给设计和题，你再一句句改。'}
         </Typography>
         {!frozen && (
-          <Button variant="outlined" disabled={busy} onClick={onAssemble}>
+          <Button variant="outlined" onClick={onAssemble}>
             先按设定出一版
           </Button>
         )}
@@ -826,7 +826,7 @@ export function PaperView({
         <Button size="small" variant="outlined" onClick={() => window.print()}>
           打印
         </Button>
-        <Button size="small" variant="outlined" disabled={busy || frozen} onClick={onAssemble}>
+        <Button size="small" variant="outlined" disabled={frozen} onClick={onAssemble}>
           再出一版
         </Button>
       </Stack>
@@ -1031,7 +1031,7 @@ function QuestionBlock({
                 }}
               />
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 0.5, flexWrap: 'wrap' }}>
-                <Button size="small" variant="contained" disableElevation disabled={busy} onClick={() => void save()}>
+                <Button size="small" variant="contained" disableElevation onClick={() => void save()}>
                   保存并检查
                 </Button>
                 <Button
@@ -1058,7 +1058,7 @@ function QuestionBlock({
             <Typography
               component="span"
               onDoubleClick={() => {
-                if (busy || frozen) return
+                if (frozen) return
                 setStem(item.stem)
                 setEditing(true)
               }}
@@ -1161,7 +1161,7 @@ function QuestionBlock({
           <Tooltip title="这一道：改文字 / 改这一道 / 换一道 / 删掉">
             <IconButton
               size="small"
-              disabled={busy || frozen}
+              disabled={frozen}
               onClick={(event) => setMenuAt(event.currentTarget)}
               sx={{ p: 0.25 }}
             >
@@ -1192,7 +1192,7 @@ function QuestionBlock({
           </MenuItem>
           <Divider />
           <MenuItem
-            disabled={busy || frozen}
+            disabled={frozen}
             onClick={() => {
               setMenuAt(null)
               setStem(item.stem)
@@ -1202,7 +1202,7 @@ function QuestionBlock({
             改文字（就地改说法）
           </MenuItem>
           <MenuItem
-            disabled={busy || frozen}
+            disabled={frozen}
             onClick={() => {
               setMenuAt(null)
               onRevise(binding.slot, item)
@@ -1211,7 +1211,7 @@ function QuestionBlock({
             改这一道…（说一句要求，交给 agent 重造）
           </MenuItem>
           <MenuItem
-            disabled={busy || frozen}
+            disabled={frozen}
             onClick={() => {
               setMenuAt(null)
               onRegenerate(binding.slot)
@@ -1221,7 +1221,7 @@ function QuestionBlock({
           </MenuItem>
           {item.lifecycle === 'needs_review' && binding.confirmedBy === null && (
             <MenuItem
-              disabled={busy || frozen}
+              disabled={frozen}
               onClick={() => {
                 setMenuAt(null)
                 onConfirm(item.id)
@@ -1232,7 +1232,7 @@ function QuestionBlock({
           )}
           <Divider />
           <MenuItem
-            disabled={busy || frozen}
+            disabled={frozen}
             onClick={() => {
               setMenuAt(null)
               onDelete(binding.slot)

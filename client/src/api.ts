@@ -214,8 +214,8 @@ export const useBlueprint = (name: string): Promise<SessionMetaView> =>
   send('POST', '/api/blueprints/use', { name }).then((r) => json<SessionMetaView>(r))
 
 /** 蓝图（卷头 + 题位表）：题位是老师下发的，能读能改 */
-export const getBlueprint = (): Promise<{ blueprint: BlueprintView; path: string; revision: string }> =>
-  fetch('/api/session/blueprint').then((r) => json<{ blueprint: BlueprintView; path: string; revision: string }>(r))
+export const getBlueprint = (): Promise<{ blueprint: BlueprintView; path: string; revision: string; own: boolean }> =>
+  fetch('/api/session/blueprint').then((r) => json<{ blueprint: BlueprintView; path: string; revision: string; own: boolean }>(r))
 
 export interface BlueprintPatchView {
   paper?: Partial<BlueprintView['paper']>
@@ -298,6 +298,11 @@ export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: R
     const payload = JSON.parse(message.data) as { runId: string; goal: string; workspace: string; label?: string; parent?: string }
     onRun({ kind: 'started', ...payload })
   }
+  // 模型正在写什么（流式）：一小段一小段来，界面拿它显示最下面那一块浅字
+  const delta = (message: MessageEvent<string>): void => {
+    const payload = JSON.parse(message.data) as { runId: string; label: string; text: string; workspace?: string }
+    onRun({ kind: 'delta', ...payload, workspace: payload.workspace ?? '' })
+  }
   // "正要做什么"：工具一开跑就推，界面据此显示"正在…（已 n 秒）"
   const busy = (message: MessageEvent<string>): void => {
     const payload = JSON.parse(message.data) as { runId: string; agent: string; what: string; workspace?: string }
@@ -322,6 +327,7 @@ export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: R
     ['kb:changed', simple('kb:changed')],
     ['workspace:changed', simple('workspace:changed')],
     ['settings:changed', simple('settings:changed')],
+    ['delta', delta],
     ['run:busy', busy],
     ['run:step', step],
     ['run:started', started],

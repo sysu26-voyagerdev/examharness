@@ -47,6 +47,13 @@ declare module '@deepseek-ai/cordis' {
      * 一次模型调用 + 一次工具跑动可能要几十秒，只在结束时推消息，界面看着像卡住了。
      */
     'run:busy'(payload: { runId: string; agent: string; what: string; workspace: string }): void
+    /**
+     * **模型正在写什么**（流式）：每吐出一段就发一次，只用于界面实时显示。
+     *
+     * 它不是记录：记录只认走完的 `run:step`（一段流打完才是一条事实）。
+     * 界面拿它显示在最下面那一小块浅字里——十几秒没有输出的时候，那一块是活的。
+     */
+    'llm:delta'(payload: { runId: string; label: string; text: string; workspace: string }): void
     /** 一轮结束（emit，仅广播；界面据此收尾并刷新数据） */
     'run:done'(payload: {
       runId: string

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Service, type Context } from "@deepseek-ai/cordis";
-import { parseJsonObject } from "@examharness/core";
+import { numberSlots, parseJsonObject } from "@examharness/core";
 import type {
   Blueprint,
   Cognitive,
@@ -488,6 +488,58 @@ const BLUEPRINT_TOOLS: readonly LlmToolSpec[] = [
     },
   },
   {
+    name: "change_setting",
+    description:
+      "**改这一张卷子的设定**（老师口头说的那种：「第 2 题换成圆」「大题改成 3 道」「每题 12 分」「别考动点」）。" +
+      "按卷面上的**第几题**认（不是内部编号），改的是**这一张卷子自己的设定**，不会影响别人的卷子。" +
+      "改完要说清改了哪几条，并按新设定把受影响的题重出（place_item / assemble_paper）。",
+    parameters: {
+      type: "object",
+      properties: {
+        note: { type: "string", description: "一句人话：你改了什么" },
+        paper: {
+          type: "object",
+          description: "卷头：卷名/班级/时长/满分（只写要改的）",
+          properties: { title: { type: "string" }, className: { type: "string" }, minutes: { type: "number" }, totalScore: { type: "number" } },
+        },
+        rows: {
+          type: "array",
+          description: "按卷面题号改某几道（第几题 = 卷面上印的编号）",
+          items: {
+            type: "object",
+            properties: {
+              number: { type: "number", description: "卷面第几题" },
+              knowledge: { type: "array", items: { type: "string" }, description: "这道题改考古什么（图谱里的名字）" },
+              type: { type: "string", description: "选择/填空/解答" },
+              score: { type: "number", description: "每题几分" },
+              count: { type: "number", description: "这一档要几道" },
+              difficulty: { type: "array", items: { type: "number" }, description: "难度区间 [下限, 上限]" },
+              remove: { type: "boolean", description: "把这一档去掉" },
+            },
+            required: ["number"],
+          },
+        },
+        addRows: {
+          type: "array",
+          description: "加几道（放在卷末）",
+          items: {
+            type: "object",
+            properties: {
+              knowledge: { type: "array", items: { type: "string" } },
+              type: { type: "string" },
+              score: { type: "number" },
+              count: { type: "number" },
+              difficulty: { type: "array", items: { type: "number" } },
+            },
+            required: ["knowledge", "type", "score"],
+          },
+        },
+        forbid: { type: "array", items: { type: "string" }, description: "这张卷子不考的知识点（整卷禁用）" },
+      },
+      required: ["note"],
+    },
+  },
+  {
     name: "blueprint_update",
     description: "改库里某一份蓝图（共享文件：会检查修订号，别人刚改过就报冲突）。",
     parameters: {
@@ -621,6 +673,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   static Config = Config;
 
   private readonly config: WorkbenchConfig;
+  /** 新增题位起 key 用的计数器（只求唯一、可读） */
+  private settingCounter = 0;
   /** 正在跑的轮次（顶层最多一轮；子任务可以并行，见 start()） */
   private readonly runs = new Map<string, RunState>();
   private counter = 0;
@@ -750,15 +804,19 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       解题步骤: item.prose.solution,
       可以使用的数字: [...new Set(Object.values(item.instance.params))].map(String).join('、'),
     }
-    const reply = await this.ctx.llm.chat([
-      { role: 'system', content: SERIALIZER_PROMPT },
-      {
-        role: 'user',
-        content:
-          JSON.stringify(brief) +
-          '\n\n注意：这次是**按老师的要求改一版**，只改说法与情境，数值/条件/答案一律不许动。',
-      },
-    ])
+    const reply = await this.ctx.llm.chat(
+      [
+        { role: 'system', content: SERIALIZER_PROMPT },
+        {
+          role: 'user',
+          content:
+            JSON.stringify(brief) +
+            '\n\n注意：这次是**按老师的要求改一版**，只改说法与情境，数值/条件/答案一律不许动。',
+        },
+      ],
+      undefined,
+      (text) => this.broadcastDelta('改这一道', text),
+    )
     const parsed = parseJsonObject(reply.content)
     const stem = typeof parsed?.stem === 'string' ? parsed.stem : undefined
     if (stem === undefined || stem === '') return '执笔者没有按要求给出题面'
@@ -802,10 +860,14 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     const learned = this.ctx.graph.learnedKeys();
     let parsed: Record<string, unknown> | undefined;
     try {
-      const reply = await this.ctx.llm.chat([
-        { role: "system", content: COMPOSER_PROMPT },
-        { role: "user", content: JSON.stringify({ 老师的话: request, 可以用的知识点: learned }) },
-      ]);
+      const reply = await this.ctx.llm.chat(
+        [
+          { role: "system", content: COMPOSER_PROMPT },
+          { role: "user", content: JSON.stringify({ 老师的话: request, 可以用的知识点: learned }) },
+        ],
+        undefined,
+        (piece) => this.broadcastDelta("理解这句话", piece),
+      );
       parsed = parseJsonObject(reply.content);
     } catch (error) {
       return {
@@ -1021,6 +1083,11 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     return { items };
   }
 
+  /** 把模型的流式输出转成事件（界面那小块浅字就是它）：不落库，只用来"看见它在写什么" */
+  private broadcastDelta(label: string, text: string): void {
+    this.ctx.emit("llm:delta", { runId: "", label, text, workspace: "" });
+  }
+
   /** 让执笔者写题面（单独一层：并行调用时才不会被 lint 当成"循环里等"） */
   private async writeStem(item: Item, wish: string): Promise<Item | string> {
     return this.serialize(item, wish);
@@ -1090,19 +1157,23 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       // 题面里**只允许出现这些数字**（含情境里的数）——它们来自构造
       可以使用的数字: [...new Set(params)].map(String).join("、"),
     };
-    const reply = await this.ctx.llm.chat([
-      { role: "system", content: SERIALIZER_PROMPT },
-      {
-        role: "user",
-        content:
-          JSON.stringify(brief) +
+    const reply = await this.ctx.llm.chat(
+      [
+        { role: "system", content: SERIALIZER_PROMPT },
+        {
+          role: "user",
+          content:
+            JSON.stringify(brief) +
           (wish === undefined || wish === ""
             ? ""
             : `\n\n老师原话：${wish}\n` +
               "他想要的就是这个意思：在**不改动任何数值、条件与答案**的前提下，尽量照他的说法写情境与问法。\n" +
               "如果他的说法与这道结构对不上（比如他要的条件这道题里没有），就照实写这道题，不要为了迎合而改数、也不要编。"),
-      },
-    ]);
+        },
+      ],
+      undefined,
+      (text) => this.broadcastDelta("写题面", text),
+    );
     const parsed = parseJsonObject(reply.content);
     const stem = typeof parsed?.stem === "string" ? parsed.stem : undefined;
     const answerText = typeof parsed?.answerText === "string" ? parsed.answerText : undefined;
@@ -1261,7 +1332,15 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         state.steps += 1;
         // agent 循环天然串行：下一步做什么取决于上一步的回复
         // oxlint-disable-next-line no-await-in-loop
-        const reply = await this.ctx.llm.chat(messages, this.tools());
+        const reply = await this.ctx.llm.chat(messages, this.tools(), (text) => {
+          // **它在写什么，实时说给界面**（不落库：落库的只有走完的那一步）
+          this.ctx.emit("llm:delta", {
+            runId: state.id,
+            label: "它说",
+            text,
+            workspace: workspace?.name ?? "",
+          });
+        });
         if (reply.content !== null && reply.content !== "")
           say(state.steps, "assistant", reply.content);
 
@@ -2059,6 +2138,103 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       if (session === undefined)
         return { kind: "tool", text: `${tool}：没有会话服务`, payload: { error: "未接入会话" } };
 
+      if (tool === "change_setting") {
+        // `session` 在上一层（blueprint_ 分支）已经取过：这里直接用，别再声明一次
+        const patch = session.settingPatch?.bind(session);
+        if (session === undefined || patch === undefined) {
+          return { kind: "tool", text: "change_setting：没有会话服务，改不了设定", payload: { error: "未接入会话" } };
+        }
+        const rows = Array.isArray(args.rows) ? (args.rows as Record<string, unknown>[]) : [];
+        const addRows = Array.isArray(args.addRows) ? (args.addRows as Record<string, unknown>[]) : [];
+        const paper = typeof args.paper === "object" && args.paper !== null ? (args.paper as Record<string, unknown>) : undefined;
+        const forbid = Array.isArray(args.forbid) ? args.forbid.map(String) : undefined;
+        try {
+          const before = session.blueprint();
+          // 「第几题」→ 内部题位：用卷面上现在这一版算出来的编号表认（与界面、与老师说的一致）
+          const latest = session.latest();
+          const typed = (latest?.bindings ?? []).flatMap((binding) => {
+            const item = this.ctx.bank.get(binding.itemId);
+            return item === undefined ? [] : [{ slot: binding.slot, type: item.slot.type }];
+          });
+          const byNumber = new Map<number, string>();
+          for (const [slot, number] of numberSlots(typed)) byNumber.set(number, slot.replace(/-\d+$/, ""));
+          const rowsOut = [...before.blueprint];
+          const changed: string[] = [];
+          for (const row of rows) {
+            const number = Number(row.number ?? 0);
+            const rowKey = byNumber.get(number);
+            if (rowKey === undefined) {
+              return {
+                kind: "tool",
+                text: `change_setting：卷面上没有第 ${String(number)} 题（现在共 ${String(byNumber.size)} 道）`,
+                payload: { error: "题号不存在" },
+              };
+            }
+            const index = rowsOut.findIndex((entry) => entry.key === rowKey);
+            const current = rowsOut[index];
+            if (current === undefined) continue;
+            if (row.remove === true) {
+              rowsOut.splice(index, 1);
+              changed.push(`去掉第 ${String(number)} 题这一档`);
+              continue;
+            }
+            const next = {
+              ...current,
+              ...(Array.isArray(row.knowledge) ? { knowledge: row.knowledge.map(String) } : {}),
+              ...(typeof row.type === "string" ? { type: row.type as typeof current.type } : {}),
+              ...(typeof row.score === "number" ? { score: row.score } : {}),
+              ...(typeof row.count === "number" ? { count: row.count } : {}),
+              ...(Array.isArray(row.difficulty) && row.difficulty.length === 2
+                ? { difficulty: [Number(row.difficulty[0]), Number(row.difficulty[1])] as [number, number] }
+                : {}),
+            };
+            rowsOut[index] = next;
+            changed.push(
+              `第 ${String(number)} 题：${next.knowledge.join("、")}｜${next.type}｜每题 ${String(next.score)} 分 ×${String(next.count)}`,
+            );
+          }
+          for (const extra of addRows) {
+            this.settingCounter += 1;
+            const knowledge = Array.isArray(extra.knowledge) ? extra.knowledge.map(String) : [];
+            const type = String(extra.type ?? "解答") as "选择" | "填空" | "解答";
+            const score = Number(extra.score ?? 10);
+            rowsOut.push({
+              key: `X${String(Date.now() % 100000)}${String(this.settingCounter)}`,
+              knowledge,
+              cognitive: "掌握",
+              type,
+              difficulty:
+                Array.isArray(extra.difficulty) && extra.difficulty.length === 2
+                  ? [Number(extra.difficulty[0]), Number(extra.difficulty[1])]
+                  : [0.5, 0.8],
+              score,
+              count: typeof extra.count === "number" ? extra.count : 1,
+            });
+            changed.push(`加了一道：${knowledge.join("、")}｜${type}｜${String(score)} 分`);
+          }
+          const after = patch({
+            ...(paper === undefined ? {} : { paper: paper as Partial<Blueprint["paper"]> }),
+            ...(changed.length === 0 ? {} : { blueprint: rowsOut }),
+            ...(forbid === undefined ? {} : { constraints: { forbidKnowledge: forbid } }),
+          });
+          return {
+            kind: "tool",
+            text:
+              `change_setting：${String(args.note ?? "改好了")}\n` +
+              (changed.length === 0 ? "（设定没有实质变化）" : changed.map((line) => `  · ${line}`).join("\n")) +
+              `\n现在：${String(after.blueprint.length)} 个题位、共 ${String(after.paper.totalScore)} 分。` +
+              "接着按新设定把受影响的题重出，再用 place_item / assemble_paper 让卷子变过来。",
+            payload: { ok: true, changed, totalScore: after.paper.totalScore },
+          };
+        } catch (error) {
+          return {
+            kind: "tool",
+            text: `change_setting：没改成（${error instanceof Error ? error.message : String(error)}）`,
+            payload: { error: "改设定失败" },
+          };
+        }
+      }
+
       if (tool === "blueprint_list") {
         const library = session.blueprintList();
         const current = session.blueprintSource().path;
@@ -2629,6 +2805,9 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     "**别再翻上一轮的产物**：工作区里的 out/、tmp/ 是以前的草稿，除非这次任务需要，不要一上来就重读。",
     "**默认动作**：把蓝图里缺的题位补齐，然后 assemble_paper 组卷。除非简报显示题位已齐、卷子已组好，",
     '   否则不要问"你要哪一种"——直接干。',
+    "**老师口头改设定**（「第 2 题换成圆」「大题改成 3 道」「别考动点」）用 change_setting：" +
+    "   它按**卷面上的第几题**认，改的是这一张卷子自己的设定（不动别人的卷子）；" +
+    "   改完要把受影响的题重出（quick_question / construct_item）再 place_item——只改设定不动卷子等于没改。",
     '**老师要的规格库里没有时**：不要反问他"要哪一种"。直接 blueprint_list 看库里有什么 →',
     "   照他的要求 blueprint_create 一份**草稿**（题位尽量贴近他的说法）→ blueprint_use 换上 → 按新题位出题。",
     '   构造器覆盖不到的题位照实写在草稿里并说明"这些题位我出不了"，让老师在界面上改——**草稿是他的起点，不是问他问题**。',

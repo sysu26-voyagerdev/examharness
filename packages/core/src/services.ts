@@ -244,7 +244,18 @@ export interface LlmApi {
   readonly configured: boolean
   /** 当前模型名（要记进 prose.serializer，题面将来可重生成） */
   readonly model: string
-  chat(messages: readonly LlmMessage[], tools?: readonly LlmToolSpec[]): Promise<LlmReply>
+  chat(
+    messages: readonly LlmMessage[],
+    tools?: readonly LlmToolSpec[],
+    /**
+     * **流式**：模型每吐出一段文字就回调一次（界面靠它实时显示"模型此刻在写什么"）。
+     *
+     * 为什么要有：agent 说话是老师判断"它在干什么"的主要依据，而一次调用可能十几秒没有输出——
+     * 那十几秒里界面是死的（用户："要能实时浅字看到最后几个输出"）。
+     * 回调只用于**显示**：真正的判定仍然只看最终 reply（R2 不变）。
+     */
+    onDelta?: (text: string) => void,
+  ): Promise<LlmReply>
 }
 
 export interface WorkbenchRequest {
@@ -797,6 +808,15 @@ export interface SessionApi {
   blueprint(): Blueprint
   /** 蓝图从哪个文件来、什么修订号（共享文件要靠它发现冲突） */
   blueprintSource(): { path: string; revision: string }
+  /**
+   * **把这份卷子的设定变成它自己的**（复制一份，之后只改这一张卷子的）。
+   *
+   * 为什么要有：设定（原来叫蓝图）本来是共享文件——一个老师改"第 2 题考圆"，
+   * 会把另一张卷子也改了，还会互相"撞车"。老师改的永远是**这一张卷子的设定**。
+   */
+  settingOwn?(): { name: string; path: string; cloned: boolean }
+  /** 改**这一张卷子**的设定（自动先把它变成自己的，再改） */
+  settingPatch?(patch: BlueprintPatch): Blueprint
   /** 蓝图库：老师手上是一套模板（课后作业 / 单元测验 / …），不是一个蓝图 */
   blueprintList(): readonly BlueprintInfo[]
   blueprintRead(name: string): Blueprint

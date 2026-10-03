@@ -31,7 +31,7 @@ const TEMPLATES: readonly { label: string; text: string }[] = [
 
 export function StartPage(): React.JSX.Element {
   const app = useApp()
-  const { sessions, session, busy } = app
+  const { sessions, session } = app
   const [draft, setDraft] = useState('')
   const [renaming, setRenaming] = useState('')
   const [title, setTitle] = useState('')
@@ -89,12 +89,11 @@ export function StartPage(): React.JSX.Element {
             size="small"
             variant="outlined"
             label={template.label}
-            disabled={busy !== ''}
             onClick={() => setDraft(`${template.text}`)}
           />
         ))}
         <Box sx={{ flex: 1 }} />
-        <Button variant="contained" disableElevation disabled={busy !== '' || draft.trim() === ''} onClick={() => start(draft)}>
+        <Button variant="contained" disableElevation disabled={draft.trim() === ''} onClick={() => start(draft)}>
           开始出题
         </Button>
       </Stack>
@@ -108,7 +107,6 @@ export function StartPage(): React.JSX.Element {
         <Button
           size="small"
           startIcon={<AddIcon />}
-          disabled={busy !== ''}
           onClick={() =>
             void app.guard('new', async () => {
               await api.createSession()

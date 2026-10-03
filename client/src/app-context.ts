@@ -32,14 +32,30 @@ export interface AppValue {
   elsewhere: readonly RunAgentView[]
   /** 正在做的动作（工具名 + 开始时间）：界面显示"正在…（已 n 秒）" */
   doing: { what: string; agent: string; at: number } | null
+  /** 模型此刻正在写的内容（流式）：界面右下角用浅字实时显示，走完一步就清掉 */
+  stream: { label: string; text: string; at: number } | null
   live: readonly LiveEvent[]
-  /** 正在进行的动作（'' = 空闲） */
+  /**
+   * 正在进行的界面动作（'' = 空闲）。
+   *
+   * **它不是一把全局锁**：以前用它 disable 掉整屏按钮，于是"有一道题在改"就动不了别的题、
+   * 连设定都打不开（用户当场指出的机制问题）。现在它只用来显示进度条与"这个动作自己在跑"。
+   */
   busy: string
+  /** 这个动作是不是正在跑（只挡它自己，不挡别人） */
+  busyWith: (label: string) => boolean
   error: string
   clearError: () => void
   reload: () => Promise<void>
   guard: (label: string, action: () => Promise<void>) => Promise<void>
   startRun: (goal: string) => Promise<void>
+  /**
+   * **跟它说一件事**：它空闲就开一轮；它正在忙，就把这句话插进去（下一步就生效）。
+   *
+   * 为什么不是"忙就禁用"：老师手上不该有"等它干完才能动"的时刻——
+   * 一道题正在改，不该挡住他改另一道、调设定、删一道。
+   */
+  ask: (goal: string) => Promise<'run' | 'interjected'>
   interject: (text: string) => Promise<void>
   stopRun: () => Promise<void>
   go: (path: string) => void
