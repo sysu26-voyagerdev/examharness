@@ -9,10 +9,12 @@ import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
 import MoreVertIcon from '@mui/icons-material/MoreVert'
 import PersonIcon from '@mui/icons-material/Person'
 import ReportOutlinedIcon from '@mui/icons-material/ReportOutlined'
+import WarningAmberOutlinedIcon from '@mui/icons-material/WarningAmberOutlined'
 import Alert from '@mui/material/Alert'
 import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
 import Button from '@mui/material/Button'
+import ButtonBase from '@mui/material/ButtonBase'
 import Card from '@mui/material/Card'
 import CardActions from '@mui/material/CardActions'
 import CardContent from '@mui/material/CardContent'
@@ -184,8 +186,8 @@ const EXAMPLES: readonly string[] = [
  *
  * 为什么是这样：老师要看着它干活（那才是控制感），所以它必须常驻、可读、能插话；
  * 但一条平铺的流水账会"串"——主线、子任务、几轮之间分不开。
- * 所以按**轮**分块：块头是老师那句话，块内一行一步，子任务缩进嵌在自己的块里；
- * 过去跑完的块折成一行，正在跑的那块展开。没有装饰动画，没有转圈。
+ * 所以按**轮**分块：块头是老师那句话，块内一行一步，子任务缩进嵌在自己那一轮里；
+ * 过去跑完的块折成一行，最近一轮（和正在跑的）展开。没有装饰动画，没有转圈。
  */
 export function Timeline({
   entries,
@@ -206,25 +208,36 @@ export function Timeline({
   const endRef = useRef<HTMLDivElement | null>(null)
   const boxRef = useRef<HTMLDivElement | null>(null)
   const stickRef = useRef(true)
-  const [open, setOpen] = useState<readonly string[]>([])
-  /** 手动折起来的那些块（默认展开最近一块，收起来要能收） */
-  const [closed, setClosed] = useState<readonly string[]>([])
+  /**
+   * 块的开合：**只记老师手动改过的那些**（id → 展开吗）。
+   *
+   * 以前这里分了"手动展开的"和"手动收起的"两个数组，而"手动展开"那个数组**从头到尾没被写过**
+   * （只读不写）——于是点一个折起来的旧块时，第一下只是把它记进"收起的名单"，看着毫无反应：
+   * 旧块**永远打不开**（真实踩过，截图复现过）。
+   */
+  const [manual, setManual] = useState<Readonly<Record<string, boolean>>>({})
 
   useEffect(() => {
     const box = boxRef.current
-    if (box !== null) stickRef.current = box.scrollHeight - box.scrollTop - box.clientHeight < 120
-    if (stickRef.current) endRef.current?.scrollIntoView({ block: 'end' })
+    if (box === null) return
+    stickRef.current = box.scrollHeight - box.scrollTop - box.clientHeight < 120
+    // 直接设 scrollTop：`scrollIntoView` 会连祖先滚动容器一起滚（实测会把卷面也带着动）
+    if (stickRef.current) box.scrollTop = box.scrollHeight
   }, [entries.length])
 
-  const blocks = useMemo(
-    () =>
-      groupRuns(entries).map((block) => ({
-        ...block,
-        entries: collapseSame(block.entries),
-        children: block.children.map((child) => ({ ...child, entries: collapseSame(child.entries) })),
-      })),
-    [entries],
-  )
+  const blocks = useMemo(() => collapseBlocks(groupRuns(entries)), [entries])
+  /** 默认展开**最近一轮**（刚发生的事才是老师要看的）；兜底那一块（'earlier'）不算"最近一轮" */
+  const latestRound = blocks.toReversed().find((block) => block.id !== 'earlier')?.id
+  const isOpen = (block: RunBlock): boolean => {
+    const chosen = manual[block.id]
+    if (chosen !== undefined) return chosen
+    if (running && block.id === runningId) return true
+    // 子任务（帮手）：正在跑的那个展开，跑完的折成一行——不然父块会被帮手的过程淹没
+    if (block.parent !== undefined) return false
+    return block.id === latestRound
+  }
+  const toggle = (block: RunBlock): void =>
+    setManual((previous) => ({ ...previous, [block.id]: !isOpen(block) }))
 
   if (blocks.length === 0) {
     return (
@@ -234,21 +247,24 @@ export function Timeline({
         </Typography>
         <Stack spacing={0.75}>
           {EXAMPLES.map((example) => (
-            <Box
+            <ButtonBase
               key={example}
+              disabled={onExample === undefined}
               onClick={() => onExample?.(example)}
               sx={{
+                display: 'block',
+                width: '100%',
+                textAlign: 'left',
                 px: 1.25,
                 py: 0.75,
                 border: 1,
                 borderColor: 'divider',
                 borderRadius: 1,
-                cursor: onExample === undefined ? 'default' : 'pointer',
                 '&:hover': { bgcolor: 'action.hover' },
               }}
             >
               <Typography variant="body2">{example}</Typography>
-            </Box>
+            </ButtonBase>
           ))}
         </Stack>
       </Box>
@@ -257,73 +273,117 @@ export function Timeline({
 
   return (
     <Box ref={boxRef} sx={{ height: '100%', overflowY: 'auto', px: 1.25, py: 1 }}>
-      {blocks.map((block, index) => {
-        const current = running && block.id === runningId
-        // 默认展开**最近那一块**（刚发生的事才是老师要看的），更早的折成一行；
-        // 但"点一下收起来"必须有效——所以记的是**手动收起的那些**，而不是"手动展开的那些"
-        const latest = index === blocks.length - 1
-        const expanded = current || (!closed.includes(block.id) && (open.includes(block.id) || (block.parent === undefined && latest)))
-        return (
-          <Box key={block.id} sx={{ mb: 1.25 }}>
-            <Stack
-              onClick={() =>
-                setClosed((previous) =>
-                  previous.includes(block.id) ? previous.filter((id) => id !== block.id) : [...previous, block.id],
-                )
-              }
-              sx={{ cursor: 'pointer', px: 0.5, py: 0.5, borderRadius: 1, '&:hover': { bgcolor: 'action.hover' } }}
-            >
-              {/* 第一行：谁说的 + 说了什么（**一行，截断**，不换行——换行会把整块挤成一坨） */}
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                  {block.id === 'earlier' ? '卷子' : block.parent === undefined ? '老师' : '子任务'}
-                </Typography>
-                <Typography variant="body2" sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
-                  {titleLine(block.title, translate)}
-                </Typography>
-                {current && <Chip size="small" color="primary" label="在做" />}
-                {!current && <Chip size="small" variant="outlined" label="做完了" />}
-                <Typography variant="caption" color="text.disabled" sx={{ whiteSpace: 'nowrap' }}>
-                  {new Date(block.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
-                </Typography>
-              </Stack>
-              {/* 第二行：折起来时给出"最后成了什么"（展开时就不必重复） */}
-              {!expanded && (
-                <Typography variant="caption" color="text.disabled" noWrap sx={{ display: 'block', pl: 4.5 }}>
-                  {String(block.entries.length)} 步 · {resultLine(block, translate)}
-                </Typography>
-              )}
-            </Stack>
-            {expanded && (
-              <Stack spacing={0.25} sx={{ pl: block.parent === undefined ? 1 : 2.5, mt: 0.25 }}>
-                {block.entries.map((entry) => (
-                  <StepRow key={entry.id} entry={entry} {...(translate === undefined ? {} : { translate })} />
-                ))}
-                {block.children.map((child) => (
-                  <Box key={child.id} sx={{ borderLeft: 2, borderColor: 'divider', pl: 1 }}>
-                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', py: 0.25 }}>
-                      <Typography variant="caption" color="secondary.main" sx={{ overflowWrap: 'anywhere' }}>
-                        {plain(child.title)}
-                      </Typography>
-                      <Typography variant="caption" color="text.disabled">
-                        {String(child.entries.length)} 步
-                      </Typography>
-                    </Stack>
-                    <Stack spacing={0.25} sx={{ pl: 1.5 }}>
-                      {child.entries.map((entry) => (
-                        <StepRow key={entry.id} entry={entry} {...(translate === undefined ? {} : { translate })} />
-                      ))}
-                    </Stack>
-                  </Box>
-                ))}
-              </Stack>
-            )}
-          </Box>
-        )
-      })}
+      {blocks.map((block) => (
+        <BlockRow
+          key={block.id}
+          block={block}
+          running={running}
+          {...(runningId === undefined ? {} : { runningId })}
+          isOpen={isOpen}
+          onToggle={toggle}
+          {...(translate === undefined ? {} : { translate })}
+        />
+      ))}
       <div ref={endRef} />
     </Box>
   )
+}
+
+/** 块头那一列（"老师/卷子/子任务"）的宽度：**固定住**，不然每一块的标题起头都不齐 */
+const WHO_WIDTH = 38
+
+/**
+ * 一块：块头一行（谁说的 + 说了什么 + 在做/做完了 + 几点），折起来时补一句"最后成了什么"。
+ * 展开时先列自己这一步一步，再把子任务嵌在下面——**子任务有自己的块头**，能单独开合、有几层嵌几层。
+ */
+function BlockRow({
+  block,
+  running,
+  runningId,
+  isOpen,
+  onToggle,
+  translate,
+}: {
+  block: RunBlock
+  running: boolean
+  runningId?: string
+  isOpen: (block: RunBlock) => boolean
+  onToggle: (block: RunBlock) => void
+  translate?: (text: string) => string
+}): React.JSX.Element {
+  const open = isOpen(block)
+  const current = running && block.id === runningId
+  return (
+    <Box sx={{ mb: 1.25 }}>
+      <ButtonBase
+        onClick={() => onToggle(block)}
+        aria-expanded={open}
+        title={open ? '折起来' : '展开看每一步'}
+        sx={{
+          display: 'block',
+          width: '100%',
+          textAlign: 'left',
+          px: 0.5,
+          py: 0.5,
+          borderRadius: 1,
+          '&:hover': { bgcolor: 'action.hover' },
+        }}
+      >
+        {/* 第一行：谁说的 + 说了什么（**一行，截断**，不换行——换行会把整块挤成一坨） */}
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
+          <Typography
+            variant="caption"
+            color="text.secondary"
+            sx={{ whiteSpace: 'nowrap', width: WHO_WIDTH, flexShrink: 0 }}
+          >
+            {block.id === 'earlier' ? '卷子' : block.parent === undefined ? '老师' : '子任务'}
+          </Typography>
+          <Typography variant="body2" sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
+            {titleLine(block.title, translate)}
+          </Typography>
+          {current ? <Chip size="small" color="primary" label="在做" /> : <Chip size="small" variant="outlined" label="做完了" />}
+          <Typography variant="caption" color="text.disabled" sx={{ whiteSpace: 'nowrap' }}>
+            {clock(block.at)}
+          </Typography>
+        </Stack>
+        {/* 第二行：折起来时给出"最后成了什么"（展开时就不必重复） */}
+        {!open && (
+          <Typography
+            variant="caption"
+            color="text.disabled"
+            noWrap
+            sx={{ display: 'block', pl: `${String(WHO_WIDTH + 8)}px` }}
+          >
+            {String(stepsOf(block))} 步 · {resultLine(block, translate)}
+          </Typography>
+        )}
+      </ButtonBase>
+      {open && (
+        <Stack spacing={0.25} sx={{ pl: block.parent === undefined ? 1 : 2.5, mt: 0.25 }}>
+          {block.entries.map((entry) => (
+            <StepRow key={entry.id} entry={entry} {...(translate === undefined ? {} : { translate })} />
+          ))}
+          {block.children.map((child) => (
+            <Box key={child.id} sx={{ borderLeft: 2, borderColor: 'divider', pl: 1 }}>
+              <BlockRow
+                block={child}
+                running={running}
+                {...(runningId === undefined ? {} : { runningId })}
+                isOpen={isOpen}
+                onToggle={onToggle}
+                {...(translate === undefined ? {} : { translate })}
+              />
+            </Box>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  )
+}
+
+/** 几点几分（记录里只有一个时间格式：时:分） */
+function clock(at: string): string {
+  return new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
 }
 
 /** 折起来的块也让人知道"最后成了什么"（取最后一条记录的第一句） */
@@ -336,7 +396,7 @@ function resultLine(block: RunBlock, translate?: (text: string) => string): stri
 }
 
 /**
- * 块头那一行：老师说的话（或"改第 3 道题"这种派活）**也要翻译**。
+ * 块头那一行：老师说的话（或"改第 3 题"这种派活）**也要翻译**。
  *
  * "改 S3-1"里的题号是内部编号，直接显示出来就是个系统词（真实踩过）。
  */
@@ -354,67 +414,121 @@ interface RunBlock {
   children: readonly RunBlock[]
 }
 
-/** 按"轮"分块：起一轮的那一行是块头，其余挂到自己的 runId 下，子任务嵌在父块里 */
+/** 一块里一共有多少步（含子任务的），折起来时显示的就是它 */
+function stepsOf(block: RunBlock): number {
+  return block.entries.length + block.children.reduce((sum, child) => sum + stepsOf(child), 0)
+}
+
+/** 每一块自己合一遍重复行，子块也合 */
+function collapseBlocks(blocks: readonly RunBlock[]): readonly RunBlock[] {
+  return blocks.map((block) => ({
+    ...block,
+    entries: collapseSame(block.entries),
+    children: collapseBlocks(block.children),
+  }))
+}
+
+/**
+ * 按"轮"分块：起一轮的那一行是块头，其余挂到自己的 `agent`/`runId` 下。
+ *
+ * 子任务嵌在派它的那一轮里（**有几层就嵌几层**）：以前只往"顶层块"里挂一层，
+ * 帮手再派的帮手就挂不上任何地方——它每一步都渲染不出来（等于凭空消失），
+ * 而挂不上父块的行又会掉进兜底块，几条线混成一条平铺的流水账，也就是用户说的"串"。
+ */
 function groupRuns(entries: readonly LogEntryView[]): readonly RunBlock[] {
   const starters = new Map<string, { title: string; at: string; parent?: string }>()
   for (const entry of entries) {
     if (entry.kind !== 'user' || entry.runId === undefined) continue
     if (!starters.has(entry.runId)) {
-      starters.set(entry.runId, { title: entry.text, at: entry.at, ...(entry.parent === undefined ? {} : { parent: entry.parent }) })
+      starters.set(entry.runId, {
+        title: entry.text,
+        at: entry.at,
+        ...(entry.parent === undefined ? {} : { parent: entry.parent }),
+      })
     }
   }
-  const blocks = new Map<string, { entries: LogEntryView[] }>()
+  const buckets = new Map<string, LogEntryView[]>()
   const loose: LogEntryView[] = []
   for (const entry of entries) {
     const id = entry.agent ?? entry.runId
     if (id === undefined || !starters.has(id)) {
-      // 没有归属的行（早先的记录、判定行）单独兜住，不硬塞进谁的块里
+      // 没有轮次归属的行（老师签的字、早先的记录）单独兜住，不硬塞进谁的块里
       loose.push(entry)
       continue
     }
-    const bucket = blocks.get(id) ?? { entries: [] }
-    bucket.entries.push(entry)
-    blocks.set(id, bucket)
+    const bucket = buckets.get(id) ?? []
+    bucket.push(entry)
+    buckets.set(id, bucket)
   }
-  const built: { block: RunBlock; parent?: string }[] = [...starters.entries()].map(([id, starter]) => ({
-    block: {
+  const nodes = new Map<string, RunBlock>()
+  for (const [id, starter] of starters) {
+    nodes.set(id, {
       id,
       title: starter.title,
       at: starter.at,
       ...(starter.parent === undefined ? {} : { parent: starter.parent }),
-      entries: (blocks.get(id)?.entries ?? []).filter((entry) => !(entry.kind === 'user' && entry.runId === id && entry.text === starter.title)),
+      // 块头那一行不重复显示在块里
+      entries: (buckets.get(id) ?? []).filter(
+        (entry) => !(entry.kind === 'user' && entry.runId === id && entry.text === starter.title),
+      ),
       children: [],
-    },
-    ...(starter.parent === undefined ? {} : { parent: starter.parent }),
-  }))
-  const roots = built.filter((entry) => entry.parent === undefined || !built.some((other) => other.block.id === entry.parent))
-  for (const entry of built) {
-    if (entry.parent === undefined) continue
-    const parent = roots.find((root) => root.block.id === entry.parent)
-    if (parent !== undefined) (parent.block.children as RunBlock[]).push(entry.block)
-  }
-  if (loose.length > 0) {
-    roots.unshift({
-      block: {
-        id: 'earlier',
-        // 没有轮次头的记录（例如老师按"再出一版"、签字、退回）：不属于哪一轮 agent，
-        // 但它们就是"这一版"发生过的事——别把它们藏起来，也别叫它们"早先的记录"
-        title: '这一版做了什么',
-        at: loose[0]?.at ?? new Date().toISOString(),
-        entries: loose,
-        children: [],
-      },
     })
   }
-  return roots.map((entry) => entry.block)
+  /** 顺着 parent 往上走：用来认出"父块指向自己/自己的后代"这种坏数据，别渲染成死循环 */
+  const reaches = (from: RunBlock, target: string): boolean => {
+    const seen = new Set<string>()
+    let current: RunBlock | undefined = from
+    while (current !== undefined && !seen.has(current.id)) {
+      if (current.id === target) return true
+      seen.add(current.id)
+      current = current.parent === undefined ? undefined : nodes.get(current.parent)
+    }
+    return false
+  }
+  const roots: RunBlock[] = []
+  for (const node of nodes.values()) {
+    const parent = node.parent === undefined ? undefined : nodes.get(node.parent)
+    if (parent === undefined || parent.id === node.id || reaches(parent, node.id)) {
+      roots.push(node)
+      continue
+    }
+    const siblings = parent.children as RunBlock[]
+    siblings.push(node)
+  }
+  if (loose.length > 0) {
+    const earlier: RunBlock = {
+      id: 'earlier',
+      // 没有轮次头的记录（例如老师签字、退回某一版）：不属于哪一轮 agent，
+      // 但它们就是"这一版"发生过的事——别把它们藏起来，也别叫它们"早先的记录"
+      title: '这一版做了什么',
+      at: loose[0]?.at ?? new Date().toISOString(),
+      entries: loose,
+      children: [],
+    }
+    // **按时间插回去**：以前不管三七二十一放在最上面，于是"最近发生的事"长在记录的开头
+    const index = roots.findIndex((root) => root.at > earlier.at)
+    if (index < 0) roots.push(earlier)
+    else roots.splice(index, 0, earlier)
+  }
+  return roots
 }
 
-/** 连着几行一模一样就合成一行（×N）：记录要能读，不是流水账 */
+/**
+ * 连着几行一模一样就合成一行（×N）：记录要能读，不是流水账。
+ *
+ * 比的是**正文 + 类型 + 工具名**：只比正文的话，两个不同工具碰巧写出同一句话
+ * 就会被合成一行，标签只剩前一个——等于把"谁干的"说错。
+ */
 function collapseSame(entries: readonly LogEntryView[]): readonly LogEntryView[] {
   const out: LogEntryView[] = []
   for (const entry of entries) {
     const previous = out.at(-1)
-    if (previous !== undefined && previous.text === entry.text && previous.kind === entry.kind) {
+    if (
+      previous !== undefined &&
+      previous.text === entry.text &&
+      previous.kind === entry.kind &&
+      previous.tool === entry.tool
+    ) {
       out[out.length - 1] = { ...previous, repeat: (previous.repeat ?? 1) + 1 }
       continue
     }
@@ -422,6 +536,16 @@ function collapseSame(entries: readonly LogEntryView[]): readonly LogEntryView[]
   }
   return out
 }
+
+/**
+ * 一步的语气：**出错**、**没成**、**完成**、平常。
+ *
+ * 记录里没有"语气"字段（那是服务端的事，界面不改数据），只能看文字——
+ * 所以说法要列全：以前这条正则里没有"出错"，于是"这一轮出错停下了"那一行
+ * 顶着一个**绿色对勾**（真实踩过，截图里就是它）。
+ */
+const HARD_FAIL = /出错|停下了|崩了|报错/u
+const SOFT_FAIL = /没通过|失败|拦下|不一致|过于相似|读不了|不能|还缺|出不了|没赶上|没做成|没成功/u
 
 /**
  * 一步：**一行，但会自己换行**。
@@ -432,16 +556,21 @@ function collapseSame(entries: readonly LogEntryView[]): readonly LogEntryView[]
 function StepRow({ entry, translate }: { entry: LogEntryView; translate?: (text: string) => string }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const text = translate === undefined ? entry.text : translate(entry.text)
-  const failed = /没通过|失败|拦下|不一致|过于相似|读不了|不能|还缺|出不了/.test(text)
-  const done = entry.kind === 'verdict' || entry.kind === 'gate'
+  const broken = HARD_FAIL.test(text)
+  const stalled = !broken && SOFT_FAIL.test(text)
+  const tone = broken ? 'error.main' : stalled ? 'warning.main' : 'text.primary'
+  const settled = entry.kind === 'verdict' || entry.kind === 'gate'
   const long = text.length > 260 || text.split('\n').length > 6
+  const toggle = (): void => setOpen((value) => !value)
   return (
     <Box sx={{ px: 0.5 }}>
       <Stack direction="row" spacing={0.75} sx={{ alignItems: 'flex-start' }}>
         <Box sx={{ mt: 0.4, flexShrink: 0 }}>
-          {failed ? (
+          {broken ? (
             <ErrorIcon sx={{ fontSize: 14, color: 'error.main' }} />
-          ) : done ? (
+          ) : stalled ? (
+            <WarningAmberOutlinedIcon sx={{ fontSize: 14, color: 'warning.main' }} />
+          ) : settled ? (
             <CheckCircleIcon sx={{ fontSize: 14, color: 'success.main' }} />
           ) : (
             <BuildOutlinedIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
@@ -449,15 +578,28 @@ function StepRow({ entry, translate }: { entry: LogEntryView; translate?: (text:
         </Box>
         <Typography
           variant="body2"
-          onClick={() => (long ? setOpen((value) => !value) : undefined)}
+          onClick={long ? toggle : undefined}
+          onKeyDown={
+            long
+              ? (event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    toggle()
+                  }
+                }
+              : undefined
+          }
+          {...(long ? { role: 'button', tabIndex: 0, 'aria-expanded': open } : {})}
           sx={{
             flex: 1,
             minWidth: 0,
-            color: failed ? 'error.main' : 'text.primary',
+            color: tone,
             whiteSpace: 'pre-wrap',
             overflowWrap: 'anywhere',
             wordBreak: 'break-word',
             cursor: long ? 'pointer' : 'default',
+            borderRadius: 0.5,
+            '&:focus-visible': { outline: '2px solid', outlineColor: 'primary.main', outlineOffset: 1 },
             ...(long && !open
               ? {
                   display: '-webkit-box',
@@ -467,9 +609,9 @@ function StepRow({ entry, translate }: { entry: LogEntryView; translate?: (text:
                 }
               : {}),
           }}
-          title={long ? (open ? '收起' : '点开看全文') : undefined}
+          title={long ? (open ? '收起' : '点开看全文（也可以按回车）') : undefined}
         >
-          {entry.kind === 'tool' && entry.tool !== undefined ? `${toolLabel(entry.tool)}：` : ''}
+          {entry.kind === 'tool' && toolLabel(entry.tool) !== '' ? `${toolLabel(entry.tool)}：` : ''}
           {text}
           {(entry.repeat ?? 1) > 1 && (
             <Box component="span" sx={{ ml: 0.75, color: 'text.disabled' }}>
