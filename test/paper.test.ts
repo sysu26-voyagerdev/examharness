@@ -108,6 +108,27 @@ describe('组卷', () => {
     expect(second?.id).not.toBe(first?.id)
   })
 
+  it('现造不出新的时**沿用上一版这个题位的那道**，并如实标注（宁可沿用，不要空题位）', async () => {
+    const ctx = await boot()
+    const first = await ctx.paper.assemble(blueprint, { nonce: 'n1' })
+    const keep = first.slots[0]
+    if (keep === undefined) throw new Error('第一版没有题位')
+
+    // maxAttempts=0：模拟"这个题位的候选题型都造不出新的了"
+    const second = await ctx.paper.assemble(blueprint, {
+      nonce: 'n2',
+      maxAttempts: 0,
+      previous: { [keep.key]: keep.itemId },
+    })
+
+    const reusedSlot = second.slots.find((slot) => slot.key === keep.key)
+    expect(reusedSlot?.itemId).toBe(keep.itemId)
+    expect(second.reused).toContain(keep.key)
+    // 只沿用了给出来的那一个题位，别的题位该报缺口就报缺口（不假装凑齐）
+    expect(second.reused).toHaveLength(1)
+    expect(second.gaps.length).toBeGreaterThan(0)
+  })
+
   it('按蓝图凑齐题位，并由易到难排序、分值对得上', async () => {
     const ctx = await boot()
     const paper = await ctx.paper.assemble(blueprint)

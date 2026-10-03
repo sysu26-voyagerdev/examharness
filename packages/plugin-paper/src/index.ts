@@ -54,6 +54,8 @@ export class PaperService extends Service implements PaperApi {
     const maxAttempts = options.maxAttempts ?? this.config.maxAttempts
     const slots: PaperSlot[] = []
     const gaps: PaperGap[] = []
+    /** 沿用了上一版的那几个题位（现造不出新的时才会有） */
+    const reused: string[] = []
     let attempts = 0
     // **这次组卷的身份**：不同次组卷派不同的种子 → "再出一版"是**现造**一批新题。
     // （以前种子只由 (题位, 尝试) 决定，于是每次都派到同一个种子、把库里那批旧题捞回来，
@@ -85,6 +87,9 @@ export class PaperService extends Service implements PaperApi {
         let fallback: PaperSlot | undefined
         let fallbackShape: string | undefined
         let reason = '候选种子用尽，仍未凑到通过闸门的题'
+        // 每个题型各为什么不行：缺口原因要给老师看得懂的一句话，
+        // 只留最后一条会误导（"被 verify-question 拦下"可能只是备选题型的事，首选是别的原因）
+        const tried: string[] = []
 
         // **一个题位可以有几个题型**：入门小题过不了分量闸门时，接着试下一个题型
         // （题位是 9 分解答题，就该由多问的题型来出）。没有候选就如实报缺口。
@@ -144,6 +149,11 @@ export class PaperService extends Service implements PaperApi {
               continue
             }
             reason = kind === undefined ? `${result.verdict.gate}：${result.verdict.reason}` : `${kind} 被 ${result.verdict.gate} 拦下：${result.verdict.reason}`
+            tried.push(
+              kind === undefined
+                ? reason
+                : `${kind} 被 ${result.verdict.gate} 拦下：${result.verdict.reason}`,
+            )
             // fixable=false 是结构性违规（超纲等）：换种子没用，必须改蓝图
             if (!result.verdict.fixable) break
           }
@@ -155,6 +165,23 @@ export class PaperService extends Service implements PaperApi {
         if (placed === undefined && fallback !== undefined) {
           placed = fallback
           used.add(fallbackShape ?? '')
+        }
+
+        // 最后一招：**沿用上一版这个题位的那道**。
+        // 什么时候走到这里：这个题位的候选题型都造不出新的了（参数空间用尽 + 查重拦住），
+        // 真实情况是库里攒到几百道之后必然发生。缺一道题比"少一点新意"严重得多，
+        // 所以沿用——但要**如实记下来**（`reused`），版本说明里会写"这几道沿用了上一版"。
+        if (placed === undefined && tried.length > 0) {
+          reason = [...new Set(tried)].slice(0, 3).join('；')
+        }
+
+        if (placed === undefined) {
+          const lastId = options.previous?.[key]
+          const last = lastId === undefined ? undefined : this.ctx.bank.get(lastId)
+          if (last !== undefined && signedByAll(last, this.ctx.bank.gates?.() ?? [])) {
+            placed = { key, spec, itemId: lastId ?? '' }
+            reused.push(key)
+          }
         }
 
         if (placed === undefined) gaps.push({ slot: key, missing: 1, reason })
@@ -175,6 +202,7 @@ export class PaperService extends Service implements PaperApi {
       totalScore,
       scoreGap: blueprint.paper.totalScore - totalScore,
       attempts,
+      ...(reused.length === 0 ? {} : { reused }),
     }
     this.latest = paper
     return paper

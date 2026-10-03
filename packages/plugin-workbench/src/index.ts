@@ -1527,7 +1527,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           storedId: result.id,
         };
       }
-      const placed = await session.place(slotKey, result.id);
+      const placed = await session.place(slotKey, result.id, 'agent');
       if (!placed.ok) {
         return {
           kind: "tool",

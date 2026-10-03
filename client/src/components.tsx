@@ -440,6 +440,10 @@ function statusOf(item: ItemView, binding: SlotBindingView): { text: string; ton
   if (binding.confirmedBy !== null) {
     return { text: '已确认', tone: 'ok', hint: `${binding.confirmedBy} 已确认这道题` }
   }
+  if (binding.chosenBy !== undefined) {
+    // 指定过的那道：重组卷不会换掉它（与签字同一档）
+    return { text: '指定的', tone: 'ok', hint: `${binding.chosenBy} 指定要这一道——重组卷不会换掉它` }
+  }
   const failed = Object.entries(item.evidence).filter(([, value]) => !value.pass)
   if (failed.length > 0) {
     return { text: '没通过', tone: 'warn', hint: failed.map(([gate]) => `${gateLabel(gate)}没通过`).join('、') }
@@ -773,6 +777,9 @@ function QuestionBlock({
           sx={{ opacity: 0, transition: 'opacity .15s', alignItems: 'center', pl: 1 }}
         >
           {mark !== '' && <Chip size="small" color="info" variant="outlined" label={mark} />}
+          {binding.chosenBy !== undefined && binding.confirmedBy === null && (
+            <Chip size="small" variant="outlined" label={binding.chosenBy === 'agent' ? 'agent 放的' : '我指定的'} />
+          )}
           <Tooltip title={`${status.hint}｜${item.knowledge.join('、')}｜难度 ${formatDifficulty(item.difficulty)}`}>
             <Box
               sx={{

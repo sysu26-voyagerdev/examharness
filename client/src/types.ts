@@ -69,6 +69,8 @@ export interface SlotBindingView {
   itemId: string
   confirmedBy: string | null
   confirmedAt: string | null
+  /** 被明确指到过这个题位的人（老师 / agent）：指过的**钉住**，重组卷不换掉它 */
+  chosenBy?: string
 }
 
 export interface VersionView {

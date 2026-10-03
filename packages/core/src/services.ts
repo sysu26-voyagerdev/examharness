@@ -147,6 +147,15 @@ export interface Paper {
   scoreGap: number
   /** 组卷过程中提交了几次（可观测：闸门拦了几次） */
   attempts: number
+  /**
+   * **这一版沿用了上一版的那几道**（题位）。
+   *
+   * 什么时候会沿用：这个题位的候选题型都造不出"新的"了——同一题型的参数空间是有限的，
+   * 库里攒起来之后（真实情况：548 道）"再生一道不重样的"就会失败。
+   * 那时候宁可**沿用上一版这个题位的那道**，也不要报缺口——卷子缺一道题比"少一点新意"严重得多，
+   * 而且沿用了哪几道必须如实说出来（界面上显示在版本说明里）。
+   */
+  reused?: readonly string[]
 }
 
 export interface AssembleOptions {
@@ -171,6 +180,11 @@ export interface AssembleOptions {
    * 老师签过字的那道题属于老师，重组卷不该把它换掉。
    */
   pinned?: Readonly<Record<string, string>>
+  /**
+   * **上一版每个题位上摆的是哪道**（题位 → 题号）：现造不出新的时的最后一招。
+   * 只有在"这个题位的候选题型都造不出新的"时才会用它（见 `Paper.reused`）。
+   */
+  previous?: Readonly<Record<string, string>>
   /**
    * **这个题位该用哪个题型**（题位 → 题型名）：卷子自己记住的事。
    *
@@ -685,6 +699,14 @@ export interface SlotBinding {
   /** 人工终审签字（R4）：谁、何时 */
   confirmedBy: string | null
   confirmedAt: string | null
+  /**
+   * **被明确指到过这个题位**（老师点了"用这一道"，或 agent 用 place_item 放的）。
+   *
+   * 与签字同一档的语义：**这道题是人选的，不是抽的**——重组卷时钉住不动。
+   * 没有它，agent 为某一题辛辛苦苦写的新题型会在下一版卷子上被"抽签"抽掉，
+   * 老师的结论只能是"你做的活我看不见"（ADR-0034）。
+   */
+  chosenBy?: string
 }
 
 export interface PaperVersion {
@@ -796,10 +818,16 @@ export interface SessionApi {
   /** 只重做某一个题位，**必须守住蓝图约束**；返回被替换掉的那道题 */
   regenerate(slotKey: string, seed?: number): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }>
   /**
-   * **老师指定用这一道**：把题库里已有的题放进某个题位。
+   * **指定用这一道**：把已有的题放进某个题位。
    * 与 regenerate（让机器再造一道）相对——这是"人指了这一道"。
+   *
+   * `by` 记的是谁指的（老师 / agent）：指过的题位**钉住**，重组卷不该把它换掉。
    */
-  place(slotKey: string, itemId: string): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }>
+  place(
+    slotKey: string,
+    itemId: string,
+    by?: string,
+  ): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }>
   /** 人工终审签字（R4）。签名与时间落入题目的 review 与会话轨迹 */
   confirm(itemId: string, by: string): SlotBinding | undefined
   freeze(): PaperVersion | undefined

@@ -237,7 +237,10 @@ export class SessionService extends Service implements SessionApi {
     // 老师签过字的那几道**钉住不动**：签的是那道题，重组卷不该把它换掉
     const pinned: Record<string, string> = {}
     for (const binding of this.latest()?.bindings ?? []) {
-      if (binding.confirmedBy !== null) pinned[binding.slot] = binding.itemId
+      // 签字过的 + **被明确指到过这个题位的**：都是"人选的那道"，重组卷不该把它换掉
+      // （后者是 ADR-0034：agent 用 place_item 放上去的那一道，下一版还得在）
+      if (binding.confirmedBy === null && binding.chosenBy === undefined) continue
+      if (this.ctx.bank.get(binding.itemId) !== undefined) pinned[binding.slot] = binding.itemId
     }
     // **卷子自己记住每个题位用的题型**：上一版这个题位是哪个题型出的，这一版接着用它。
     // 题目仍然是现造的（这一版不该是上一版的翻版），但"用哪种做法出"不该每次重抽——
@@ -245,13 +248,21 @@ export class SessionService extends Service implements SessionApi {
     const preferredKinds: Record<string, string> = {}
     for (const binding of this.latest()?.bindings ?? []) {
       const item = this.ctx.bank.get(binding.itemId)
-      if (item !== undefined && item.instance.kind !== '') preferredKinds[binding.slot] = item.instance.kind
+      // **用注册名，不用 instance.kind**：题型模块可以自报一个 kind（改写/派生别人的题型时很常见），
+      // 它跟注册名可能不是一个东西。真实踩过：记成自报的名字，下一版就把题位喂给了同名的另一条题型，
+      // 结果原本有题的题位反而报缺口。provenance.constructor 是 `注册名@版本`，这才是卷子记的事。
+      const registered = item?.provenance.constructor.split('@')[0]
+      if (registered !== undefined && registered !== '') preferredKinds[binding.slot] = registered
     }
+    // 现造不出新的时的最后一招：沿用上一版这个题位的那道（见 AssembleOptions.previous）
+    const previousItems: Record<string, string> = {}
+    for (const binding of this.latest()?.bindings ?? []) previousItems[binding.slot] = binding.itemId
     const paper = await this.ctx.paper.assemble(blueprint, {
       nonce: `${record.meta.id}|${String(Date.now())}`,
       usedShapes,
       pinned,
       preferredKinds,
+      previous: previousItems,
     })
     const previous = this.latest()
 
@@ -263,9 +274,13 @@ export class SessionService extends Service implements SessionApi {
         itemId: slot.itemId,
         confirmedBy: kept?.confirmedBy ?? null,
         confirmedAt: kept?.confirmedAt ?? null,
+        ...(kept?.chosenBy === undefined ? {} : { chosenBy: kept.chosenBy }),
       }
     })
-    return this.push(record, reason, bindings, paper.attempts, paper.gaps, blueprint.paper.totalScore)
+    // 沿用了上一版的题位要说出来（版本说明里看得见）：老师有权知道这一版哪几道不是新的
+    const reused = paper.reused ?? []
+    const label = reused.length === 0 ? reason : `${reason}（${reused.join('、')} 沿用了上一版）`
+    return this.push(record, label, bindings, paper.attempts, paper.gaps, blueprint.paper.totalScore)
   }
 
   /**
@@ -333,7 +348,11 @@ export class SessionService extends Service implements SessionApi {
    * 所以要守的规矩是"不许悄悄换掉题位的类型"（选择题填不进解答题位），
    * 其余交给闸门：这道题若还没被现役闸门全部签过字，就重新送审一遍再放。
    */
-  async place(slotKey: string, itemId: string): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }> {
+  async place(
+    slotKey: string,
+    itemId: string,
+    by = '老师',
+  ): Promise<{ ok: boolean; version?: PaperVersion; reason?: string }> {
     const record = this.record()
     if (record.meta.frozen) return { ok: false, reason: '本会话已冻结：冻结后不可改动（R3）' }
 
@@ -356,7 +375,7 @@ export class SessionService extends Service implements SessionApi {
 
     const previous = this.latest()
     const bindings = (previous?.bindings ?? []).filter((binding) => binding.slot !== slotKey)
-    bindings.push({ slot: slotKey, itemId, confirmedBy: null, confirmedAt: null })
+    bindings.push({ slot: slotKey, itemId, confirmedBy: null, confirmedAt: null, chosenBy: by })
     const version = this.push(record, `指定 ${slotKey}`, bindings, 0, previous?.gaps ?? [], blueprint.paper.totalScore)
     return { ok: true, version }
   }
