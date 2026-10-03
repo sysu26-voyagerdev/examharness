@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { BankApi, Item, SearchQuery, SubmitResult } from '@examharness/core'
+import type { BankApi, Item, SearchQuery, SubmitResult, Verdict } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -96,6 +96,14 @@ export class BankService extends Service implements BankApi {
     this.append(stored)
     this.ctx.emit('item:stored', { item: stored })
     return { ok: true, id: stored.id, verdict }
+  }
+
+  /**
+   * 预检：跑闸门链但不入库（口述出题用它先筛掉结构上站不住的候选）。
+   * 与 submit 共用同一条 waterfall：**判定只有一套**，不存在"预检松一点"。
+   */
+  async verify(item: Item): Promise<Verdict> {
+    return this.ctx.waterfall('item:verify', item, () => ({ pass: true }))
   }
 
   get(id: string): Item | undefined {

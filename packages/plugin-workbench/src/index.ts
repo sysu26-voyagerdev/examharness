@@ -5,6 +5,8 @@ import { parseJsonObject } from "@examharness/core";
 import type {
   Blueprint,
   Cognitive,
+  ComposeResult,
+  ComposeSpec,
   QuestionType,
   BlueprintRow,
   Item,
@@ -54,9 +56,16 @@ export const Config = z.object({
   toolResultLimit: z.number().default(6000),
   /** 一个 agent 最多同时派几个子任务（并发上限；子任务各自是一轮完整的循环） */
   maxChildren: z.number().default(4),
+  /**
+   * 口述出题的时间预算（毫秒）。到点交已有的，没试完的如实说，不让老师一直等。
+   * 为什么不留着"试到出为止"：出题是给人用的，不是跑批。
+   */
+  composeBudgetMs: z.number().default(45_000),
 });
 
 export interface WorkbenchConfig {
+  /** 口述出题的时间预算（毫秒）：到点交已有的，没试完的如实说 */
+  composeBudgetMs: number;
   extraRules: string;
   toolResultLimit: number;
   maxChildren: number;
@@ -172,12 +181,28 @@ const TOOLS: readonly LlmToolSpec[] = [
   {
     name: "submit_item",
     description:
-      "提交候选题：先让执笔者写题面，再跑完整闸门链，通过才入库。" +
-      "不通过会返回哪道闸门、为什么、能不能靠重做修好。",
+      "提交候选题：先让执笔者写题面，再跑完整闸门链，通过才入库（**入库只是留档**）。" +
+      "不通过会返回哪道闸门、为什么、能不能靠重做修好。" +
+      "注意：入库不改卷子——要让这张卷子的某个题位用上它，用 place_item。",
     parameters: {
       type: "object",
       properties: { candidateId: { type: "string" } },
       required: ["candidateId"],
+    },
+  },
+  {
+    name: "place_item",
+    description:
+      "**把这道题放到卷子的这个题位上**（老师看到的就是卷子，不是题库）：" +
+      "提交并过闸门，通过就写进当前卷子（出一版新的），卷子上这一题立刻变成它。" +
+      "改某一道题的最后一步就该是它——只说&#34;已入库&#34;等于什么都没改。",
+    parameters: {
+      type: "object",
+      properties: {
+        slotKey: { type: "string", description: "卷面题位，例如 S2-1" },
+        candidateId: { type: "string" },
+      },
+      required: ["slotKey", "candidateId"],
     },
   },
   {
@@ -741,15 +766,274 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   }
 
   /**
+   * **口述出题**：老师说一句人话，拿回一道真题。
+   *
+   * 三步，每步都尽量少花时间（老师等着看题，不是在等系统跑批）：
+   *   1. 一次模型调用把话翻译成**题位**（知识点落到图谱上、题型、分值、难度）；
+   *   2. 用现有题型按这个题位**现造**（同题位多个题型就都试一遍，换种子换结构）；
+   *   3. 造出来的每道都过完整闸门链才入库——**没过的题不会出现在这里**。
+   *
+   * 造不出来不装作成功：把"试过哪些题型、被哪道闸门拦下"如实给出来，
+   * 再把活交给 agent（`escalate`）——写题型正是 agent 的活，不是让老师改说法迁就系统。
+   */
+  async compose(text: string, nonce = Date.now()): Promise<ComposeResult> {
+    const request = text.trim();
+    if (request === "") return { ok: false, items: [], reason: "还没说想要什么题。" };
+    if (!this.ctx.llm.configured) {
+      return {
+        ok: false,
+        items: [],
+        reason: "口述出题要先把你的话变成题位，得先在设置页配置模型。",
+      };
+    }
+    const learned = this.ctx.graph.learnedKeys();
+    let parsed: Record<string, unknown> | undefined;
+    try {
+      const reply = await this.ctx.llm.chat([
+        { role: "system", content: COMPOSER_PROMPT },
+        { role: "user", content: JSON.stringify({ 老师的话: request, 可以用的知识点: learned }) },
+      ]);
+      parsed = parseJsonObject(reply.content);
+    } catch (error) {
+      return {
+        ok: false,
+        items: [],
+        reason: `没能理解这句话（${error instanceof Error ? error.message : String(error)}）。`,
+      };
+    }
+    if (parsed === undefined) {
+      return { ok: false, items: [], reason: "没能把这句话变成题位：模型没给出可用的结果。" };
+    }
+
+    // 知识点：老师话里的说法 → 图谱里的名字。对不上的**说出来**，不悄悄换成别的
+    const named = Array.isArray(parsed.knowledge) ? parsed.knowledge.map(String) : [];
+    const knowledge: string[] = [];
+    const unresolved: string[] = [];
+    for (const phrase of named) {
+      const literal = phrase.trim();
+      if (literal === "") continue;
+      const hit = this.ctx.graph.search(literal, 1)[0];
+      if (hit === undefined) {
+        unresolved.push(literal);
+        continue;
+      }
+      if (knowledge.includes(hit.key)) continue;
+      knowledge.push(hit.key);
+      if (hit.key !== literal) unresolved.push(`${literal} → ${hit.key}`);
+    }
+    // 越界（还没学过）的不能进题位：红线写在 docs/agent/06，不是这里能商量的
+    const missing = this.ctx.graph.missing(knowledge);
+    const usable = knowledge.filter((key) => !missing.includes(key));
+    const spec: ComposeSpec = {
+      knowledge: usable,
+      unresolved: [...unresolved, ...missing.map((key) => `${key}（还没学过）`)],
+      type: questionTypeOr(parsed.type, numberOr(parsed.score, 8) ?? 8),
+      score: Math.min(20, Math.max(1, Math.round(numberOr(parsed.score, 8) ?? 8))),
+      difficulty: difficultyOr(parsed.difficulty),
+      note: typeof parsed.note === "string" ? parsed.note.trim() : "",
+    };
+    if (usable.length === 0) {
+      return {
+        ok: false,
+        spec,
+        items: [],
+        reason:
+          missing.length > 0
+            ? `这些知识点还没学过，出不了题：${missing.join("、")}。`
+            : "这句话里没能认出图谱里的知识点——换个说法（说出章节或考点名）再试一次。",
+      };
+    }
+
+    const slot: BlueprintRow = {
+      key: "口述出题",
+      knowledge: spec.knowledge,
+      cognitive: "掌握",
+      type: spec.type,
+      difficulty: spec.difficulty,
+      score: spec.score,
+      count: 1,
+    };
+    const attempts: string[] = [];
+    // **时间是硬的**：老师在这儿等着看题。到点就把已有的交出去，剩下的如实说明没试完，
+    // 而不是让他对着转圈等一个越来越长的批处理。
+    const deadline = Date.now() + this.config.composeBudgetMs;
+    // 种子带着这一句的"批号"：**再来一批**要真的换一批题（同一批种子会被去重闸门当成重复提交）
+    const seeds = [nonce % 90_000, (nonce + 7_919) % 90_000];
+    const byScore = await this.constructFor(slot, request, attempts, deadline, seeds);
+    // **降规格再试一次**：说 10 分的解答题，可现有题型只出得了一问（分量不够）——
+    // 与其回一句"造不出来"，不如把造得出来的那一档给他，并**如实说清降了哪一档**。
+    // 不偷偷降：老师看到的题、分值都必须是真的（他要是非 10 分不可，还有 agent 那条路）。
+    let items = byScore.items;
+    let shownSpec = spec;
+    let adjusted: string | undefined;
+    const relaxed = spec.type === "解答" && spec.score > 6 ? 6 : 0;
+    if (items.length === 0 && relaxed > 0) {
+      const smaller: BlueprintRow = { ...slot, score: relaxed };
+      const second = await this.constructFor(smaller, request, attempts, deadline, seeds);
+      if (second.items.length > 0) {
+        items = second.items;
+        shownSpec = { ...spec, score: relaxed };
+        adjusted =
+          `按你说的规格（${spec.type}题 ${String(spec.score)} 分）现有题型造不出来（原因见下），` +
+          `这道是降到 ${String(relaxed)} 分造出来的。非要 ${String(spec.score)} 分的话，点「让 agent 想办法」写一个题型。`;
+      }
+    }
+
+    if (items.length > 0) {
+      return {
+        ok: true,
+        spec: shownSpec,
+        items,
+        ...(adjusted === undefined ? {} : { adjusted }),
+        ...(attempts.length === 0 ? {} : { attempts }),
+      };
+    }
+
+    // 造不出来时给老师两条路：库里已经有像的（可能就想要这个），或者让 agent 想办法
+    const similar = this.similarTo(spec, slot);
+    const kinds = [...(this.ctx.construct.candidates?.(slot) ?? [])];
+    const kindText =
+      kinds.length === 0
+        ? `现有题型里没有覆盖「${spec.knowledge.join("、")}」的（${String(spec.type)}｜${String(spec.score)} 分）`
+        : `现有题型（${kinds.join("、")}）都造不出这个题位`;
+    return {
+      ok: false,
+      spec,
+      items: [],
+      ...(similar.length === 0 ? {} : { similar }),
+      ...(attempts.length === 0 ? {} : { attempts }),
+      reason: `${kindText}。`,
+      escalate:
+        `老师口述了一道题，想要这个：${request}\n` +
+        `(已落到题位：${spec.knowledge.join("、")}｜${spec.type}｜${String(spec.score)} 分｜难度 ${spec.difficulty.join("–")})\n\n` +
+        `${kindText}${attempts.length === 0 ? "" : `，试过的都被闸门拦下了：\n- ${attempts.join("\n- ")}`}\n\n` +
+        "请把这道题真的造出来：先看真题里这个考点怎么问（material_search/corpus_search），" +
+        "再用 constructor_write 写或改题型（要覆盖多种结构，不要一个句式换数字），" +
+        "出好后 submit_item 过闸门；老师要是说了放进哪个题位，就用 place_item 放上去。" +
+        "如果你判断这个要求越过了已学范围或有版权问题，如实说清楚，不要硬凑。",
+    };
+  }
+
+  /**
+   * 照这个题位现造几道（最多两道），**过闸门才收下**。
+   *
+   * 一个题位可能有好几个题型（入门小题 / 多问综合题）：各出一版让老师挑。
+   * 试过的每一步都记进 `attempts`——造不出来时，"试过什么、被哪道闸门拦下"是老师唯一能据以判断的信息。
+   */
+  private async constructFor(
+    slot: BlueprintRow,
+    wish: string,
+    attempts: string[],
+    deadline: number,
+    seeds: readonly number[],
+  ): Promise<{ items: Item[] }> {
+    const kinds = [...(this.ctx.construct.candidates?.(slot) ?? [])];
+    /** 最多同时试几个题型：够看出"能出成什么"就行，多了只是让老师多等 */
+    const list = (kinds.length === 0 ? [""] : kinds).slice(0, 4);
+    const items: Item[] = [];
+
+    // 换一批种子 = 换一批结构。闸门里的回译是**模型读题面**，同一次写歪了换个种子往往就过；
+    // 但一批就够（时间预算是硬的），所以只两批。
+    //
+    // **拿到一道就走**：老师等着看题，一次给一道最快；想要更多就按「再来一批」
+    // （那时候 seed 换了批号，出来的是另一批题，不会撞上"重复提交"）。
+    for (const seed of seeds) {
+      if (items.length >= 1 || Date.now() > deadline) break;
+
+      // ── 第一遍：**不花模型调用**的预检 ──
+      // 结构上就站不住的（分量不够、超纲、选项不全）在这一步被拦下。
+      // 这一步以前是"先写题面再入库"，于是每个废候选都要白花一次模型调用。
+      const kept: { kind: string; item: Item }[] = [];
+      for (const kind of list) {
+        if (kept.length >= 1) break;
+        let item: Item;
+        try {
+          const withKind = this.ctx.construct.generateWith?.bind(this.ctx.construct);
+          item =
+            kind === "" || withKind === undefined
+              ? this.ctx.construct.generate(slot, seed)
+              : withKind(slot, seed, kind);
+        } catch (error) {
+          attempts.push(
+            `${kind === "" ? "默认题型" : kind}（种子 ${String(seed)}）：造不出来 —— ${error instanceof Error ? error.message : String(error)}`,
+          );
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- 预检很便宜（不花模型调用、不落库），串行省得闸门互相看见半成品
+        const verdict = (await this.ctx.bank.verify?.(item)) ?? { pass: true as const };
+        if (!verdict.pass) {
+          attempts.push(
+            `${item.instance.kind}（种子 ${String(seed)}）：过不了 ${verdict.gate} —— ${verdict.reason}`,
+          );
+          continue;
+        }
+        kept.push({ kind, item });
+      }
+      if (kept.length === 0) continue;
+
+      // ── 第二遍：**并行**让执笔者照老师的话把题面写出来 ──
+      // 模型调用是这里最贵的一段（一道题一次），并行才不会让"试了两个题型"变成两倍等待。
+      // oxlint-disable-next-line no-await-in-loop -- 这一批本来就是并行的（Promise.all），不是一条条等
+      const written = await Promise.all(
+        kept.map((entry) => this.writeStem(entry.item, wish).then((prose) => ({ kind: entry.kind, item: entry.item, prose }))),
+      );
+
+      // ── 第三遍：**串行**入库 ──
+      // 题库是有状态的（去重要看库里已有什么），写必须一道一道来。
+      for (const entry of written) {
+        if (items.length >= 1) break;
+        if (typeof entry.prose === "string") {
+          attempts.push(`${entry.item.instance.kind}（种子 ${String(seed)}）：题面没写成 —— ${entry.prose}`);
+          continue;
+        }
+        // oxlint-disable-next-line no-await-in-loop -- 唯一写入口有状态（去重、事件），串行才不会绕成一团
+        const result = await this.ctx.bank.submit(entry.prose);
+        if (result.ok) {
+          // 交回**入库后的那一份**：证据是闸门写的，写在库里的那份上
+          // （拿提交前的副本会让界面看到"检查：无"——检查明明跑过了）
+          items.push(this.ctx.bank.get(result.id) ?? { ...entry.prose, id: result.id });
+          continue;
+        }
+        attempts.push(
+          `${entry.item.instance.kind}（种子 ${String(seed)}）：被 ${result.verdict.gate} 拦下 —— ${result.verdict.reason}`,
+        );
+      }
+    }
+    return { items };
+  }
+
+  /** 让执笔者写题面（单独一层：并行调用时才不会被 lint 当成"循环里等"） */
+  private async writeStem(item: Item, wish: string): Promise<Item | string> {
+    return this.serialize(item, wish);
+  }
+
+  /** 库里已有的、跟这个题位像的题（按知识点重合度，同题型优先） */
+  private similarTo(spec: ComposeSpec, slot: BlueprintRow): readonly Item[] {
+    const wanted = new Set(spec.knowledge);
+    const scored: { item: Item; score: number }[] = [];
+    for (const item of this.ctx.bank.search({ knowledge: spec.knowledge, limit: 40 })) {
+      const shared = item.slot.knowledge.filter((key) => wanted.has(key)).length;
+      const union = new Set([...item.slot.knowledge, ...spec.knowledge]).size;
+      if (shared === 0) continue;
+      scored.push({ item, score: shared / union + (item.slot.type === slot.type ? 0.2 : 0) });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, 3).map((entry) => entry.item);
+  }
+
+  /**
    * 让**执笔者**（模型）把构造好的结构写成给学生看的题面。
    *
    * 分工是这套设计的关键：**结构由题型给**（条件、问法、答案、检验点——数学是真的），
    * **文字由模型写**（可以有情境、可以有多种讲法——但只能使用构造给的数字）。
    * 写歪了由回译闸门拦下：目标、条件条数、答案、题面里的每个数字都要对得上。
    *
+   * `wish` 是老师原话（口述出题时用）：照他的说法写情境与问法，但**数值一律不许动**——
+   * 迎合与真值是两件事，改数就是另编了一道题。
+   *
    * 返回写好的 Item；失败时返回一句给模型看的错误说明。
    */
-  private async serialize(item: Item): Promise<Item | string> {
+  private async serialize(item: Item, wish?: string): Promise<Item | string> {
     const params = Object.values(item.instance.params);
     const brief = {
       题型: item.slot.type,
@@ -763,7 +1047,16 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     };
     const reply = await this.ctx.llm.chat([
       { role: "system", content: SERIALIZER_PROMPT },
-      { role: "user", content: JSON.stringify(brief) },
+      {
+        role: "user",
+        content:
+          JSON.stringify(brief) +
+          (wish === undefined || wish === ""
+            ? ""
+            : `\n\n老师原话：${wish}\n` +
+              "他想要的就是这个意思：在**不改动任何数值、条件与答案**的前提下，尽量照他的说法写情境与问法。\n" +
+              "如果他的说法与这道结构对不上（比如他要的条件这道题里没有），就照实写这道题，不要为了迎合而改数、也不要编。"),
+      },
     ]);
     const parsed = parseJsonObject(reply.content);
     const stem = typeof parsed?.stem === "string" ? parsed.stem : undefined;
@@ -1170,7 +1463,9 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       if (result.ok) {
         return {
           kind: "gate",
-          text: `submit_item：${candidateId} 通过全部闸门并入库（${result.id}）\n题面：${item.prose.stem}`,
+          text:
+            `submit_item：${candidateId} 通过全部闸门并入库（${result.id}）——**入库只是留档，卷子还没变**；` +
+            `要把卷子上某个题位换成它，用 place_item <题位> ${candidateId}\n题面：${item.prose.stem}`,
           // 通过时把证据一并回给模型：它能看到"凭什么通过"，而不是只看到 ok
           payload: {
             ok: true,
@@ -1190,6 +1485,72 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           fixable: result.verdict.fixable,
           hint: result.verdict.hint ?? null,
         },
+      };
+    }
+
+    if (tool === "place_item") {
+      const candidateId = String(args.candidateId ?? "");
+      const slotKey = String(args.slotKey ?? "");
+      const candidate = state.candidates.get(candidateId);
+      if (candidate === undefined) {
+        return { kind: "tool", text: `place_item：没有候选题 ${candidateId}`, payload: { error: "未知候选" } };
+      }
+      let item = candidate.item;
+      if (item.prose.serializer.model === "template" && this.ctx.llm.configured) {
+        const written = await this.serialize(item);
+        if (typeof written === "string") {
+          return { kind: "tool", text: `place_item：题面没写成（${written}）`, payload: { error: written } };
+        }
+        item = written;
+      }
+      const result = await this.ctx.bank.submit(item);
+      if (!result.ok) {
+        return {
+          kind: "gate",
+          text: `place_item：被 ${result.verdict.gate} 拦下 —— ${result.verdict.reason}`,
+          payload: {
+            ok: false,
+            gate: result.verdict.gate,
+            reason: result.verdict.reason,
+            fixable: result.verdict.fixable,
+            hint: result.verdict.hint ?? null,
+          },
+        };
+      }
+      // 过闸门之后**写进卷子**：这一步才是老师看得见的（R2 没被绕过：仍然是唯一写入口 + 闸门裁决）
+      const session = this.ctx.get("session");
+      if (session === undefined) {
+        return {
+          kind: "tool",
+          text: `place_item：${result.id} 过了闸门，但没有会话可以放进卷子（只入了库）`,
+          payload: { ok: true, id: result.id, placed: false },
+          storedId: result.id,
+        };
+      }
+      const placed = await session.place(slotKey, result.id);
+      if (!placed.ok) {
+        return {
+          kind: "tool",
+          text: `place_item：${result.id} 过了闸门，但没放进题位 ${slotKey} —— ${placed.reason ?? ""}`,
+          payload: { ok: true, id: result.id, placed: false, reason: placed.reason ?? "" },
+          storedId: result.id,
+        };
+      }
+      return {
+        kind: "gate",
+        text:
+          `place_item：**卷子第 ${String(placed.version?.version ?? 0)} 版**，题位 ${slotKey} 现在就是这道题：
+` +
+          `${item.prose.stem}`,
+        payload: {
+          ok: true,
+          id: result.id,
+          placed: true,
+          slot: slotKey,
+          version: placed.version?.version ?? null,
+          stem: item.prose.stem,
+        },
+        storedId: result.id,
       };
     }
 
@@ -2093,6 +2454,50 @@ function numberOr(value: unknown, fallback: number | undefined): number | undefi
   return fallback;
 }
 
+/**
+ * 口述出题的翻译官：把老师的一句人话变成**题位**。
+ *
+ * 为什么不让 agent 干这活：老师说完一句话就该看到题。
+ * 起一轮 agent 要几十步，这里只要一次调用——快的那条路必须真的快，
+ * 慢的那条（写新题型）才值得交给 agent。
+ */
+const COMPOSER_PROMPT = [
+  "老师的命题组里，你负责把他的一句话变成**题位**（知识点、题型、分值、难度）。",
+  "你只做这一件事：不写题、不解释、不评价。",
+  '只输出 JSON：{"knowledge":["知识点"],"type":"选择|填空|解答","score":8,"difficulty":[0.6,0.75],"note":"一句话说清他想要什么"}',
+  "硬规矩：",
+  "1. knowledge 只能从「可以用的知识点」里挑（**一字不差地抄名字**，不写别名、不写自己造的名字）；",
+  "   他说的是别的说法时，挑最接近的那一个；一个都对应不上就返回空数组——**不要硬凑**。",
+  "2. 他的说法不清楚（比如「出几道题」），就按初中数学常见的规格给一个合理题位，别反问。",
+  "3. 分值与题型要配套：选择 3–4 分、填空 3–5 分、解答 6–14 分；",
+  '   他没说分值就按他描述的样子定（"小题"给 4 分、"大题/综合题"给 10 分、带"证明/探究"给 12 分）。',
+  "4. difficulty 是 [下限,上限]，0–1 之间的两位小数，常规题 0.6–0.8；他要「难一点」就 0.8 以上。",
+  "5. note 用一句人话说清你的理解（老师会看到这句话，写错了当场能发现）。",
+  "6. 不要输出 JSON 以外的任何内容。",
+].join("\n");
+
+function questionTypeOr(value: unknown, score: number): QuestionType {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (text === "选择" || text === "填空" || text === "解答") return text;
+  return score <= 4 ? "选择" : "填空";
+}
+
+/** 难度是 0–1 之间的小数：模型给大了就夹回来（不报错——它是想表达"很难"） */
+function unitClamp(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function difficultyOr(value: unknown): readonly [number, number] {
+  const raw = Array.isArray(value) ? value.map(Number) : [];
+  const low = raw[0];
+  const high = raw[1];
+  if (low === undefined || high === undefined || !Number.isFinite(low) || !Number.isFinite(high)) {
+    return [0.6, 0.8];
+  }
+  const [a, b] = [unitClamp(low), unitClamp(high)];
+  return a <= b ? [a, b] : [b, a];
+}
+
 function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = false): string {
   const rows = blueprint.blueprint
     .map(
@@ -2102,6 +2507,9 @@ function systemPrompt(blueprint: Blueprint, extraRules: string, hasWorkspace = f
     .join("\n");
   return [
     "你是 AI 命题组的组长。你的产出必须是**能过闸门**的原创题。",
+    "**但产物是卷子**：老师只认卷子上第几题是什么。题库是留档（临时堆栈），往库里加题不是成果——",
+    "   submit_item 之后卷子还没变；要让某一题变成新出的那道，必须 place_item <题位> <候选题>。",
+    "   收尾时说的是\"卷子第 N 版、第 X 题变成了……\"，不是\"库里多了一道\"。",
     "**用中文说话**：老师看的是中文界面，你的每一句说明都用中文（工具参数里的中文也一样）。",
     "说话要短：一句话说清你做了什么、发现了什么。**不要写报告**——不写 Markdown 标题、不加粗、",
     "不列表格、不复述工具原始输出，也不要重复题目全文（卷子页上就有）。",

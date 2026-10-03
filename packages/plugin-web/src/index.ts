@@ -265,8 +265,19 @@ function briefOf(ctx: Context, blueprint: Blueprint): string {
   const assembledKeys = new Set((latest?.bindings ?? []).map((binding) => binding.slot.replace(/-\d+$/, '')))
   const stale = latest !== undefined && [...expectedKeys].some((key) => !assembledKeys.has(key) && !(latest.gaps ?? []).some((gap) => gap.slot.startsWith(key)))
   const gaps = stale ? [] : (latest?.gaps ?? [])
+  // **卷面上现在是什么**：agent 要能一眼看到"哪个题位上摆着哪道题"。
+  // 没有这一段，它只能看到题位清单，于是它做的事永远停在"往库里加题"——
+  // 而老师要的是卷子上那一道变了（这是这套东西最容易走偏的地方）。
+  const onPaper = (latest?.bindings ?? []).map((binding) => {
+    const item = ctx.bank.get(binding.itemId)
+    const stem = item === undefined ? '（题已不在库里）' : item.prose.stem.replace(/\s+/g, ' ').slice(0, 28)
+    const kind = item === undefined ? '' : item.instance.kind
+    return `  · ${binding.slot}${binding.confirmedBy === null ? '' : `【${binding.confirmedBy}已签，钉住】`} ← ${binding.itemId}（${kind}）：${stem}…`
+  })
   const lines = [
     `卷子：${blueprint.paper.title}（${blueprint.paper.className}，卷头 ${String(blueprint.paper.totalScore)} 分 / ${String(blueprint.paper.minutes)} 分钟）`,
+    '**产物是这张卷子**：老师看的是卷子。题库只是留档（做过的题堆在那儿，过程不是成果）——',
+    'submit_item 只是留档，卷子不会变；要让卷子上某一题变成新出的那道，用 place_item <题位> <候选题>（或 assemble_paper 整卷重出）。',
     `题位（需要 / 有没有构造器）：`,
     ...progress.map(
       (slot) =>
@@ -283,7 +294,10 @@ function briefOf(ctx: Context, blueprint: Blueprint): string {
               `上次组卷（第 ${String(latest.version)} 版、${String(latest.bindings.length)} 道题、${String(latest.totalScore)} 分）报出的缺口：`,
               ...gaps.map((gap) => `  · ${gap.slot}（缺 ${String(gap.missing)}）：${gap.reason}`),
             ].join('\n'),
-    `题库：${String(ctx.bank.all().length)} 道`,
+    onPaper.length === 0
+      ? '卷面现状：还没有卷子（先 assemble_paper 组一次）'
+      : ['卷面现状：', ...onPaper].join('\n'),
+    `题库（留档）：${String(ctx.bank.all().length)} 道`,
     `本卷禁用：${blueprint.constraints.forbidKnowledge.join('、') || '无'}`,
     batches.length === 0
       ? '资料：还没有导入任何资料（没有可参考的真实题，查重只对自家题库）'
@@ -526,7 +540,8 @@ export function apply(ctx: Context, config: WebConfig): void {
             `答案：${current.witness.answer}；参数：${JSON.stringify(current.instance.params)}。\n`) +
         '\n请按他的要求重造这一道（可以换种子、换题型，必要时用 constructor_write 改题型或写新题型；' +
         '数值与答案必须由构造给出，不要手改）。' +
-        '出好后用 submit_item 过闸门，再用 assemble_paper 组卷——让这一版卷子上就是改好的那道。' +
+        '出好后**用 place_item 把它放到这个题位上**（只入库不算改：卷子上没变就是没改），' +
+        '然后用一句话告诉我卷子第几版、第几题变成了什么。' +
         '做不到的（比如要求越过了已学范围）如实说。'
       try {
         const started = ctx.workbench.start({
@@ -547,6 +562,58 @@ export function apply(ctx: Context, config: WebConfig): void {
       const body = (await readBody(req)) as { slot?: string; itemId?: string }
       try {
         send(res, 200, await ctx.session.place(String(body.slot ?? ''), String(body.itemId ?? '')))
+      } catch (error) {
+        send(res, 409, { error: error instanceof Error ? error.message : String(error) })
+      }
+      return
+    }
+
+    /**
+     * **口述出题**：老师说一句"我想要一道……的题"，直接拿回题。
+     *
+     * 同步返回（不等 agent）：翻译 + 现造 + 过闸门通常十几秒，
+     * 界面上一句"正在把这句话变成题…"就够了；造不出来才把活交给 agent（下面的 escalate）。
+     */
+    if (method === 'POST' && path === '/api/compose') {
+      const body = (await readBody(req)) as { text?: string }
+      const compose = ctx.workbench.compose?.bind(ctx.workbench)
+      if (compose === undefined) {
+        send(res, 200, { ok: false, items: [], reason: '工作台没有接入口述出题' })
+        return
+      }
+      const result = await compose(String(body.text ?? ''))
+      send(res, 200, {
+        ok: result.ok,
+        ...(result.spec === undefined ? {} : { spec: result.spec }),
+        items: result.items.map(summarize),
+        ...(result.similar === undefined ? {} : { similar: result.similar.map(summarize) }),
+        ...(result.adjusted === undefined ? {} : { adjusted: result.adjusted }),
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
+        ...(result.attempts === undefined ? {} : { attempts: result.attempts }),
+        ...(result.escalate === undefined ? {} : { escalate: result.escalate }),
+      })
+      return
+    }
+
+    /** 口述出题造不出来时：把这句话交给 agent，让它写题型把它造出来 */
+    if (method === 'POST' && path === '/api/compose/escalate') {
+      const body = (await readBody(req)) as { goal?: string; label?: string }
+      const goal = String(body.goal ?? '').trim()
+      const label = String(body.label ?? '').trim()
+      if (goal === '') {
+        send(res, 409, { error: '没有要交代的活儿' })
+        return
+      }
+      const live = sessionBlueprint(ctx)
+      try {
+        const started = ctx.workbench.start({
+          goal,
+          brief: briefOf(ctx, live),
+          blueprint: live,
+          workspace: ctx.session.current().id,
+          label: label === '' ? '口述出题' : label,
+        })
+        send(res, 202, { runId: started.runId })
       } catch (error) {
         send(res, 409, { error: error instanceof Error ? error.message : String(error) })
       }

@@ -10,20 +10,23 @@ import Stack from '@mui/material/Stack'
 import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
+import { ComposeDialog } from '../compose-dialog.js'
 import { MathText } from '../math-text.js'
 import { gateLabel } from '../components.js'
 import type { BankQuery, BankView, ItemView } from '../types.js'
 
 /**
- * 题库页：**老师手里的存货**。
+ * 做过的题：**留档，不是成果**。
  *
- * 以前题库只在接口里，界面只给最终那份卷子看——老师既不知道有什么题，也没法挑。
- * 这一页回答三个问题：有哪些题（筛选 + 分面）、这道题长什么样（题干/选项/图/答案/检查结果）、
- * 以及"我要用它"（放进当前卷的哪个题位）。
+ * 这一页存在的理由要说清（它很容易被当成"作品"）：出题系统真正的产物是**卷子**，
+ * 这里是出题过程中留下的东西——每道题都过了闸门、都能再被用上，但堆在库里本身没有意义。
  *
- * 放进去之后仍然过闸门：这道题若还没被现役闸门签过字，服务端会重新送审一遍。
+ * 所以这一页回答的是"**捡一道用上**"：翻一翻做过什么（筛选 + 分面）、看这道题长什么样
+ * （题干/选项/图/答案/检查结果）、然后把某一道**指给**当前卷子的某个题位。
+ * 要"现造一道"（这才是常态）用卷面上的「说一道题」或「改这道题…」。
  */
 
 const STATUS_TEXT: Readonly<Record<string, string>> = {
@@ -46,6 +49,8 @@ export function BankPage(): React.JSX.Element {
   const [note, setNote] = useState('')
   const [showAnswer, setShowAnswer] = useState(false)
   const [target, setTarget] = useState('')
+  /** 说一道题：脑子里想到一道题时不用先去找题位、也不用等 agent 跑一轮 */
+  const [composing, setComposing] = useState(false)
 
   const load = useCallback(async (next: BankQuery): Promise<void> => {
     setLoading(true)
@@ -94,15 +99,20 @@ export function BankPage(): React.JSX.Element {
       {/* 左：筛选 + 列表 */}
       <Box sx={{ width: { xs: '100%', md: 430 }, flexShrink: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
-          <Typography variant="h5">题库</Typography>
+          <Typography variant="h5">做过的题</Typography>
           <Typography variant="caption" color="text.secondary">
             {data === null ? '读题库…' : `筛出 ${String(data.total)} 道`}
           </Typography>
           {loading && <CircularProgress size={14} />}
+          <Box sx={{ flex: 1 }} />
+          <Button size="small" variant="outlined" startIcon={<AutoAwesomeIcon />} onClick={() => setComposing(true)}>
+            说一道题
+          </Button>
         </Stack>
         {/* 题库是**全局**的（几个会话共用一份），所以"给哪张卷"必须说清是哪一张 */}
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
-          所有会话共用的一份存货。当前这张卷：{session?.meta.title ?? '（没有会话）'}
+          这里堆的是出题时留下的题（过程留档）——**成果是卷子**。要新题，用卷面上的「说一道题」。
+          当前这张卷：{session?.meta.title ?? '（没有会话）'}
           {session === null ? '' : `　第 ${String(session.versions.at(-1)?.version ?? 0)} 版`}
         </Typography>
 
@@ -307,10 +317,10 @@ export function BankPage(): React.JSX.Element {
                   用这一道
                 </Button>
               </Stack>
-              {/* 说清这条路的性质：**这是复用库里已有的题**，不是造新题 */}
+              {/* 说清这条路的性质：**这是把留档里的题捡起来用**，不是造新题 */}
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                这是把库里已有的一道**指给**这个题位（会重新过一遍检查）。要**现造**新题，用卷面上的
-                「改这道题…」，或者直接「再出一版」——每次组卷都是现造的。
+                这是把留档里的一道**指给**这个题位（会重新过一遍检查；这一版卷子立刻变）。
+                要**现造**新题，用卷面上的「说一道题」或「改这道题…」——每次组卷都是现造的。
               </Typography>
               {note !== '' && (
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
@@ -321,6 +331,7 @@ export function BankPage(): React.JSX.Element {
           </>
         )}
       </Card>
+      {composing && <ComposeDialog onClose={() => setComposing(false)} onPlaced={() => load(query)} />}
     </Box>
   )
 }

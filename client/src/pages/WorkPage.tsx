@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import EditNoteOutlinedIcon from '@mui/icons-material/EditNoteOutlined'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import SendIcon from '@mui/icons-material/Send'
@@ -22,6 +23,7 @@ import Typography from '@mui/material/Typography'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import { BlueprintDialog } from '../blueprint-dialog.js'
+import { ComposeDialog } from '../compose-dialog.js'
 import { DoingRow, EvidenceView, FilesView, KnowledgeView, PaperView, ReviseDialog, Timeline } from '../components.js'
 import { forWorkspace } from '../log.js'
 import type { BlueprintInfoView, ItemView, SlotChangeView, VersionView } from '../types.js'
@@ -60,6 +62,8 @@ export function WorkPage(): React.JSX.Element {
   const [focusAgent, setFocusAgent] = useState('')
   /** 正在改哪一道（点"改这道题"之后弹出来的） */
   const [revising, setRevising] = useState<{ slot: string; item: ItemView } | null>(null)
+  /** 说一道题（想到什么就出什么，不必先有题位） */
+  const [composing, setComposing] = useState(false)
 
   const reloadLibrary = (): void => {
     void api
@@ -283,8 +287,12 @@ export function WorkPage(): React.JSX.Element {
               <Button size="small" variant="outlined" disabled={busy !== '' || frozen} onClick={assemble}>
                 直接按蓝图组卷
               </Button>
+              {/* 脑子里有一道题时不用先找题位：说一句，现造一道，看着行就放进卷子 */}
+              <Button size="small" variant="text" startIcon={<AutoAwesomeIcon />} disabled={frozen} onClick={() => setComposing(true)}>
+                说一道题
+              </Button>
               <Typography variant="caption" color="text.secondary">
-                {latest === undefined ? '还没有试卷' : `第 ${String(latest.version)} 版`}　题库 {String(state?.items.length ?? 0)} 道
+                {latest === undefined ? '还没有试卷' : `第 ${String(latest.version)} 版`}　留档 {String(state?.items.length ?? 0)} 道
               </Typography>
             </Stack>
           )}
@@ -381,6 +389,16 @@ export function WorkPage(): React.JSX.Element {
           {tab === 'files' && <FilesView name={session?.meta.id ?? ''} tick={entries.length} />}
         </Box>
       </Card>
+
+      {composing && (
+        <ComposeDialog
+          onClose={() => setComposing(false)}
+          onPlaced={async () => {
+            setViewVersion(null)
+            await app.reload()
+          }}
+        />
+      )}
 
       {revising !== null && (
         <ReviseDialog

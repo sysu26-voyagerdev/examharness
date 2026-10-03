@@ -1,4 +1,13 @@
-import type { Blueprint, BlueprintRow, FigureArtifact, FigureSpec, Item, SlotSpec, Verdict } from './types.js'
+import type {
+  Blueprint,
+  BlueprintRow,
+  FigureArtifact,
+  FigureSpec,
+  Item,
+  QuestionType,
+  SlotSpec,
+  Verdict,
+} from './types.js'
 import type { FusionView, KnowledgeMatch, KnowledgeNeighbors } from './graph.js'
 
 // 必须真实导入被增强的模块：TS 只在模块已进入程序时才认这条声明合并
@@ -36,6 +45,14 @@ export interface BankApi {
   /** 相似度：参数字面量 + 知识点的 Jaccard */
   similarity(a: Item, b: Item): number
   submit(item: Item): Promise<SubmitResult>
+  /**
+   * **预检**：跑一遍闸门链，但**不入库**。
+   *
+   * 为什么要有它：口述出题会一次造好几个候选，结构上就站不住的（分量不够、超纲、
+   * 选项不全）不该先花一次模型调用把题面写出来再被拦下——先用模板题面预检，能过的才值得写。
+   * 这不是第二个写入口：预检不落库、不发事件、不改变任何状态，判定永远还是那套闸门给的。
+   */
+  verify?(item: Item): Promise<Verdict>
   get(id: string): Item | undefined
   all(): readonly Item[]
   /**
@@ -154,6 +171,18 @@ export interface AssembleOptions {
    * 老师签过字的那道题属于老师，重组卷不该把它换掉。
    */
   pinned?: Readonly<Record<string, string>>
+  /**
+   * **这个题位该用哪个题型**（题位 → 题型名）：卷子自己记住的事。
+   *
+   * 为什么要有：一个题位常常有好几个题型能出（入门小题、多问综合题、新写的题型…），
+   * 按注册顺序挑第一个 = **agent 新写的题型永远轮不到**——真实后果：
+   * agent 为"第 2 题"专门写了一个更好的题型、也造出了题，重组的卷子上却还是老题型出的老题，
+   * 老师的结论只能是"你做的活我看不见"。
+   *
+   * 所以：卷子上这个题位现在用的题型，下一版继续用它（题目照样现造）。
+   * 换题型要有明确的动作（老师指定、或 agent 明确说换），不靠"谁先注册"。
+   */
+  preferredKinds?: Readonly<Record<string, string>>
 }
 
 /** 组卷：把蓝图变成一份卷子。**是约束求解，不是"生成 N 道题"** */
@@ -282,7 +311,48 @@ export interface WorkbenchApi {
    * 数值、条件、答案都不许改——改完仍要过闸门。
    */
   polish?(item: Item, instruction: string): Promise<Item | string>
+  /**
+   * **口述出题**：老师说一句"我想要一道……的题"，直接拿到题。
+   *
+   * 这一支存在的理由是**自由度**：题不该只能从题位/题库里挑。老师脑子里有一道题，
+   * 就该能立刻看到它——现有题型覆盖得到就现造（走完整闸门链才入库），
+   * 覆盖不到就如实说，并把话交给 agent 去写题型（`escalate`）。
+   */
+  compose?(text: string): Promise<ComposeResult>
   active(): readonly WorkbenchRunState[]
+}
+
+/** 老师那句话被翻译成的题位（给老师看：系统理解成了什么，错了当场能发现） */
+export interface ComposeSpec {
+  /** 落到图谱上的知识点（老师话里的说法会被对到图谱里的名字） */
+  knowledge: readonly string[]
+  /** 没能落进题位的说法（图谱里没有，或不在已学范围）——不悄悄丢掉 */
+  unresolved: readonly string[]
+  type: QuestionType
+  score: number
+  difficulty: readonly [number, number]
+  /** 模型对这句话的理解（一句人话） */
+  note: string
+}
+
+export interface ComposeResult {
+  ok: boolean
+  spec?: ComposeSpec
+  /** 现造出来、过了闸门、已入库的题（能放进题位，也能只留着） */
+  items: readonly Item[]
+  /** 库里已有的相近题（造不出来时，老师可能就想要这几道） */
+  similar?: readonly Item[]
+  /**
+   * 出了一道、但规格与老师说的不一样时的一句人话（例如"10 分的出不来，这道是 6 分的"）。
+   * **不许偷偷降规格**：降了就说清楚，老师自己决定要不要。
+   */
+  adjusted?: string
+  /** 没出成时的一句人话 */
+  reason?: string
+  /** 试过哪些题型、被哪道闸门拦下（如实列出来，不糊成"失败了"） */
+  attempts?: readonly string[]
+  /** 现有题型做不到时，交给 agent 的活儿 */
+  escalate?: string
 }
 
 // ── 设置（运行期覆盖层）────────────────────────────────────

@@ -422,6 +422,10 @@ describe('答案按值比（真实用例）', () => {
     { constructed: '圆心 O 到弦 AB 的距离 = 12', parsed: '12', same: true },
     { constructed: '（1）y = 2x + 2；（2）(-1, 0)；（3）面积为 1', parsed: '（1）y = 2x + 2；（2）交点坐标 (-1, 0)；（3）面积 = 1', same: true },
     { constructed: '\\dfrac{6}{14}', parsed: '3/7', same: true },
+    // 数学减号（U+2212）与 ASCII 减号是同一个事实：真实案例里模型写"顶点坐标为 (3/2, -49/4)"，
+    // 构造答案是"(1.5, −12.25)"——曾经因为减号写法不同被判成两个答案，好题白白重跑一遍。
+    { constructed: '(1.5, \u221212.25)', parsed: '顶点坐标为 (3/2, -49/4)', same: true },
+    { constructed: '\\dfrac{1}{2}', parsed: '0.5', same: true },
     { constructed: 'x = 2', parsed: 'x = 3', same: false },
     { constructed: '\\dfrac{5}{12}', parsed: '5/13', same: false },
     { constructed: '（1）144；（2）x(x-6)(x+6)', parsed: '(1) 72；(2) x^3-36x = x(x+6)(x-6)', same: false },

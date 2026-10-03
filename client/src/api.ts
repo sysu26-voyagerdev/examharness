@@ -1,6 +1,7 @@
 import type {
   BankQuery,
   BankView,
+  ComposeView,
   BlueprintInfoView,
   BlueprintRowView,
   BlueprintView,
@@ -89,6 +90,18 @@ export const polishItem = (itemId: string, instruction: string): Promise<{ ok: b
   send('POST', `/api/item/${encodeURIComponent(itemId)}/polish`, { instruction }).then((r) =>
     json<{ ok: boolean; gate?: string; reason?: string; hint?: string; stem?: string }>(r),
   )
+
+/**
+ * 口述出题：说一句"我想要一道……的题"，直接拿回现造的题。
+ * 同步等（十几秒）：这句话先被翻译成题位，再用现有题型现造、过闸门——
+ * 等着的这段时间界面要**说清在等什么**，不能只转圈。
+ */
+export const compose = (text: string): Promise<ComposeView> =>
+  send('POST', '/api/compose', { text }).then((r) => json<ComposeView>(r))
+
+/** 现有题型造不出来时：把这句话交给 agent，让它写题型把它真的造出来 */
+export const escalateCompose = (goal: string, label: string): Promise<{ runId: string }> =>
+  send('POST', '/api/compose/escalate', { goal, label }).then((r) => json<{ runId: string }>(r))
 
 /** 老师指定用这一道：把它放进某个题位 */
 export const placeItem = (slot: string, itemId: string): Promise<{ ok: boolean; reason?: string }> =>

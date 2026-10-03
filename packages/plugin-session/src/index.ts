@@ -239,10 +239,19 @@ export class SessionService extends Service implements SessionApi {
     for (const binding of this.latest()?.bindings ?? []) {
       if (binding.confirmedBy !== null) pinned[binding.slot] = binding.itemId
     }
+    // **卷子自己记住每个题位用的题型**：上一版这个题位是哪个题型出的，这一版接着用它。
+    // 题目仍然是现造的（这一版不该是上一版的翻版），但"用哪种做法出"不该每次重抽——
+    // 抽签的结果是 agent 新写的题型永远排不上（见 AssembleOptions.preferredKinds）。
+    const preferredKinds: Record<string, string> = {}
+    for (const binding of this.latest()?.bindings ?? []) {
+      const item = this.ctx.bank.get(binding.itemId)
+      if (item !== undefined && item.instance.kind !== '') preferredKinds[binding.slot] = item.instance.kind
+    }
     const paper = await this.ctx.paper.assemble(blueprint, {
       nonce: `${record.meta.id}|${String(Date.now())}`,
       usedShapes,
       pinned,
+      preferredKinds,
     })
     const previous = this.latest()
 

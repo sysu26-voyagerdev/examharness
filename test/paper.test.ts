@@ -54,7 +54,60 @@ afterEach(async () => {
   rmSync(workdir, { recursive: true, force: true })
 })
 
+/** 第二个题型：和第一条构造器覆盖同样的题位（用来测"这个题位该用哪个题型"） */
+function secondKind(): { name: string; apply(ctx: Context): void } {
+  return {
+    name: 'second-kind',
+    apply(ctx: Context): void {
+      ctx.inject(['construct'], (scope) => {
+        const construct = scope.construct
+        scope.construct.register(
+          'second/roots',
+          (slot, seed) => {
+            // 借用第一条构造器造出来的结构，只把题型名换掉：
+            // 这样"卷面上用的哪个题型"可以从 instance.kind 上看出来
+            const base = construct.generate({ ...slot, key: `${slot.key}--x`, count: 1 }, seed)
+            const { a, r1, r2 } = base.instance.params
+            return {
+              ...base,
+              id: `${base.id}-2nd`,
+              // 符号闸门对不认识的题型是 fail-closed 的：新题型必须自带可独立复算的检验点
+              instance: {
+                ...base.instance,
+                kind: 'second/roots',
+                checks: [
+                  { expr: `${String(a)}*(x-(${String(r1)}))*(x-(${String(r2)}))`, at: { x: Number(r1) }, expect: 0 },
+                ],
+              },
+            }
+          },
+          ['与坐标轴交点', '对称轴', '顶点式'],
+        )
+      })
+    },
+  }
+}
+
 describe('组卷', () => {
+  it('**卷子自己记住题位用的题型**：agent 新写的题型不会被"先注册的那个"顶掉', async () => {
+    const ctx = await boot()
+    await ctx.plugin(secondKind())
+    // 不指定：按注册顺序，用的是先注册的那条
+    const plain = await ctx.paper.assemble(blueprint, { nonce: 'n1' })
+    const first = ctx.bank.get(plain.slots[0]?.itemId ?? '')
+    expect(first?.instance.kind).toBe('parabola/roots')
+
+    // 指定（等价于"上一版这个题位用的是它"）：换题型出，但仍然**现造**
+    const preferred = await ctx.paper.assemble(blueprint, {
+      nonce: 'n2',
+      preferredKinds: { [plain.slots[0]?.key ?? '']: 'second/roots' },
+    })
+    const second = ctx.bank.get(preferred.slots[0]?.itemId ?? '')
+    expect(second?.instance.kind).toBe('second/roots')
+    // 现造：换了题型也是新的一道（不是把库里的捞回来）
+    expect(second?.id).not.toBe(first?.id)
+  })
+
   it('按蓝图凑齐题位，并由易到难排序、分值对得上', async () => {
     const ctx = await boot()
     const paper = await ctx.paper.assemble(blueprint)

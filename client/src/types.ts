@@ -287,6 +287,33 @@ export interface BankQuery {
   offset?: number
 }
 
+/**
+ * 口述出题：老师那句话被翻译成的题位 + 现造出来的题。
+ *
+ * `spec` 一定要显示给老师看——他才知道系统把他的话理解成了什么，
+ * 理解错了当场就能发现（而不是拿到一道莫名其妙的题猜哪里出了问题）。
+ */
+export interface ComposeSpecView {
+  knowledge: readonly string[]
+  unresolved: readonly string[]
+  type: string
+  score: number
+  difficulty: readonly [number, number]
+  note: string
+}
+
+export interface ComposeView {
+  ok: boolean
+  spec?: ComposeSpecView
+  items: readonly ItemView[]
+  similar?: readonly ItemView[]
+  /** 出了一道但降了规格时的一句人话（降了就说清楚） */
+  adjusted?: string
+  reason?: string
+  attempts?: readonly string[]
+  escalate?: string
+}
+
 /** 界面上的一个 agent（主线或子任务）：用来显示"谁在干什么、走到第几步" */
 export interface RunAgentView {
   id: string

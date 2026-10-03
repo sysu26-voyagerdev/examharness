@@ -91,7 +91,16 @@ export class PaperService extends Service implements PaperApi {
         const slot = { ...row, key, count: 1 }
         const byKind = this.ctx.construct.generateWith?.bind(this.ctx.construct)
         const kinds = this.ctx.construct.candidates?.(slot)
-        const usable = kinds === undefined || kinds.length === 0 ? [undefined] : kinds
+        // **卷自记题型**：这个题位上一版用哪个题型，这一版还用它（题照样现造）。
+        // 不然按注册顺序挑，agent 新写的题型永远轮不到——它做的活老师在卷子上看不见。
+        const preferred = options.preferredKinds?.[key]
+        const ordered =
+          kinds === undefined || kinds.length === 0
+            ? []
+            : preferred !== undefined && kinds.includes(preferred)
+              ? [preferred, ...kinds.filter((kind) => kind !== preferred)]
+              : [...kinds]
+        const usable = ordered.length === 0 ? [undefined] : ordered
 
         for (const kind of usable) {
           for (let attempt = 0; attempt < maxAttempts; attempt += 1) {

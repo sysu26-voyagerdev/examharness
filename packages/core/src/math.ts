@@ -85,9 +85,18 @@ export function texToHtml(tex: string, display = true): string {
 export function answerValues(text: string): readonly number[] {
   // 顺序有讲究：先把 LaTeX 结构与"排版"剥掉，剩下的数才是答案里的数。
   let clean = text
+    // **减号有好几种写法**：数学减号 U+2212（模型写 LaTeX 时常带它）、全角减号、短破折号——
+    // 它们与 ASCII 的 `-` 是同一个数学事实（真实踩过：`−12.25` 与 `-12.25` 被判成两个答案，
+    // 于是好题被回译闸门冤枉、白白重跑一遍模型）。
+    .replace(/[\u2212\uFF0D\u2013\u2014\u2015]/g, '-')
     .replace(/[（(]\s*\d+\s*[)）]/g, ' ') // 分问序号（1）
     .replace(/第\s*\d+\s*问/g, ' ')
     .replace(/[①-⑳]/g, ' ')
+  // 1) LaTeX 分数：\dfrac{6}{14} → 6/14（先做，否则 6 与 14 会被当成两个数）
+  clean = clean.replace(
+    /\\(?:d|t)?frac\s*\{\s*(-?\d+(?:\.\d+)?)\s*\}\s*\{\s*(-?\d+(?:\.\d+)?)\s*\}/g,
+    '$1/$2',
+  )
   // 1) LaTeX 分数：\dfrac{6}{14} → 6/14（先做，否则 6 与 14 会被当成两个数）
   clean = clean.replace(
     /\\(?:d|t)?frac\s*\{\s*(-?\d+(?:\.\d+)?)\s*\}\s*\{\s*(-?\d+(?:\.\d+)?)\s*\}/g,

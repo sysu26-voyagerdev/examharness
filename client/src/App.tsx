@@ -55,7 +55,7 @@ import type {
 
 const NAV = [
   { key: 'work', label: '工作台', icon: <ScienceOutlinedIcon /> },
-  { key: 'bank', label: '题库', icon: <LibraryBooksOutlinedIcon /> },
+  { key: 'bank', label: '做过的题', icon: <LibraryBooksOutlinedIcon /> },
   { key: 'sessions', label: '会话', icon: <MenuBookOutlinedIcon /> },
   { key: 'materials', label: '资料', icon: <TuneOutlinedIcon /> },
   { key: 'settings', label: '设置', icon: <SettingsOutlinedIcon /> },
