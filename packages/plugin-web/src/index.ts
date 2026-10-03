@@ -579,7 +579,13 @@ export function apply(ctx: Context, config: WebConfig): void {
         return
       }
       try {
-        send(res, 200, { ok: true, version: restore(Number(body.version ?? 0)) })
+        const version = restore(Number(body.version ?? 0))
+        ctx.session.appendLog({
+          kind: 'verdict',
+          text: `退回了第 ${String(body.version ?? 0)} 版：这一版 ${String(version.bindings.length)} 道题`,
+          workspace: ctx.session.current().id,
+        })
+        send(res, 200, { ok: true, version })
       } catch (error) {
         send(res, 409, { error: error instanceof Error ? error.message : String(error) })
       }
@@ -595,7 +601,13 @@ export function apply(ctx: Context, config: WebConfig): void {
         return
       }
       try {
-        send(res, 200, { ok: true, version: clear(String(body.slot ?? '')) })
+        const version = clear(String(body.slot ?? ''))
+        ctx.session.appendLog({
+          kind: 'verdict',
+          text: `从卷子上拿掉了一道：这一版 ${String(version.bindings.length)} 道题`,
+          workspace: ctx.session.current().id,
+        })
+        send(res, 200, { ok: true, version })
       } catch (error) {
         send(res, 409, { error: error instanceof Error ? error.message : String(error) })
       }
@@ -949,7 +961,17 @@ export function apply(ctx: Context, config: WebConfig): void {
     if (method === 'POST' && path === '/api/session/assemble') {
       const body = (await readBody(req)) as { reason?: string }
       try {
-        send(res, 200, await ctx.session.assemble(body.reason ?? '组卷'))
+        const version = await ctx.session.assemble(body.reason ?? '再出一版')
+        // **没有 agent 参与的改动也要在记录里说一句**：不然老师按完"再出一版"，
+        // 右边那一栏只看到几条"收下一道新题"，像是什么都没发生（真实截图就是这样）。
+        ctx.session.appendLog({
+          kind: 'verdict',
+          text:
+            `出了一版：第 ${String(version.version)} 版 · ${String(version.bindings.length)} 道题 · 满分 ${String(version.totalScore)} 分` +
+            (version.gaps.length === 0 ? '' : `（还缺 ${String(version.gaps.length)} 道）`),
+          workspace: ctx.session.current().id,
+        })
+        send(res, 200, version)
       } catch (error) {
         send(res, 409, { error: error instanceof Error ? error.message : String(error) })
       }

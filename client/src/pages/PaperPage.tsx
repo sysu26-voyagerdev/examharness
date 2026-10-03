@@ -179,7 +179,9 @@ export function PaperPage(): React.JSX.Element {
   )
 
   const agent = (
-    <Box sx={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
+    // width:'100%' 不能省：父容器是**横向** flex，子元素默认按内容宽度排（量过：栏宽 400，
+    // 内容只有 330，右边空出一条灰的——用户截图里那条就是它）
+    <Box sx={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
       {/* 谁在干活：主线 + 子任务（子任务是与主线并排的，但只在这一栏里，绝不与别的出题串流） */}
       {(running !== null || agents.length > 1) && (
         <Stack direction="row" spacing={1} sx={{ px: 1.5, py: 1, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -199,6 +201,7 @@ export function PaperPage(): React.JSX.Element {
           running={running !== null}
           {...(running === null ? {} : { runningId: running.id })}
           translate={translate}
+          onExample={(example) => setDraft(example)}
         />
       </Box>
       {doing !== null && (
@@ -371,7 +374,17 @@ export function PaperPage(): React.JSX.Element {
         {panes.panes.rightOpen ? (
           <>
             <Sash orientation="vertical" onPointerDown={panes.beginDrag('right')} onDoubleClick={() => panes.reset('right')} />
-            <Box sx={{ width: panes.panes.right, flexShrink: 0, borderLeft: 1, borderColor: 'divider', display: 'flex', minWidth: 0 }}>
+            <Box
+              sx={{
+                width: panes.panes.right,
+                flexShrink: 0,
+                borderLeft: 1,
+                borderColor: 'divider',
+                display: 'flex',
+                flexDirection: 'column',
+                minWidth: 0,
+              }}
+            >
               {agent}
             </Box>
           </>

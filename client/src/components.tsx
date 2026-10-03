@@ -168,6 +168,13 @@ export function DoingRow({ doing, since }: { doing: { what: string; agent: strin
   )
 }
 
+/** 第一次用时的三句话：说得出、也点得动 */
+const EXAMPLES: readonly string[] = [
+  '出一份二次函数的课后作业，20 分钟',
+  '再加一道圆的选择题，3 分',
+  '这一版太难了，换简单点',
+]
+
 /**
  * agent 的工作记录：**DSH 式的一块一块**。
  *
@@ -181,6 +188,7 @@ export function Timeline({
   running,
   runningId,
   translate,
+  onExample,
 }: {
   entries: readonly LogEntryView[]
   running: boolean
@@ -188,6 +196,8 @@ export function Timeline({
   runningId?: string
   /** 把系统题号翻成人话（S3-1 → 第 3 题） */
   translate?: (text: string) => string
+  /** 点一句例子就把它填进输入框（第一次用时不用猜该说什么） */
+  onExample?: (text: string) => void
 }): React.JSX.Element {
   const endRef = useRef<HTMLDivElement | null>(null)
   const boxRef = useRef<HTMLDivElement | null>(null)
@@ -204,10 +214,29 @@ export function Timeline({
 
   if (blocks.length === 0) {
     return (
-      <Box sx={{ p: 3, textAlign: 'center' }}>
-        <Typography variant="body2" color="text.secondary">
-          说一句你要什么——出题、改哪一道、换个难度，都是这一句。
+      <Box sx={{ p: 3 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          还没有开始。说一句就行——出题、改哪一道、换个难度，都是这一句：
         </Typography>
+        <Stack spacing={0.75}>
+          {EXAMPLES.map((example) => (
+            <Box
+              key={example}
+              onClick={() => onExample?.(example)}
+              sx={{
+                px: 1.25,
+                py: 0.75,
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 1,
+                cursor: onExample === undefined ? 'default' : 'pointer',
+                '&:hover': { bgcolor: 'action.hover' },
+              }}
+            >
+              <Typography variant="body2">{example}</Typography>
+            </Box>
+          ))}
+        </Stack>
       </Box>
     )
   }
@@ -227,9 +256,12 @@ export function Timeline({
               onClick={() => setOpen((previous) => (previous.includes(block.id) ? previous.filter((id) => id !== block.id) : [...previous, block.id]))}
               sx={{ alignItems: 'center', cursor: 'pointer', px: 0.5, py: 0.5, borderRadius: 1, '&:hover': { bgcolor: 'action.hover' } }}
             >
-              <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                {block.parent === undefined ? '老师' : '子任务'}
-              </Typography>
+              {/* 说话人只在真正的"轮"上标（老师/子任务）；"这一版做了什么"不是谁说的话 */}
+              {block.id !== 'earlier' && (
+                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                  {block.parent === undefined ? '老师' : '子任务'}
+                </Typography>
+              )}
               <Typography variant="body2" sx={{ fontWeight: 600, minWidth: 0, overflowWrap: 'anywhere' }}>
                 {plain(block.title)}
               </Typography>
@@ -323,7 +355,9 @@ function groupRuns(entries: readonly LogEntryView[]): readonly RunBlock[] {
     roots.unshift({
       block: {
         id: 'earlier',
-        title: '早先的记录',
+        // 没有轮次头的记录（例如老师按"再出一版"、签字、退回）：不属于哪一轮 agent，
+        // 但它们就是"这一版"发生过的事——别把它们藏起来，也别叫它们"早先的记录"
+        title: '这一版做了什么',
         at: loose[0]?.at ?? new Date().toISOString(),
         entries: loose,
         children: [],
