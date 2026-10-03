@@ -568,6 +568,30 @@ function statusOf(item: ItemView, binding: SlotBindingView): { text: string; ton
  * 缺口的说法**给老师看**：服务端那句是给 agent 看的（带内部题型名与闸门名），
  * 界面上要把它们换成"哪一项检查没过 + 为什么"。
  */
+/** 正文里出现的工具名 → 人话（记录是给老师看的，工具名只该出现在它自己的标签上） */
+const TOOL_IN_PROSE: Readonly<Record<string, string>> = {
+  assemble_paper: '出一版',
+  construct_item: '造一道',
+  submit_item: '收下',
+  place_item: '放到卷子上',
+  quick_question: '现造一道',
+  gap_report: '缺口',
+  item_read: '看这一道',
+  bank_stats: '看看做过的题',
+  material_search: '找素材',
+  corpus_search: '找素材',
+  constructor_write: '写题型',
+  blueprint_list: '看设定',
+  blueprint_use: '换设定',
+  blueprint_create: '建设定',
+  derive_concepts: '梳理知识点',
+  satisfy_dependencies: '补前置知识',
+  list_concepts: '看知识点',
+  figure_render: '画图',
+  known_concepts: '看知识点',
+  paper_read: '看卷子',
+}
+
 /** 闸门名 → 老师能判断的风险（说"这意味着什么"，不说闸门叫什么） */
 export const RISK: Readonly<Record<string, string>> = {
   scope: '有知识点超出已学范围',
@@ -586,19 +610,24 @@ export const RISK: Readonly<Record<string, string>> = {
  * 日志是给人看的（老师要看着 agent 干活），系统词一个都不该露出来。
  */
 export function humanLine(text: string, number?: (slot: string) => string | undefined): string {
-  // "被 verify-x 拦下"先说成人话（否则会变成"被与已有题目太像 拦下"这种别扭句子）
-  let out = text.replace(/\S*\s*被\s*verify-([a-z-]+)\s*拦下[：:]/gu, (_all, gate: string) => `${RISK[gate] ?? gateLabel(`verify-${gate}`)}：`)
+  // "某题型 被 verify-x 拦下："先说成人话
+  // （`[^：\s]+` 而不是 `\S+`：否则会把"3 分｜原因：parabola/roots"整段吃掉，真实踩过）
+  let out = text.replace(/[^：:\s]+\s*被\s*verify-([a-z-]+)\s*拦下[：:]/gu, (_all, gate: string) => `${RISK[gate] ?? gateLabel(`verify-${gate}`)}：`)
   out = out.replace(/verify-([a-z-]+)/gu, (_all, gate: string) => RISK[gate] ?? gateLabel(`verify-${gate}`))
   out = out.replace(/it-[\w-]+/gu, '这道题')
   out = out.replace(/口述出题/g, '这道题')
-  out = out.replace(/\bS(\d+)-(\d+)\b/gu, (all: string) => number?.(all) ?? '这道题')
+  out = out.replace(/\bS(\d+)-(\d+)\b/gu, (all: string, row: string) => number?.(all) ?? `设定里的第 ${row} 个题位`)
+  // 光秃秃的组号（S15 这种）也要说人话：它是"设定里的第几个题位"
+  out = out.replace(/\bS(\d+)\b/gu, '设定里的第 $1 个题位')
+  // 工具名不该出现在人看的正文里
+  for (const [tool, human] of Object.entries(TOOL_IN_PROSE)) out = out.split(tool).join(human)
   return out
 }
 
 function humanGap(reason: string): string {
   const stripped = reason
     // 缺口原因里可能列了几个题型各为什么不行：**每一处**都要翻成人话
-    .replace(/\S+\s*被\s*verify-([a-z-]+)\s*拦下：/gu, (_all, gate: string) => `${RISK[gate] ?? gateLabel(`verify-${gate}`)}：`)
+    .replace(/[^：:\s]+\s*被\s*verify-([a-z-]+)\s*拦下：/gu, (_all, gate: string) => `${RISK[gate] ?? gateLabel(`verify-${gate}`)}：`)
     .replace(/与已入库题目结构完全相同（\S+）/gu, '与我已经出过的一道题完全相同')
     .replace(/构造器不覆盖该题位：.*$/u, '还没有能出这道题的题型')
   return stripped.length > 120 ? `${stripped.slice(0, 118)}…` : stripped
