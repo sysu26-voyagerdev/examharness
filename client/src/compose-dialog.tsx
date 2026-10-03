@@ -189,6 +189,28 @@ export function ComposeDialog({
               {result.reason ?? '这道题没造出来。'}
               {result.similar !== undefined && result.similar.length > 0 && ' 库里倒是有几道相近的（见下）。'}
             </Alert>
+            {result.alternatives !== undefined && result.alternatives.length > 0 && (
+              <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                <Typography variant="body2" color="text.secondary">
+                  这些能出：
+                </Typography>
+                {result.alternatives.map((key) => (
+                  <Chip
+                    key={key}
+                    size="small"
+                    variant="outlined"
+                    clickable
+                    label={key}
+                    onClick={() => {
+                      // 换个知识点是另一道题：要说清是老师自己点的（不自动替换）
+                      const next = `${text.trim()}（知识点按「${key}」出）`
+                      setText(next)
+                      void ask(next)
+                    }}
+                  />
+                ))}
+              </Stack>
+            )}
             {result.attempts !== undefined && result.attempts.length > 0 && (
               <Box>
                 <Button size="small" onClick={() => setShowWhy((value) => !value)}>

@@ -590,6 +590,7 @@ export function apply(ctx: Context, config: WebConfig): void {
         ...(result.adjusted === undefined ? {} : { adjusted: result.adjusted }),
         ...(result.reason === undefined ? {} : { reason: result.reason }),
         ...(result.attempts === undefined ? {} : { attempts: result.attempts }),
+        ...(result.alternatives === undefined ? {} : { alternatives: result.alternatives }),
         ...(result.escalate === undefined ? {} : { escalate: result.escalate }),
       })
       return

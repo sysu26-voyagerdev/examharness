@@ -173,6 +173,24 @@ describe('选择题闸门', () => {
     expect(bad.ok ? '' : bad.verdict.reason).toContain('没有正确答案')
   })
 
+  it('题面里又写了一遍选项 → 拦下（学生会看到两套不一样的选项）', async () => {
+    const ctx = await boot()
+    const base = await itemFor('选择', 3)
+    // 真实案例：题面里写着 A–D 四个选项，结构里的选项却是另一套
+    const item: Item = {
+      ...base,
+      prose: {
+        ...base.prose,
+        stem: `${base.prose.stem}\nA. 35°\nB. 70°\nC. 35°或70°\nD. 无法确定`,
+      },
+    }
+    const result = await ctx.bank.submit(item)
+
+    expect(result.ok).toBe(false)
+    expect(result.ok ? '' : result.verdict.gate).toBe('verify-options')
+    expect(result.ok ? '' : result.verdict.reason).toContain('又写了一遍选项')
+  })
+
   it('选项重复 → 拦下（那样答案就不唯一了）', async () => {
     const ctx = await boot()
     const base = (await itemFor('选择', 3))

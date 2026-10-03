@@ -99,6 +99,21 @@ export function apply(ctx: Context, config: OptionsConfig): void {
       }
     }
 
+    // **题面里又写了一遍选项**：学生看到的是两套选项，而且两套可以不一样
+    // （真实案例：题面里写着 "A. 35° B. 70° C. 35°或70° D. 无法确定"，结构里的选项却是
+    //   145°/35°/55°/70°——一边 A 与 C 重复，一边四选一，这道题是坏的）。
+    // 选项只由框架渲染一处；题面里再写一遍一律拦下。
+    const inline = item.prose.stem.match(/^\s*[A-DＡ-Ｄ]\s*[．.、)）]/gm) ?? []
+    if (inline.length >= 3) {
+      return {
+        pass: false,
+        gate: name,
+        reason: `题面里又写了一遍选项（${String(inline.length)} 行）：选项由框架渲染，题面里再写一遍会出现两套不一样的选项`,
+        fixable: true,
+        hint: '把题面里的 A./B./C./D. 那几行删掉，选项只从结构的 options 来（题面以"（  ）"结尾即可）',
+      }
+    }
+
     return {
       ...verdict,
       pass: true,

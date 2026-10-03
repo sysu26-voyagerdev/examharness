@@ -857,8 +857,10 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     // **时间是硬的**：老师在这儿等着看题。到点就把已有的交出去，剩下的如实说明没试完，
     // 而不是让他对着转圈等一个越来越长的批处理。
     const deadline = Date.now() + this.config.composeBudgetMs;
-    // 种子带着这一句的"批号"：**再来一批**要真的换一批题（同一批种子会被去重闸门当成重复提交）
-    const seeds = [nonce % 90_000, (nonce + 7_919) % 90_000];
+    // 种子带着这一句的"批号"：**再来一批**要真的换一批题（同一批种子会被去重闸门当成重复提交）。
+    // 给得多一点是因为**预检不花模型调用**：多试几个种子只花时间不花钱，
+    // 而库里攒起来之后（真实情况：500+ 道）"换一个没被用过的组合"常要好几个种子才碰得到。
+    const seeds = Array.from({ length: 8 }, (_unused, index) => (nonce + index * 7_919) % 90_000);
     const byScore = await this.constructFor(slot, request, attempts, deadline, seeds);
     // **降规格再试一次**：说 10 分的解答题，可现有题型只出得了一问（分量不够）——
     // 与其回一句"造不出来"，不如把造得出来的那一档给他，并**如实说清降了哪一档**。
@@ -889,9 +891,10 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       };
     }
 
-    // 造不出来时给老师两条路：库里已经有像的（可能就想要这个），或者让 agent 想办法
+    // 造不出来时给老师三条路：换个相近的知识点就能出、库里已经有像的、让 agent 想办法
     const similar = this.similarTo(spec, slot);
     const kinds = [...(this.ctx.construct.candidates?.(slot) ?? [])];
+    const alternatives = kinds.length === 0 ? this.servableNear(spec, slot) : [];
     const kindText =
       kinds.length === 0
         ? `现有题型里没有覆盖「${spec.knowledge.join("、")}」的（${String(spec.type)}｜${String(spec.score)} 分）`
@@ -902,6 +905,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       items: [],
       ...(similar.length === 0 ? {} : { similar }),
       ...(attempts.length === 0 ? {} : { attempts }),
+      ...(alternatives.length === 0 ? {} : { alternatives }),
       reason: `${kindText}。`,
       escalate:
         `老师口述了一道题，想要这个：${request}\n` +
@@ -910,6 +914,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         "请把这道题真的造出来：先看真题里这个考点怎么问（material_search/corpus_search），" +
         "再用 constructor_write 写或改题型（要覆盖多种结构，不要一个句式换数字），" +
         "出好后 submit_item 过闸门；老师要是说了放进哪个题位，就用 place_item 放上去。" +
+        "如果失败原因多是 verify-dedup（与库里已有的题完全相同），说明这些题型的**参数空间已经用尽**——" +
+        "那就写一个参数空间更大、结构更多样的题型，而不是换种子硬碰。" +
         "如果你判断这个要求越过了已学范围或有版权问题，如实说清楚，不要硬凑。",
     };
   }
@@ -1005,6 +1011,32 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   /** 让执笔者写题面（单独一层：并行调用时才不会被 lint 当成"循环里等"） */
   private async writeStem(item: Item, wish: string): Promise<Item | string> {
     return this.serialize(item, wish);
+  }
+
+  /**
+   * 相近的、**真的出得了题**的知识点（老师换个说法就能出）。
+   *
+   * 只从图谱里挑，并且要求"这个题位用这个知识点时确实有题型可用"——
+   * 提一个同样出不了的建议比不提还糟。排在前面的优先：图上的邻居（同一章）→ 名字有共字。
+   */
+  private servableNear(spec: ComposeSpec, slot: BlueprintRow): readonly string[] {
+    const served = (knowledge: readonly string[]): boolean =>
+      (this.ctx.construct.candidates?.({ ...slot, knowledge }) ?? []).length > 0;
+    const near: string[] = [];
+    for (const key of spec.knowledge) {
+      const neighbors = this.ctx.graph.neighbors(key);
+      for (const other of [...(neighbors?.successors ?? []), ...(neighbors?.prerequisites ?? [])]) {
+        if (spec.knowledge.includes(other) || near.includes(other)) continue;
+        near.push(other);
+      }
+    }
+    // 名字里有共同的字（"圆周角定理" → "圆的基本性质"这类）
+    for (const key of this.ctx.graph.learnedKeys()) {
+      if (spec.knowledge.includes(key) || near.includes(key)) continue;
+      const shared = [...key].filter((char) => spec.knowledge.some((wanted) => wanted.includes(char)));
+      if (shared.length >= 2) near.push(key);
+    }
+    return near.filter((key) => served([key])).slice(0, 3);
   }
 
   /** 库里已有的、跟这个题位像的题（按知识点重合度，同题型优先） */

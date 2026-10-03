@@ -313,6 +313,8 @@ export interface ComposeView {
   adjusted?: string
   reason?: string
   attempts?: readonly string[]
+  /** 换个相近的知识点就能出（点一下就出，不自动替换） */
+  alternatives?: readonly string[]
   escalate?: string
 }
 
