@@ -308,6 +308,22 @@ export interface LlmReply {
   toolCalls: readonly LlmToolCall[]
 }
 
+/**
+ * 流里的一小段文字属于哪一路：
+ *
+ * - `think`：**它在想**（提供方的 `reasoning_content`）。它常常比正文早十几秒开始，
+ *   而且内容比正文长——一个带工具调用的回合里，模型先想、再决定调什么工具，
+ *   这段时间**只有**这一路在流。它不是结论、不进记录，只用来让老师看见"它此刻在想什么"。
+ * - `say`：**它写给人看的字**（正文 `content`），走完一步才会变成记录里的一行。
+ */
+export type LlmDeltaKind = 'think' | 'say'
+
+/** 流式回调的一段：文字 + 它是哪一路（界面靠它如实标"它在想"还是"它在写"） */
+export interface LlmDelta {
+  kind: LlmDeltaKind
+  text: string
+}
+
 export interface LlmApi {
   /** 密钥从哪来（env / file / none）——**不给值**，只给来源 */
   readonly source: CredentialSource
@@ -325,9 +341,10 @@ export interface LlmApi {
      *
      * 为什么要有：agent 说话是老师判断"它在干什么"的主要依据，而一次调用可能十几秒没有输出——
      * 那十几秒里界面是死的（用户："要能实时浅字看到最后几个输出"）。
-     * 回调只用于**显示**：真正的判定仍然只看最终 reply（R2 不变）。
+     * 回调只用于**显示**：真正的判定仍然只看最终 reply（R2 不变）；
+     * `think` 那一路更是**不进任何记录**——它不是模型的结论，只是它此刻在想的事。
      */
-    onDelta?: (text: string) => void,
+    onDelta?: (delta: LlmDelta) => void,
   ): Promise<LlmReply>
 }
 

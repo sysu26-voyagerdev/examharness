@@ -98,12 +98,52 @@ describe('流式（SSE）', () => {
         frame({ choices: [{ delta: { content: '想。' } }] }),
         'data: [DONE]\n\n',
       ]),
-      (text) => seen.push(text),
+      (delta) => seen.push(delta.text),
     )
 
     expect(seen.join('')).toBe('我在想。')
     expect(reply.content).toBe('我在想。')
     expect(reply.toolCalls).toHaveLength(0)
+  })
+
+  it('**它在想**与**它在写**分开回调：思考那一路不混进正文，也不进返回值', async () => {
+    const seen: { kind: string; text: string }[] = []
+    const reply = await readStream(
+      stream([
+        // 真实形状：带工具的回合里，reasoning_content 先来一大段，正文随后才出现
+        frame({ choices: [{ delta: { role: 'assistant', reasoning_content: 'The teacher wants' } }] }),
+        frame({ choices: [{ delta: { reasoning_content: ' a multiple-choice item.' } }] }),
+        frame({ choices: [{ delta: { content: '我先看一下' } }] }),
+        frame({ choices: [{ delta: { content: '这类题的问法。' } }] }),
+        'data: [DONE]\n\n',
+      ]),
+      (delta) => seen.push(delta),
+    )
+
+    // 两路各自连续、顺序不乱：想完再写
+    expect(seen).toEqual([
+      { kind: 'think', text: 'The teacher wants' },
+      { kind: 'think', text: ' a multiple-choice item.' },
+      { kind: 'say', text: '我先看一下' },
+      { kind: 'say', text: '这类题的问法。' },
+    ])
+    // 思考不是结论：正文里不许带上它（它只用于界面显示，记录只认走完的那一步）
+    expect(reply.content).toBe('我先看一下这类题的问法。')
+  })
+
+  it('只吐思考、还没吐正文时也要回调（这十几秒以前是整段丢掉的）', async () => {
+    const seen: string[] = []
+    const reply = await readStream(
+      stream([frame({ choices: [{ delta: { reasoning_content: 'Let me check the graph first.' } }] }), 'data: [DONE]\n\n']),
+      (delta) => {
+        expect(delta.kind).toBe('think')
+        seen.push(delta.text)
+      },
+    )
+
+    expect(seen.join('')).toBe('Let me check the graph first.')
+    // 这一回合没有正文：reply.content 照样是 null（不许拿思考当正文回给调用方）
+    expect(reply.content).toBeNull()
   })
 
   it('工具调用的参数是**分片**来的：必须按 index 拼回去（拼错就成了半截 JSON）', async () => {
@@ -122,7 +162,7 @@ describe('流式（SSE）', () => {
   it('一段被切开（半截 JSON）也不会把整条流带崩', async () => {
     const whole = frame({ choices: [{ delta: { content: '好。' } }] })
     const seen: string[] = []
-    const reply = await readStream(stream([whole.slice(0, 12), whole.slice(12)]), (text) => seen.push(text))
+    const reply = await readStream(stream([whole.slice(0, 12), whole.slice(12)]), (delta) => seen.push(delta.text))
     // 切开那一半解析不了就跳过——但正文不能因此丢掉（宁可少显示一段，也不能让这轮挂掉）
     expect(reply.content === null || reply.content === '好。').toBe(true)
     expect(seen.length).toBeLessThanOrEqual(1)

@@ -10,6 +10,7 @@ import type {
   QuestionType,
   BlueprintRow,
   Item,
+  LlmDelta,
   LlmMessage,
   LlmToolSpec,
   WorkbenchApi,
@@ -823,7 +824,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         },
       ],
       undefined,
-      (text) => this.broadcastDelta('改这一道', text),
+      (delta) => this.broadcastDelta('改这一道', delta),
     )
     const parsed = parseJsonObject(reply.content)
     const stem = typeof parsed?.stem === 'string' ? parsed.stem : undefined
@@ -874,7 +875,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           { role: "user", content: JSON.stringify({ 老师的话: request, 可以用的知识点: learned }) },
         ],
         undefined,
-        (piece) => this.broadcastDelta("理解这句话", piece),
+        (delta) => this.broadcastDelta("理解这句话", delta),
       );
       parsed = parseJsonObject(reply.content);
     } catch (error) {
@@ -1092,8 +1093,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   }
 
   /** 把模型的流式输出转成事件（界面那小块浅字就是它）：不落库，只用来"看见它在写什么" */
-  private broadcastDelta(label: string, text: string): void {
-    this.ctx.emit("llm:delta", { runId: "", label, text, workspace: "" });
+  private broadcastDelta(label: string, delta: LlmDelta): void {
+    this.ctx.emit("llm:delta", { runId: "", label, kind: delta.kind, text: delta.text, workspace: "" });
   }
 
   /** 让执笔者写题面（单独一层：并行调用时才不会被 lint 当成"循环里等"） */
@@ -1180,7 +1181,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         },
       ],
       undefined,
-      (text) => this.broadcastDelta("写题面", text),
+      (delta) => this.broadcastDelta("写题面", delta),
     );
     const parsed = parseJsonObject(reply.content);
     const stem = typeof parsed?.stem === "string" ? parsed.stem : undefined;
@@ -1340,12 +1341,14 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         state.steps += 1;
         // agent 循环天然串行：下一步做什么取决于上一步的回复
         // oxlint-disable-next-line no-await-in-loop
-        const reply = await this.ctx.llm.chat(messages, this.tools(), (text) => {
+        const reply = await this.ctx.llm.chat(messages, this.tools(), (delta) => {
           // **它在写什么，实时说给界面**（不落库：落库的只有走完的那一步）
+          // kind 一路带到界面：在想就标"它在想"、在写就标"它在写"——合成一段就等于把"它在想"冒充成"它说的话"
           this.ctx.emit("llm:delta", {
             runId: state.id,
             label: "它说",
-            text,
+            kind: delta.kind,
+            text: delta.text,
             workspace: workspace?.name ?? "",
           });
         });

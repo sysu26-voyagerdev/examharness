@@ -1,5 +1,5 @@
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { CredentialSource, LlmApi, LlmMessage, LlmReply, LlmToolCall, LlmToolSpec } from '@examharness/core'
+import type { CredentialSource, LlmApi, LlmDelta, LlmMessage, LlmReply, LlmToolCall, LlmToolSpec } from '@examharness/core'
 import { expandEnv } from '@examharness/core'
 import z from 'schemastery'
 
@@ -156,7 +156,7 @@ export class LlmService extends Service implements LlmApi {
   async chat(
     messages: readonly LlmMessage[],
     tools?: readonly LlmToolSpec[],
-    onDelta?: (text: string) => void,
+    onDelta?: (delta: LlmDelta) => void,
   ): Promise<LlmReply> {
     if (!this.configured) throw new Error('未配置模型密钥：在设置页填，或设环境变量 EXAMHARNESS_API_KEY')
     const active = this.effective()
@@ -185,7 +185,7 @@ export class LlmService extends Service implements LlmApi {
     model: string,
     messages: readonly LlmMessage[],
     tools?: readonly LlmToolSpec[],
-    onDelta?: (text: string) => void,
+    onDelta?: (delta: LlmDelta) => void,
   ): Promise<LlmReply> {
     const payload = buildPayload({ ...this.config, model }, messages, tools)
     // 有人在看就流式：一次调用常常十几秒没输出，那段时间界面不该是死的
@@ -212,10 +212,18 @@ export class LlmService extends Service implements LlmApi {
  *
  * 只认 `data:` 行，遇到 `[DONE]` 收工；工具调用的参数是**分片**来的，
  * 必须按 index 拼回去（拼错了工具就带着半截 JSON 被调用——这是流式最容易踩的坑）。
+ *
+ * **两路分开回调**（`delta.reasoning_content` → `think`，`delta.content` → `say`）：
+ * 一个带工具的回合里，模型常常先想十几秒、再动手，这段时间流里**只有** `reasoning_content`。
+ * 以前只认 `content`，那十几秒就被整段丢掉——界面上那一块于是"根本不存在"，
+ * 而老师看到的却是状态行说"在做"（真实量过：前 14 个采样点、约 25 秒，实时区都是空的）。
+ *
+ * 思考**不进 reply**：它是模型的过程，不是结论（记录只认走完的那一步，见 ADR-0038）。
+ * 返回值里只有 `content` 与 `toolCalls`，这条边界靠类型就守住了。
  */
 export async function readStream(
   body: ReadableStream<Uint8Array>,
-  onDelta: (text: string) => void,
+  onDelta: (delta: LlmDelta) => void,
 ): Promise<LlmReply> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
@@ -226,13 +234,20 @@ export async function readStream(
   const handle = (chunk: string): void => {
     const choice = (JSON.parse(chunk) as {
       choices?: {
-        delta?: { content?: string | null; tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[] }
+        delta?: {
+          content?: string | null
+          /** 思考那一路（DeepSeek 系）：**只有**它先到，正文随后才来 */
+          reasoning_content?: string | null
+          tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[]
+        }
       }[]
     }).choices?.[0]
     const delta = choice?.delta
+    if (delta?.reasoning_content !== undefined && delta.reasoning_content !== null && delta.reasoning_content !== '')
+      onDelta({ kind: 'think', text: delta.reasoning_content })
     if (delta?.content !== undefined && delta.content !== null && delta.content !== '') {
       content += delta.content
-      onDelta(delta.content)
+      onDelta({ kind: 'say', text: delta.content })
     }
     for (const call of delta?.tool_calls ?? []) {
       const index = call.index ?? 0
