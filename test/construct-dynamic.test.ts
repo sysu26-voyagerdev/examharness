@@ -363,7 +363,10 @@ afterEach(async () => {
   rmSync(workdir, { recursive: true, force: true })
 })
 
-describe('agent 在运行时制作新题型', () => {
+describe('agent 在运行时制作新题型', { timeout: 30_000 }, () => {
+  // 这一组每条都要起一个子进程做隔离验收（正常 ~2 秒）：默认 5 秒超时在机器忙的时候会假失败
+  // （真实踩过：并行跑测试时偶发超时，看起来像产品坏了，其实是测试太紧）
+
   it('外部题型模块被验收、注册，然后真的出题并过闸门入库', async () => {
     writeModule('linear-inequality', GOOD_MODULE)
     const ctx = await boot()

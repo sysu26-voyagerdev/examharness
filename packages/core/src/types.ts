@@ -146,6 +146,15 @@ export interface Figure {
 export interface EvidenceEntry {
   pass: boolean
   detail?: string
+  /**
+   * **判定规则的版本**：闸门加了新判据就 +1。
+   *
+   * 为什么要有：题一旦入库，重组卷时会直接复用（R3：不重跑）。可闸门的判据会变——
+   * 真实踩过：图形闸门补上"题面说'如图'就必须有图"之后，库里 124 道"如图但没有图"的题
+   * 照样躺在卷子上，因为它们当年被签过字，而"签过字"只看了闸门的**名字**。
+   * 记版本之后，判据一升级，旧签字自动失效、旧题自动重新送审（要么补图，要么被拦下）。
+   */
+  rule?: number
 }
 
 export type Evidence = Readonly<Record<string, EvidenceEntry>>
@@ -195,7 +204,14 @@ export interface BlueprintRow extends SlotSpec {
 
 /** 命题蓝图 = 双向细目表 */
 export interface Blueprint {
-  paper: { title: string; totalScore: number; minutes: number; className: string }
+  paper: {
+    title: string
+    totalScore: number
+    minutes: number
+    className: string
+    /** 卷头下面要不要印"学校/班级/姓名/学号"那一行（真卷子都要，默认印） */
+    studentFields?: boolean
+  }
   blueprint: readonly BlueprintRow[]
   constraints: {
     /** 未学知识，硬禁用 */
@@ -221,7 +237,11 @@ export type MaybePromise<T> = T | Promise<T>
  * 用途：组卷时优先避开这张会话已经用过的结构——
  * "原创"不只是换数字，新卷子应该在结构上也是新的（否则每次都是差不多的题拼来拼去）。
  */
-export function shapeOf(item: { instance: { givens: readonly string[]; goal: string; goals?: readonly string[] } }): string {
-  const parts = [...item.instance.givens, ...(item.instance.goals ?? [item.instance.goal])]
+export function shapeOf(item: {
+  instance: { givens?: readonly string[]; goal?: string; goals?: readonly string[] }
+}): string {
+  // 容错：这句话会被用在"agent 现写的题型刚造出来的题"上——那种题的字段完整性由构造边界负责把关
+  // （见 assertConstructed），这里少一个字段就少一份输入，不能因此把整轮带崩。
+  const parts = [...(item.instance.givens ?? []), ...(item.instance.goals ?? (item.instance.goal === undefined ? [] : [item.instance.goal]))]
   return parts.join('|').replace(/\d+(?:\.\d+)?/g, '#')
 }

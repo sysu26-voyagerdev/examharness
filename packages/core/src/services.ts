@@ -64,14 +64,32 @@ export interface BankApi {
    * 有了名单，复用就能要求"这道题的证据里**每一道现役闸门**都签过字"，
    * 签不全的题会被重新送进闸门链（要么补签，要么被拦下）。
    */
-  declareGate?(name: string): void
-  /** 现役闸门名单（按报到顺序） */
-  gates?(): readonly string[]
+  declareGate?(name: string, rule?: number): void
+  /** 现役闸门名单（按报到顺序）+ 各自的判定规则版本 */
+  gates?(): readonly BankGate[]
   /**
    * 人工终审签字（R4）：把题目从 needs_review / draft 变成 verified 并留痕。
    * **系统不得自己调用它**——只有老师在界面上点"我确认"才会走到这里。
    */
   confirm(id: string, by: string): Item | undefined
+}
+
+/** 现役闸门：名字 + 判定规则版本（规则升级 = 旧签字失效，旧题要重新送审） */
+export interface BankGate {
+  name: string
+  rule: number
+}
+
+/**
+ * 这道题的签字还有效吗：**每个现役闸门都签过，而且签的是现在这版规则**。
+ * 缺一个、或者规则版本对不上，都要重新送审（见 EvidenceEntry.rule）。
+ */
+export function signedByAll(item: Item, gates: readonly BankGate[]): boolean {
+  return gates.every((gate) => {
+    const entry = item.evidence[gate.name]
+    if (entry === undefined) return false
+    return (entry.rule ?? 1) === gate.rule
+  })
 }
 
 /** 知识点图谱：既是 agent 的设计工具（引导），也是闸门（越界检测） */
@@ -854,6 +872,8 @@ export interface SessionLogEntry {
 
 export interface SessionApi {
   list(): readonly SessionMeta[]
+  /** 某张卷子有哪些版本（起始页的卡片要显示"多少道、多少分、最后哪一版"） */
+  versionsOf?(id: string): readonly PaperVersion[]
   /** 会话分组 */
   groups(): readonly SessionGroup[]
   /**

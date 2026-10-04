@@ -25,6 +25,9 @@ export const name = 'verify-roundtrip'
  * 两者必须一致——不然"每道现役闸门都签过字"永远对不上，旧题就没法复用（真踩过）。
  */
 export const evidenceKey = 'roundtrip'
+
+/** 判定规则的版本：加一条新判据就 +1（旧签字随即失效，旧题重新送审） */
+export const rule = 1
 export const inject = ['llm']
 
 export const Config = z.object({
@@ -236,7 +239,7 @@ function checkTexLayer(item: Item): Verdict | undefined {
 
 export function apply(ctx: Context, config: RoundTripConfig): void {
   // 报到：题库据此判断"旧题能不能直接复用"（新闸门上线后，旧题要被重新验一遍）
-  ctx.get('bank')?.declareGate?.(evidenceKey)
+  ctx.get('bank')?.declareGate?.(evidenceKey, rule)
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict

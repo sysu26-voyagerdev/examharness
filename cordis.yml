@@ -17,7 +17,7 @@
       - corpus/extracted
     defaultClassName: 初三(2)班
     defaultProgress: 九上·22章·第2课时
-    defaultBlueprint: seed/blueprint.json
+    defaultBlueprint: seed/blueprints/空白.json
     corpusWordingMax: 0.55
     corpusNumbersMin: 0.8
     bankMaxSimilarity: 0.85
@@ -263,7 +263,7 @@
   config:
     path: data/sessions.json
     logPath: data/session-log.json
-    defaultBlueprint: seed/blueprint.json
+    defaultBlueprint: seed/blueprints/空白.json
     defaultClass: 初三(2)班
     defaultProgress: 九上·22章·第2课时
 

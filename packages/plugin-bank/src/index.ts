@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import type { BankApi, Item, SearchQuery, SubmitResult, Verdict } from '@examharness/core'
+import type { BankApi, BankGate, Item, SearchQuery, SubmitResult, Verdict } from '@examharness/core'
 import z from 'schemastery'
 
 /**
@@ -125,14 +125,20 @@ export class BankService extends Service implements BankApi {
   }
 
   /** 现役闸门名单：闸门挂载时自己来报到（见 BankApi.declareGate 的说明） */
-  private readonly gateNames: string[] = []
+  private readonly gateNames: BankGate[] = []
 
-  declareGate(gate: string): void {
-    if (!this.gateNames.includes(gate)) this.gateNames.push(gate)
+  declareGate(gate: string, rule = 1): void {
+    const found = this.gateNames.find((entry) => entry.name === gate)
+    // 同一个闸门重复报到：取**较大的版本**（同一进程里重挂载时不会把版本改回去）
+    if (found !== undefined) {
+      found.rule = Math.max(found.rule, rule)
+      return
+    }
+    this.gateNames.push({ name: gate, rule })
   }
 
-  gates(): readonly string[] {
-    return [...this.gateNames]
+  gates(): readonly BankGate[] {
+    return this.gateNames.map((entry) => ({ ...entry }))
   }
 
   all(): readonly Item[] {

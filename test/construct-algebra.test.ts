@@ -17,6 +17,8 @@ import * as scopePlugin from '@examharness/plugin-verify-scope'
 import * as symbolicPlugin from '@examharness/plugin-verify-symbolic'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { learnedClosure } from './helpers/learned.js'
+import { assertConstructed } from '@examharness/plugin-construct-parabola'
+import { shapeOf } from '@examharness/core'
 
 /**
  * 新构造器（代数与统计）的验收测试。**这里是"严格验收"的落点**：
@@ -221,5 +223,27 @@ describe('几何构造器：图要诚实', () => {
       // 标注 5 与实际 4 不符，也必须被记成 false
       expect(values.some(([key, value]) => key.startsWith('标注') && value === false)).toBe(true)
     })
+  })
+})
+
+describe('构造边界：agent 写的题型返回坏数据也不许把整轮带崩', () => {
+  it('少字段 → 抛一句能看懂的话（不是 undefined is not iterable）', () => {
+    const bad = { id: 'x', prose: { stem: '题' }, instance: {}, witness: {} } as unknown as Item
+    expect(() => assertConstructed(bad, 'probe/x')).toThrow(/不合契约，缺：/)
+    expect(() => assertConstructed(bad, 'probe/x')).toThrow(/instance\.givens/)
+  })
+
+  it('该有的都在 → 原样返回', () => {
+    const good = {
+      id: 'it-1-1-ab',
+      prose: { stem: '已知…', answerText: '2', solution: ['步骤'] },
+      instance: { givens: ['a'], goal: '求 a', params: { a: 1 } },
+      witness: { answer: '2' },
+    } as unknown as Item
+    expect(assertConstructed(good, 'k')).toBe(good)
+  })
+
+  it('结构指纹对缺字段的题也容错（它不该是崩点）', () => {
+    expect(shapeOf({ instance: {} } as unknown as Item)).toBe('')
   })
 })

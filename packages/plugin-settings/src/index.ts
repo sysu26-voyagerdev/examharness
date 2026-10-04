@@ -47,7 +47,8 @@ export const Config = z.object({
   corpusDirs: z.array(z.string()).default([]),
   defaultClassName: z.string().default('初三(2)班'),
   defaultProgress: z.string().default(''),
-  defaultBlueprint: z.string().default('seed/blueprint.json'),
+  /** 新卷的默认设定：空的（老师说一句要什么，agent 先给设计） */
+  defaultBlueprint: z.string().default('seed/blueprints/空白.json'),
   corpusWordingMax: z.number().default(0.55),
   corpusNumbersMin: z.number().default(0.8),
   bankMaxSimilarity: z.number().default(0.85),

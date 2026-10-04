@@ -22,6 +22,18 @@ import type { SessionMetaView } from '../types.js'
  * 原来那套侧边栏（工作台/题库/会话/资料/设置）是把系统的插件分类摆给老师看，已经删掉。
  */
 
+/** "2 天前""今天 15:40"：列表里给的是"最后动过"，不是创建时间 */
+function whenOf(iso: string): string {
+  const then = new Date(iso).getTime()
+  const minutes = Math.round((Date.now() - then) / 60000)
+  if (Number.isNaN(then)) return ''
+  if (minutes < 2) return '刚刚'
+  if (minutes < 60) return `${String(minutes)} 分钟前`
+  if (minutes < 60 * 24) return `${String(Math.round(minutes / 60))} 小时前`
+  if (minutes < 60 * 24 * 7) return `${String(Math.round(minutes / 1440))} 天前`
+  return new Date(iso).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
+}
+
 const TEMPLATES: readonly { label: string; text: string }[] = [
   { label: '课后作业', text: '出一份课后作业：' },
   { label: '单元测验', text: '出一份单元测验：' },
@@ -129,7 +141,10 @@ export function StartPage(): React.JSX.Element {
             .toReversed()
             .map((meta) => (
               <Card key={meta.id} variant="outlined">
-                <CardActionArea onClick={() => open(meta)} sx={{ px: 2, py: 1.25 }}>
+                <CardActionArea
+                  onClick={() => open(meta)}
+                  sx={{ px: 2, py: 1.25, '&:hover .rename': { opacity: 1 } }}
+                >
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     {renaming === meta.id ? (
                       <TextField
@@ -157,12 +172,21 @@ export function StartPage(): React.JSX.Element {
                     {meta.id === session?.meta.id && <Chip size="small" label="正在改" />}
                     {meta.frozen && <Chip size="small" color="warning" variant="outlined" label="已定稿" />}
                     <Box sx={{ flex: 1 }} />
-                    <Typography variant="caption" color="text.secondary">
-                      {meta.className}
+                    <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                      {meta.items === undefined
+                        ? '还没有题'
+                        : `${String(meta.items)} 道 · ${String(meta.totalScore ?? 0)} 分${
+                            (meta.gaps ?? 0) > 0 ? ` · 还缺 ${String(meta.gaps ?? 0)} 道` : ''
+                          }`}
+                    </Typography>
+                    <Typography variant="caption" color="text.disabled" sx={{ whiteSpace: 'nowrap', minWidth: 66, textAlign: 'right' }}>
+                      {whenOf(meta.updatedAt ?? meta.createdAt)}
                     </Typography>
                     <Tooltip title="改卷名">
                       <IconButton
                         size="small"
+                        className="rename"
+                        sx={{ opacity: 0, transition: 'opacity .12s' }}
                         onClick={(event) => {
                           event.stopPropagation()
                           setRenaming(meta.id)

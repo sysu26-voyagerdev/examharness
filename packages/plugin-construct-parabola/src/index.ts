@@ -82,7 +82,7 @@ export class ConstructService extends Service implements ConstructApi {
     const kind = this.pick(slot)
     const factory = kind === undefined ? undefined : this.factories.get(kind)
     if (factory === undefined) throw new Error(`没有可用于题位 ${slot.key} 的构造器`)
-    return factory(slot, seed)
+    return assertConstructed(factory(slot, seed), kind ?? '（默认题型）')
   }
 
   /** 题位能用哪些构造器（按注册顺序；组装时挨个试，小题过不了分量闸门就换下一个） */
@@ -96,7 +96,7 @@ export class ConstructService extends Service implements ConstructApi {
   generateWith(slot: BlueprintRow, seed: number, kind: string): Item {
     const factory = this.factories.get(kind)
     if (factory === undefined) throw new Error(`没有叫 ${kind} 的构造器`)
-    return factory(slot, seed)
+    return assertConstructed(factory(slot, seed), kind)
   }
 
   /**
@@ -109,6 +109,35 @@ export class ConstructService extends Service implements ConstructApi {
     }
     return undefined
   }
+}
+
+/**
+ * **构造边界**：agent 现写的题型也是"不可信输入"，它返回什么都要先检查。
+ *
+ * 为什么必须检查：真实事故——一个 agent 写的题型返回的题少了 `givens`，
+ * 后面的结构指纹（shapeOf）一对它迭代就抛 `undefined is not iterable`，
+ * 整轮 agent 直接崩掉，老师只看到"这一轮出错停下了"，
+ * 既不知道是哪道题、也不知道该改什么。检查放在这里，错误就变成一句能改的话。
+ */
+export function assertConstructed(item: Item, kind: string): Item {
+  const missing: string[] = []
+  if (item === null || typeof item !== 'object') throw new Error(`题型 ${kind} 没有返回一道题`)
+  if (typeof item.id !== 'string' || item.id === '') missing.push('id')
+  if (typeof item.prose?.stem !== 'string' || item.prose.stem === '') missing.push('prose.stem')
+  if (typeof item.prose?.answerText !== 'string') missing.push('prose.answerText')
+  if (!Array.isArray(item.prose?.solution)) missing.push('prose.solution（字符串数组）')
+  if (item.witness === undefined || typeof item.witness.answer !== 'string') missing.push('witness.answer')
+  if (!Array.isArray(item.instance?.givens)) missing.push('instance.givens（字符串数组）')
+  if (typeof item.instance?.goal !== 'string' && !Array.isArray(item.instance?.goals)) {
+    missing.push('instance.goal 或 instance.goals')
+  }
+  if (item.instance?.params === undefined || typeof item.instance.params !== 'object') {
+    missing.push('instance.params（对象）')
+  }
+  if (missing.length > 0) {
+    throw new Error(`题型 ${kind} 造出来的题不合契约，缺：${missing.join('、')}`)
+  }
+  return item
 }
 
 /** 抛物线构造器：先定根，再导出一致的事实 */

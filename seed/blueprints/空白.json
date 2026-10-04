@@ -1,0 +1,13 @@
+{
+  "paper": {
+    "title": "（还没定卷名）",
+    "totalScore": 0,
+    "minutes": 0,
+    "className": "",
+    "studentFields": true
+  },
+  "blueprint": [],
+  "constraints": {
+    "forbidKnowledge": []
+  }
+}

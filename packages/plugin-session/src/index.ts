@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
-import { fnv1a, shapeOf } from '@examharness/core'
+import { fnv1a, shapeOf, signedByAll } from '@examharness/core'
 import type {
   Blueprint,
   BlueprintInfo,
@@ -36,7 +36,14 @@ export const inject = ['bank', 'paper', 'construct']
 
 export const Config = z.object({
   path: z.string().default('data/sessions.json'),
-  defaultBlueprint: z.string().default('seed/blueprint.json'),
+  /**
+   * 新卷的默认设定：**空的**。
+   *
+   * 为什么不是某一份现成蓝图：老师新开一张卷子时，设定该由他和 agent 一起定
+   *（他说一句要什么，agent 先给设计），而不是悄悄塞给他"中考模拟 24 题"那一套——
+   * 那等于系统替他做了决定，他拿到的第一屏就已经不是他要的东西。
+   */
+  defaultBlueprint: z.string().default('seed/blueprints/空白.json'),
   defaultClass: z.string().default('初三(2)班'),
   defaultProgress: z.string().default(''),
 })
@@ -201,6 +208,11 @@ export class SessionService extends Service implements SessionApi {
 
   versions(): readonly PaperVersion[] {
     return this.record().versions
+  }
+
+  /** 某张卷子的版本列表（只读；起始页靠它显示题数/分值/最后改动） */
+  versionsOf(id: string): readonly PaperVersion[] {
+    return this.store.sessions.find((record) => record.meta.id === id)?.versions ?? []
   }
 
   latest(): PaperVersion | undefined {
@@ -384,8 +396,8 @@ export class SessionService extends Service implements SessionApi {
     }
 
     // 没被现役闸门签过字的旧题：重新送审（通过才放，不通过就把原因说清）
-    const unsigned = (this.ctx.bank.gates?.() ?? []).filter((gate) => item.evidence[gate] === undefined)
-    if (unsigned.length > 0) {
+    // **签过字还不够**：签的必须是现在这版规则（规则升级过就要重新送审，见 EvidenceEntry.rule）
+    if (!signedByAll(item, this.ctx.bank.gates?.() ?? [])) {
       const verdict = await this.ctx.bank.submit(item)
       if (!verdict.ok) return { ok: false, reason: `${verdict.verdict.gate}：${verdict.verdict.reason}` }
     }

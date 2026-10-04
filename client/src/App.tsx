@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import AccountTreeOutlinedIcon from '@mui/icons-material/AccountTreeOutlined'
 import DarkModeOutlinedIcon from '@mui/icons-material/DarkModeOutlined'
-import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined'
+import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import LightModeOutlinedIcon from '@mui/icons-material/LightModeOutlined'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import Alert from '@mui/material/Alert'
 import AppBar from '@mui/material/AppBar'
+import Avatar from '@mui/material/Avatar'
 import Box from '@mui/material/Box'
+import Button from '@mui/material/Button'
 import Chip from '@mui/material/Chip'
 import IconButton from '@mui/material/IconButton'
 import LinearProgress from '@mui/material/LinearProgress'
@@ -62,6 +64,8 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
   /** 同时在跑的界面动作（可以有多个：一边在改题，一边在存设定） */
   const [busy, setBusy] = useState<readonly string[]>([])
   const [error, setError] = useState('')
+  /** 做成了一件事的一句话（自动消失） */
+  const [notice, setNotice] = useState('')
   /** 正在跑的那一轮属于哪个会话：判定事件跟着它走（用 ref，避免闭包拿到旧值） */
   const runningNow = useRef('')
 
@@ -96,7 +100,11 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       },
       (signal) => {
         if (signal.kind === 'started') {
-          if (signal.parent === undefined) runningNow.current = signal.workspace
+          // 新的一轮：实时区从头开始（上一轮的尾巴不该留着）
+          if (signal.parent === undefined) {
+            runningNow.current = signal.workspace
+            setStream(null)
+          }
           setRuns((previous) => [
             ...previous.filter((run) => run.id !== signal.runId),
             {
@@ -104,6 +112,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
               goal: signal.goal,
               steps: 0,
               workspace: signal.workspace,
+              since: Date.now(),
               ...(signal.label === undefined ? {} : { label: signal.label }),
               ...(signal.parent === undefined ? {} : { parent: signal.parent }),
             },
@@ -111,8 +120,6 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         }
         if (signal.kind === 'busy') {
           setDoing({ what: signal.what, agent: signal.agent, at: Date.now() })
-          // 换工具了：上一段流已经变成"走完的一步"，实时区从头开始
-          setStream(null)
         }
         if (signal.kind === 'delta') {
           // **模型正在写什么**：累积一小段，界面用浅字实时显示（约 3 行就滚）
@@ -123,13 +130,15 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
           )
         }
         if (signal.kind === 'step') {
-          setStream(null)
           setRuns((previous) =>
             previous.map((run) => (run.id === signal.runId ? { ...run, steps: Math.max(run.steps, signal.step) } : run)),
           )
         }
         if (signal.kind === 'done') {
-          if (signal.parent === undefined && signal.workspace === runningNow.current) runningNow.current = ''
+          if (signal.parent === undefined && signal.workspace === runningNow.current) {
+            runningNow.current = ''
+            setStream(null)
+          }
           setRuns((previous) => previous.filter((run) => run.id !== signal.runId))
           setDoing((current) => (current?.agent === signal.runId ? null : current))
         } else setLog((previous) => appendSignal(previous, signal))
@@ -220,6 +229,11 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       busyWith,
       error,
       clearError: () => setError(''),
+      notice,
+      notify: (text: string) => {
+        setNotice(text)
+        window.setTimeout(() => setNotice((current) => (current === text ? '' : current)), 4000)
+      },
       reload,
       guard,
       startRun,
@@ -228,7 +242,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       stopRun,
       go: goTo,
     }),
-    [session, sessions, state, settings, kb, log, running, elsewhere, doing, stream, live, busy, busyWith, error, reload, guard, startRun, ask, interject, stopRun, goTo, runs, mine],
+    [session, sessions, state, settings, kb, log, running, elsewhere, doing, stream, live, busy, busyWith, error, notice, reload, guard, startRun, ask, interject, stopRun, goTo, runs, mine],
   )
 
   // 旧地址（工作台/题库/会话/资料）还有人存着书签：一律落到"这张卷子"或起始页
@@ -245,11 +259,21 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <AppBar position="static" color="inherit" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
         <Toolbar sx={{ gap: 1.5, minHeight: 56 }}>
-          <Tooltip title="所有出题">
-            <IconButton onClick={() => goTo('')} disabled={page === ''}>
-              <HomeOutlinedIcon />
-            </IconButton>
-          </Tooltip>
+          {/*
+            起始页是**根**：这里是标识，不是返回键（返回键在根上没有去处）。
+            进了卷子之后，它才是"返回"：设置/体检 → 回到卷子；卷子 → 回到所有出题。
+          */}
+          {page === 'start' ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 0.5 }}>
+              <Avatar sx={{ width: 26, height: 26, bgcolor: 'primary.main', fontSize: 14 }}>题</Avatar>
+            </Box>
+          ) : (
+            <Tooltip title={page === 'paper' ? '所有出题' : '回到卷子'}>
+              <IconButton onClick={() => goTo(page === 'paper' ? '' : 'paper')}>
+                <ArrowBackIcon />
+              </IconButton>
+            </Tooltip>
+          )}
           <Typography variant="subtitle1" sx={{ fontWeight: 700, whiteSpace: 'nowrap' }}>
             命题组
           </Typography>
@@ -287,7 +311,22 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         {busy.length > 0 && <LinearProgress />}
       </AppBar>
 
-      <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', minWidth: 0, overflow: 'hidden' }}>
+      {/*
+        内容区：**按页面决定谁滚**。
+        · 一张卷子：三栏各自滚（这一层必须 overflow hidden，否则整页跟着滚，"分栏"就散了）；
+        · 起始页/体检/设置：这几页本身就是长文档，这一层要 auto——不然设置页滚不动（真实踩过）。
+      */}
+      <Box
+        sx={{
+          flex: 1,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          overflowY: page === 'paper' ? 'hidden' : 'auto',
+          overflowX: 'hidden',
+        }}
+      >
         {page === 'paper' ? (
           <PaperPage />
         ) : page === 'graph' ? (
@@ -300,6 +339,17 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
           <StartPage />
         )}
       </Box>
+
+      <Snackbar
+        open={notice !== ''}
+        autoHideDuration={4000}
+        onClose={() => setNotice('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="success" variant="filled" onClose={() => setNotice('')} sx={{ maxWidth: 640 }}>
+          {notice}
+        </Alert>
+      </Snackbar>
 
       <Snackbar
         open={error !== ''}

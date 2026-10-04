@@ -28,6 +28,8 @@ export interface ItemView {
   constructor: string
   seed: number
   evidence: Readonly<Record<string, EvidenceView>>
+  /** 检查过期：闸门后来加了判据，这道题的签字是旧规则的（要重新过一遍） */
+  stale?: boolean
   /** 以下字段只有 /api/session 的题位带 */
   difficulty?: readonly [number, number]
   slotKey?: string
@@ -59,7 +61,7 @@ export interface BlueprintInfoView {
 }
 
 export interface BlueprintView {
-  paper: { title: string; totalScore: number; minutes: number; className: string }
+  paper: { title: string; totalScore: number; minutes: number; className: string; studentFields?: boolean }
   blueprint: readonly BlueprintRowView[]
   constraints: { forbidKnowledge: readonly string[] }
 }
@@ -94,6 +96,12 @@ export interface SlotChangeView {
 }
 
 export interface SessionMetaView {
+  /** 列表接口附带：这一张卷子的现状（多少道、多少分、还缺几道、最后动过） */
+  items?: number
+  totalScore?: number
+  version?: number
+  gaps?: number
+  updatedAt?: string
   id: string
   title: string
   className: string
@@ -368,6 +376,8 @@ export interface RunAgentView {
   goal: string
   steps: number
   workspace: string
+  /** 这一轮什么时候开始的（界面显示"整轮已用时"；它不是服务端字段，是收到 started 时记的） */
+  since?: number
   label?: string
   /** 谁派的（没有 = 老师直接起的一轮） */
   parent?: string

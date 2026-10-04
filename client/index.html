@@ -8,6 +8,29 @@
   /* 整屏就是布局本身：不许出现页面级滚动条（卷面自己的滚动在它那一栏里）。
      用 flex 撑满而不是 calc(100vh - 头部高度)——后者一改头部高度就多出一条滚动条（真实踩过）。 */
   html, body, #root { height: 100%; margin: 0; overflow: hidden; }
+
+  /*
+    打印：**只印那张卷子**。
+    关键是"放开祖先的滚动"——卷子住在可滚动的三栏里，浏览器只会印可见的部分，
+    所以打印时必须把每一层的 overflow 与固定高度都解开（真踩过：打出来只有半页）。
+  */
+  @media print {
+    html, body, #root { height: auto !important; overflow: visible !important; background: #fff !important; }
+    * { overflow: visible !important; }
+    [data-print-hide], header, nav { display: none !important; }
+    /* 卷子自己：白纸、满宽、没有边框与阴影 */
+    [data-paper] {
+      border: 0 !important;
+      box-shadow: none !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      max-width: none !important;
+      background: #fff !important;
+      color: #000 !important;
+    }
+    [data-paper] * { color: #000 !important; background: transparent !important; }
+    @page { size: A4; margin: 16mm 14mm; }
+  }
 </style>
 </head>
 <body>

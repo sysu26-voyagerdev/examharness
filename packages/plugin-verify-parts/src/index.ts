@@ -25,6 +25,9 @@ export const name = 'verify-parts'
  */
 export const evidenceKey = 'parts'
 
+/** 判定规则的版本：加一条新判据就 +1（旧签字随即失效，旧题重新送审） */
+export const rule = 1
+
 export const Config = z.object({
   /** 多少分以上的解答题至少两问 */
   twoPartFrom: z.number().default(8),
@@ -54,7 +57,7 @@ export function requiredParts(item: Item, config: PartsConfig): number {
 
 export function apply(ctx: Context, config: PartsConfig): void {
   // 报到：题库据此判断"旧题能不能直接复用"（新闸门上线后，旧题要被重新验一遍）
-  ctx.get('bank')?.declareGate?.(evidenceKey)
+  ctx.get('bank')?.declareGate?.(evidenceKey, rule)
   ctx.on('item:verify', async (item, next) => {
     const verdict: Verdict = await next()
     if (!verdict.pass) return verdict

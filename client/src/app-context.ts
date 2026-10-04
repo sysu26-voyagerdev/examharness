@@ -46,6 +46,9 @@ export interface AppValue {
   busyWith: (label: string) => boolean
   error: string
   clearError: () => void
+  /** 做成了也说一句（"已放进第 3 题"这种）：点了没反应最让人心里没底 */
+  notice: string
+  notify: (text: string) => void
   reload: () => Promise<void>
   guard: (label: string, action: () => Promise<void>) => Promise<void>
   startRun: (goal: string) => Promise<void>
