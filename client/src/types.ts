@@ -318,8 +318,14 @@ export type RunSignal =
       label?: string
       parent?: string
     }
-  /** 模型正在写什么（流式，一小段一小段来）：只用于"实时浅字"那一块 */
-  | { kind: 'delta'; runId: string; label: string; text: string; workspace: string }
+  /**
+   * 模型正在写什么（流式，一小段一小段来）：只用于"实时浅字"那一块。
+   *
+   * `part` 是**哪一路**：`think` = 它在想，`say` = 它写给人看的正文，
+   * `use` = 它在给某个工具填参数（这时 `text` 是工具名）。
+   * 这里叫 part 而不是 kind：信号自己的判别字段就是 `kind`，同名会互相盖掉。
+   */
+  | { kind: 'delta'; runId: string; label: string; part: StreamPart; text: string; workspace: string }
 
 /** 题库页的投影：筛出来的题 + 分面（各知识点/题型/状态各有多少道） */
 export interface BankView {
@@ -389,19 +395,48 @@ export interface RunAgentView {
 export type RunDoneView = RunView['stopped']
 
 /**
+ * 实时区的两路：`think` = 它在想，`say` = 它写给人看的正文。
+ *
+ * 为什么非要分两路：带工具的回合里模型**先想十几秒**，那段时间流里只有 `think`。
+ * 合成一路就等于把"它正在想的事"当成"它写出来的话"摆在老师眼前。
+ */
+export type StreamLaneKind = 'think' | 'say'
+
+/**
+ * 流式信号里的"这一段是哪一路"：两路之外还有 `use`——
+ * **它开始给工具填参数了**（名字先到）。参数是给程序看的 JSON（真实跑过十几秒），
+ * 界面不摆内容，只把"它在准备哪一步"说出来；这一路的 `text` 是**工具名**。
+ */
+export type StreamPart = StreamLaneKind | 'use'
+
+/** 一路输出的尾巴（实时区显示的就是它） */
+export interface StreamLane {
+  /** 这一路是**谁在写**（主线"它说"、执笔者的"写题面"…）：换一路就另起一段 */
+  label: string
+  text: string
+  /** 这一路最后一次吐字的时间（没在吐字时，界面显示最近动过的那一路） */
+  at: number
+}
+
+/**
  * 模型写出来的字（agent 栏底部那一块实时区）。
  *
- * 它是**这一轮**的流，不是记录：`live` 表示"此刻还在吐字"（工具在跑、模型在想的时候不是）。
+ * 它是**这一轮**的流，不是记录：记录只认走完的 `run:step`。
+ * 两路各自留尾巴，`live` 说"此刻在吐字的是哪一路"（null = 这一轮此刻没在吐字）。
  * 文本只留尾巴（几十 KB 的正文塞进一条 76px 高的框里没有意义，而且每来一段都要重排）。
  */
 export interface StreamView {
-  /** 这一次输出是谁在写（主线"它说"、执笔者的"写题面"…）：换人另起一段 */
-  label: string
-  text: string
-  /** 最后一次吐字的时间 */
-  at: number
-  /** 此刻还在写吗（界面据此说"它在写"还是"它刚才说的"） */
-  live: boolean
+  think: StreamLane | null
+  say: StreamLane | null
+  /** 此刻在吐字的是哪一路；null = 这一轮里它此刻没在吐字（工具在跑、或者轮到别人） */
+  live: StreamLaneKind | null
+  /**
+   * 它正在**给哪个工具填参数**（`use` 那一路带过来的工具名）。
+   *
+   * 参数不摆出来（那是给程序看的 JSON，真实跑过十几秒），但这一段必须说出来：
+   * 不说的话，那十几秒里那一块的字一动不动，看着像死了。
+   */
+  preparing: string | null
 }
 
 export interface LiveEvent {

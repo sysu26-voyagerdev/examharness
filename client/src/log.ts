@@ -1,4 +1,4 @@
-import type { LiveEvent, LogEntryView, RunSignal } from './types.js'
+import type { LiveEvent, LogEntryView, RunSignal, StreamLaneKind } from './types.js'
 
 /**
  * 会话记录是**一条时间线**：老师说的话、agent 干的每一步、闸门的判定，按顺序排在一起。
@@ -72,6 +72,125 @@ export const TOOL_LABEL: Readonly<Record<string, string>> = {
 export function toolLabel(tool: string | undefined): string {
   if (tool === undefined || tool === '') return ''
   return TOOL_LABEL[tool] ?? ''
+}
+
+/**
+ * 实时区那一行标签：**如实说这是"它想的"还是"它写给人看的"**。
+ *
+ * 想那一路（`think`）是英文的、还常比正文长，一个带工具的回合里最先动起来的就是它；
+ * 要是标成"它在写"，老师会以为题面就长那样（真实踩过：那一块整段是英文思考）。
+ */
+const SAY_LIVE: Readonly<Record<string, string>> = {
+  写题面: '它在写题面…',
+  改这一道: '它在改题面…',
+  理解这句话: '它在琢磨你的话…',
+}
+/** 同一个动作，说成"刚才做过" */
+const SAY_DONE: Readonly<Record<string, string>> = {
+  写题面: '它刚写的题面',
+  改这一道: '它刚改的题面',
+  理解这句话: '它刚在琢磨你的话',
+}
+/** 它此刻吐的是**按格式填的字段**：说的是"它在填什么"，不是"它在说什么" */
+const DATA_LIVE: Readonly<Record<string, string>> = {
+  写题面: '它在填题面数据…',
+  改这一道: '它在填题面数据…',
+  理解这句话: '它在把你的话定成一道题…',
+}
+const DATA_DONE: Readonly<Record<string, string>> = {
+  写题面: '它刚填的题面数据',
+  改这一道: '它刚填的题面数据',
+  理解这句话: '它刚把你的话定成了一道题',
+}
+
+/**
+ * @param lane 服务端给的"哪一路输出"（它说 / 写题面 / 改这一道 / 理解这句话），
+ *             `use` 时这里传的是**工具的人话名**（"写题型"）
+ * @param data 这一路此刻吐的是**按格式填的字段**（题面 stem / 答案 / 解析），不是给人读的句子
+ */
+export function streamLabel(kind: StreamLaneKind | 'use', lane: string, live: boolean, data: boolean): string {
+  // 它在给工具填参数：参数不摆出来（给程序看的 JSON），但要说出来它在准备哪一步
+  if (kind === 'use') return live ? `它在准备「${lane}」…` : `它刚才在准备「${lane}」`
+  if (kind === 'think') return live ? '它在想…' : '它刚想的'
+  if (data) return live ? (DATA_LIVE[lane] ?? '它在写数据…') : (DATA_DONE[lane] ?? '它刚写了些数据')
+  if (live) return SAY_LIVE[lane] ?? '它在写…'
+  return SAY_DONE[lane] ?? '它刚才写的'
+}
+
+/**
+ * 实时区这一段该摆什么字。
+ *
+ * 模型写题面时是按约定**填字段**的（`{"stem":"…","answerText":"…"}`），流里于是是一坨 JSON。
+ * 原样摆在最显眼的地方，老师看到的是 `{"knowledge":…`——这不是"它在说话"，这是数据，
+ * 而且里面**能读的部分正是题面本身**。
+ *
+ * 做法：把 JSON 里**字段的值**按顺序挑出来（键丢掉），原字不动、只做挑选与解码
+ * （`\\angle` 解成 `\angle`、`\"` 解成 `"`——这是这个字符串本来的样子，不是改写）。
+ * 尾巴上还没闭合的那一段也留着：它正是"此刻在写的那几个字"。
+ *
+ * 一个值都挑不出（半截的键名、纯数字的参数）就退回原文：
+ * 宁可让老师看见原文，也不许编一句、也不许把这一块留空。
+ * `data` 一并交回去：界面据此把标签从"它在写"改成"它在填题面数据"。
+ */
+export function streamBody(text: string): { body: string; data: boolean } {
+  if (!looksLikeData(text)) return { body: text, data: false }
+  const values = fieldValues(text)
+  if (values.length > 0) return { body: values.slice(-12).join('\n'), data: true }
+  const runs = text.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef0-9A-Za-z%．，。、；：？！（）·—…\-+=×÷°<>]+/gu) ?? []
+  // 只取最后几段：这一块看的是"此刻在写哪儿"，不是把整份数据摊开
+  const readable = runs.map((run) => run.trim()).filter((run) => /[\u4e00-\u9fff]/u.test(run) && run.length >= 2).slice(-12)
+  const joined = readable.join('\n')
+  return joined.trim() === '' ? { body: text, data: true } : { body: joined, data: true }
+}
+
+/** 一段（可能是半截的）JSON 里的**字段值**：`"键":` 后面那些字符串，按出现顺序 */
+function fieldValues(text: string): string[] {
+  const values: string[] = []
+  const literal = /"((?:[^"\\]|\\.)*)"/gu
+  let scanned = 0
+  for (;;) {
+    const match = literal.exec(text)
+    if (match === null) break
+    scanned = literal.lastIndex
+    // 后面跟着冒号的是**键**（`"stem":`）：键是给程序看的，不摆给老师
+    if (/^\s*:/.test(text.slice(literal.lastIndex))) continue
+    const value = unescapeJson(match[1] ?? '')
+    if (keepValue(value)) values.push(value)
+  }
+  // 尾巴上还没闭合的那一段：正在写的字，最该看见的就是它
+  const rest = text.slice(scanned)
+  const open = rest.indexOf('"')
+  if (open >= 0) {
+    const partial = unescapeJson(rest.slice(open + 1))
+    const before = rest.slice(0, open).trimEnd()
+    // 这个引号开的是**值**还是**键**？跟在 `:` 或 `[` 后面就一定是值；
+    // 跟在 `{`、`,` 后面分不清（半截的键名 `{"knowle` 就是这么来的），
+    // 那就要求它已经写出了一个汉字——键名不会长汉字，而人看的字会。
+    const isValue = before.endsWith(':') || before.endsWith('[') || /[\u4e00-\u9fff]/u.test(partial)
+    if (isValue && keepValue(partial)) values.push(partial)
+  }
+  return values
+}
+
+/** 这一段值值不值得摆出来：空串、孤零零一个标点（半截 JSON 断开留下的）就不摆 */
+function keepValue(value: string): boolean {
+  const trimmed = value.trim()
+  return trimmed !== '' && (trimmed.length >= 2 || /[\p{L}\p{N}]/u.test(trimmed))
+}
+
+/** 按 JSON 的规矩把转义还原（只还原，不加工） */
+function unescapeJson(text: string): string {
+  return text.replace(/\\(u[0-9a-fA-F]{4}|.)/gu, (all, escape: string) => {
+    if (escape.startsWith('u')) return String.fromCharCode(Number.parseInt(escape.slice(1), 16))
+    const table: Readonly<Record<string, string>> = { n: '\n', t: '\t', r: '\r', b: '\b', f: '\f' }
+    return table[escape] ?? escape
+  })
+}
+
+/** 这段是不是"按格式填的字段"：出现 `"键":` 这种结构，或者整段以 { [ 开头 */
+function looksLikeData(text: string): boolean {
+  const head = text.trimStart()
+  return /"[\w\u4e00-\u9fff]*"\s*:/.test(text) || head.startsWith('{') || head.startsWith('[')
 }
 
 /**

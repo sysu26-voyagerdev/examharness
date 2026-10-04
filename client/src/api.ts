@@ -20,6 +20,7 @@ import type {
   SessionsView,
   SettingsView,
   StateView,
+  StreamPart,
   VersionView,
   WorkspaceView,
 } from './types.js'
@@ -330,8 +331,24 @@ export function subscribe(
   }
   // 模型正在写什么（流式）：一小段一小段来，界面拿它显示最下面那一块浅字
   const delta = (message: MessageEvent<string>): void => {
-    const payload = JSON.parse(message.data) as { runId: string; label: string; text: string; workspace?: string }
-    onRun({ kind: 'delta', ...payload, workspace: payload.workspace ?? '' })
+    const payload = JSON.parse(message.data) as {
+      runId: string
+      label: string
+      /** 哪一路：它在想 / 它在写 / 它在给工具填参数（**不是**信号名，信号名由下面显式写死） */
+      kind: StreamPart
+      text: string
+      workspace?: string
+    }
+    // 载荷里的 `kind` 与信号的 `kind` 撞名：这里逐个字段写出来，**不要**用 `...payload` 展开——
+    // 展开会把 `kind: 'delta'` 盖成 think/say/use，界面就再也认不出这是一条流式增量
+    onRun({
+      kind: 'delta',
+      runId: payload.runId,
+      label: payload.label,
+      part: payload.kind,
+      text: payload.text,
+      workspace: payload.workspace ?? '',
+    })
   }
   // "正要做什么"：工具一开跑就推，界面据此显示"正在…（已 n 秒）"
   const busy = (message: MessageEvent<string>): void => {

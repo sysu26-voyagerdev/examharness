@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import SendIcon from '@mui/icons-material/Send'
 import StopCircleOutlinedIcon from '@mui/icons-material/StopCircleOutlined'
 import Box from '@mui/material/Box'
@@ -9,8 +9,8 @@ import TextField from '@mui/material/TextField'
 import Tooltip from '@mui/material/Tooltip'
 import Typography from '@mui/material/Typography'
 import { Timeline } from './components.js'
-import { toolLabel } from './log.js'
-import type { LogEntryView, RunAgentView, RunDoneView, StreamView } from './types.js'
+import { streamBody, streamLabel, toolLabel } from './log.js'
+import type { LogEntryView, RunAgentView, RunDoneView, StreamLane, StreamLaneKind, StreamView } from './types.js'
 
 /**
  * agent 栏：**看得见、插得进、不挡人**。
@@ -18,8 +18,8 @@ import type { LogEntryView, RunAgentView, RunDoneView, StreamView } from './type
  * 三块，从上到下：
  *   1. **状态行**：在做还是空闲、正在干什么、多久了、第几步——一眼的事实，没有转圈动画；
  *   2. **记录**：DSH 式分块（正在跑的展开，过去的折成一行），可滚动；
- *   3. **实时区**：固定高度、浅字，永远显示"最后几条输出"——
- *      不用翻记录也能看到它此刻在做什么（用户："最好能实时浅字看到最后几个输出，固定长度"）。
+ *   3. **实时区**：固定高度、浅字，显示**模型此刻在写的字的尾巴**——
+ *      它在想就显示想的那一路、在写就显示正文那一路，标签如实区分。
  *
  * 输入框**任何时候都能用**：它空闲就开一轮，它正忙就把话插进去（下一步生效）。
  * agent 不该把老师锁在一边。
@@ -40,6 +40,23 @@ function useSeconds(since: number | undefined): number {
     return () => window.clearInterval(timer)
   }, [since])
   return since === undefined ? 0 : Math.max(0, Math.round((now - since) / 1000))
+}
+
+/**
+ * 这一刻该显示哪一路。
+ *
+ * 正在吐字就显示那一路；没在吐字（工具在跑、这一步走完了）就显示**最近动过的那一路**——
+ * 时间只会往前走，所以它不会在两路之间来回跳（"一会儿有一会儿没"正是这样来的）。
+ */
+function showLane(stream: StreamView): { lane: StreamLane; kind: StreamLaneKind } | null {
+  if (stream.live !== null) {
+    const lane = stream[stream.live]
+    if (lane !== null) return { lane, kind: stream.live }
+  }
+  const { think, say } = stream
+  if (think === null) return say === null ? null : { lane: say, kind: 'say' }
+  if (say === null) return { lane: think, kind: 'think' }
+  return say.at >= think.at ? { lane: say, kind: 'say' } : { lane: think, kind: 'think' }
 }
 
 export function AgentPane({
@@ -69,26 +86,44 @@ export function AgentPane({
   // 计时用**整轮**起点：以前用"当前工具的开始时间"，每换一个工具就跳回 0:00（看着像卡住）
   const elapsed = useSeconds(running?.since)
   const stepSeconds = useSeconds(doing?.at)
-  const writing = stream !== null && stream.live
+  const shown = stream === null ? null : showLane(stream)
+  const live = stream !== null && stream.live !== null
+  /** 它此刻吐的是不是"按格式填的字段"（题面数据）：换标签、只摆能读的字（见 log.ts） */
+  const picked = shown === null ? { body: '', data: false } : shown.kind === 'say' ? streamBody(shown.lane.text) : { body: shown.lane.text, data: false }
   /**
-   * 流的尾巴：**贴着底往下滚**——它不是"看历史"的地方，是"看它此刻在写什么"的地方。
-   * 但老师自己往上翻的时候就别再拽他下去（松手的意思是"我在看这里"），
-   * 那时右上角给一个"回到最新"，点一下继续跟着滚。
+   * 摆出来的字要过**和记录同一张表**（`translate` → `humanLine`）：
+   * 模型想事情的时候会把工具名和题号原样写出来（`quick_question`、`S4-1`），
+   * 那些词不该出现在老师眼前——实时区不是"看源码的窗口"，它就是给人看的那一层。
+   */
+  const body = translate(picked.body)
+  /**
+   * 标签：正在给工具填参数时说"它在准备哪一步"（参数本身不摆出来，那是给程序看的 JSON）；
+   * 其余时候如实说这是"它想的"还是"它写给人看的"。
+   */
+  const preparing = stream?.preparing ?? null
+  const label =
+    shown === null
+      ? ''
+      : preparing !== null
+        ? streamLabel('use', toolLabel(preparing) || '下一步', true, false)
+        : streamLabel(shown.kind, shown.lane.label, live, picked.data)
+  /**
+   * 流的尾巴：**永远贴着底**——它不是"看历史"的地方，是"看它此刻在写什么"的地方。
+   *
+   * 所以这里**没有**"回到最新"：那是记录区的（那儿才是回看的地方）。
+   * 老师在这个小框里往上翻，下一次吐字就把他带回底部——想读刚滚过去的字，
+   * 上面那条记录一直在（记录区自己有自己的"回到最新"）。
    */
   const tailRef = useRef<HTMLDivElement | null>(null)
-  const tailStuck = useRef(true)
-  const [tailFree, setTailFree] = useState(false)
-  const followTail = (): void => {
+  /**
+   * 贴底要在**画出来之前**做（useLayoutEffect）：
+   * 流是每 ~100 毫秒长一截，用 useEffect 的话浏览器会先把没贴底的那一帧画出来、再跳下去——
+   * 看着就是一直"抖"。
+   */
+  useLayoutEffect(() => {
     const box = tailRef.current
-    if (box === null) return
-    box.scrollTop = box.scrollHeight
-    tailStuck.current = true
-    setTailFree(false)
-  }
-  useEffect(() => {
-    const box = tailRef.current
-    if (box !== null && tailStuck.current) box.scrollTop = box.scrollHeight
-  }, [stream?.text])
+    if (box !== null) box.scrollTop = box.scrollHeight
+  }, [body])
 
   return (
     <Box sx={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', bgcolor: 'background.paper' }}>
@@ -115,9 +150,10 @@ export function AgentPane({
         {running !== null && (
           <>
             <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0, flex: 1 }}>
+              {/* 「在想下一步」现在是**字面意思**：想的那一路真在流，下面那一块就在动 */}
               {doing !== null
                 ? `${toolLabel(doing.what) || '做一步'}（${String(stepSeconds)} 秒）`
-                : writing
+                : stream?.live === 'say'
                   ? '在写字'
                   : '在想下一步'}
             </Typography>
@@ -167,14 +203,18 @@ export function AgentPane({
         />
       </Box>
 
-      {/* **模型写出来的字**：这一块是"它正在说的那句话"的尾巴——
-          它在写就滚着往下长；它没写（模型在想、工具在跑）就静静摆着刚才那句。
-          模型还没吐字时这一块**不存在**（不摆一个空框子假装在工作）。
+      {/* **模型写出来的字**：这一块是"它此刻在写的那句话"的尾巴——
+          它在想就是想的那一路（如实标出来），在写正文就是正文那一路，一直滚着往下长。
+          没在吐字的那些秒（工具在跑）也**不清**，只把标签从"它在写…"改成"它刚才写的"：
+          轮内不清，就不会"一会儿有一会儿没"。
+          模型一个字都还没吐时这一块**不存在**（不摆一个空框子假装在工作）。
           （用户："显示的是 LLM 的实时流的末尾，所以应该是持续滚动的，而不是解析出的步骤"） */}
-      {stream !== null && stream.text.trim() !== '' && (
+      {shown !== null && body.trim() !== '' && (
         <Box
           data-print-hide
           data-agent="stream"
+          data-lane={shown.kind}
+          data-live={live ? '1' : '0'}
           sx={{
             px: 1.5,
             py: 0.75,
@@ -188,27 +228,11 @@ export function AgentPane({
             gap: 0.75,
           }}
         >
-          <Typography variant="caption" color="text.disabled" sx={{ whiteSpace: 'nowrap', pt: 0.1 }}>
-            {stream.live ? '它在写…' : '它刚才写的'}
+          <Typography variant="caption" color="text.disabled" sx={{ whiteSpace: 'nowrap', pt: 0.1 }} data-agent="stream-label">
+            {label}
           </Typography>
-          {tailFree && (
-            <Button
-              size="small"
-              onClick={followTail}
-              sx={{ minWidth: 0, px: 0.5, py: 0, fontSize: 12, whiteSpace: 'nowrap', alignSelf: 'flex-start' }}
-            >
-              回到最新
-            </Button>
-          )}
           <Box
             ref={tailRef}
-            onScroll={() => {
-              const box = tailRef.current
-              if (box === null) return
-              const free = box.scrollHeight - box.scrollTop - box.clientHeight > 8
-              tailStuck.current = !free
-              setTailFree(free)
-            }}
             sx={{
               flex: 1,
               minWidth: 0,
@@ -224,10 +248,11 @@ export function AgentPane({
                 whiteSpace: 'pre-wrap',
                 overflowWrap: 'anywhere',
                 lineHeight: 1.6,
-                color: 'text.secondary',
+                // 想的那一路再浅一档：一眼分得出"这是它在想"和"这是它写下来的字"
+                color: shown.kind === 'think' ? 'text.disabled' : 'text.secondary',
               }}
             >
-              {stream.text}
+              {body}
             </Typography>
           </Box>
         </Box>

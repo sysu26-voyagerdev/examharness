@@ -35,6 +35,7 @@ import type {
   RunDoneView,
   SettingsView,
   StateView,
+  StreamPart,
   StreamView,
 } from './types.js'
 
@@ -43,6 +44,15 @@ import type {
  * 全部塞进一个 76px 高的框里既看不见、又越来越慢（每来一段都要重排一次）。
  */
 const STREAM_TAIL = 2000
+
+/**
+ * 流式增量攒多久画一次。
+ *
+ * 提供方是**一个词一帧**地吐（实测 `reasoning_content` 就是这样），一个回合几千帧；
+ * 每帧都 setState 就是每帧重排一次界面（连着记录区一起白重渲染）。
+ * 攒到下一帧再一起画：老师看到的仍然是滚着的尾巴，界面一秒只画十次左右。
+ */
+const DELTA_FLUSH_MS = 100
 function tail(text: string): string {
   return text.length > STREAM_TAIL ? text.slice(text.length - STREAM_TAIL) : text
 }
@@ -70,10 +80,15 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
    * 模型**写出来的字**（流式累积）：界面底部那一块浅字显示它的尾巴。
    *
    * 它不是记录，也不是"解析出来的步骤"——它是模型此刻/刚才说的原话。
-   * 清空的时机只有两个：**老师起新一轮**、**这一轮结束**。
-   * 换工具、走完一步都不清：以前每走完一步就清一次，那一块于是"一会儿有一会儿没"。
+   * 两路分开存（想 / 写）：带工具的回合里模型先想十几秒，那段时间只有"想"这一路在动，
+   * 以前只接正文，于是那几十秒那一块是空的。
+   * 清空的时机只有两个：**老师起新一轮**、**这一轮结束**——
+   * 轮内不清（换了工具、走完一步都不清），"一会儿有一会儿没"就不会再发生。
    */
   const [stream, setStream] = useState<StreamView | null>(null)
+  /** 还没画出去的流式增量（一个词一帧地来，攒一批再画，见 DELTA_FLUSH_MS） */
+  const pendingDelta = useRef<readonly { part: StreamPart; label: string; text: string }[]>([])
+  const flushTimer = useRef<number | null>(null)
   /** 上一轮是怎么结束的：出错就得在状态行说一句，不然记录一滚就没人知道它栽了 */
   const [lastStop, setLastStop] = useState<RunDoneView | null>(null)
   const [live, setLive] = useState<readonly LiveEvent[]>([])
@@ -120,6 +135,59 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
     setRuns(active)
   }, [])
 
+  /**
+   * 把攒着的流式增量一次画出去（两路各自累积，只留尾巴）。
+   *
+   * 换了一路输出（主线的"它说" → 执笔者的"写题面"）另起一段：两段不同的输出连成一句就是假话。
+   * 想 ↔ 写也分开放的：想那一路是英文的、还比正文长，混在一起老师会以为题面就长那样。
+   * `use`（它在给工具填参数）不是文字、不攒：它只把"正在准备哪一步"写进 `preparing`。
+   */
+  const flushDelta = useCallback(() => {
+    if (flushTimer.current !== null) {
+      window.clearTimeout(flushTimer.current)
+      flushTimer.current = null
+    }
+    const batch = pendingDelta.current
+    pendingDelta.current = []
+    if (batch.length === 0) return
+    const at = Date.now()
+    setStream((previous) => {
+      let next: StreamView = previous ?? { think: null, say: null, live: null, preparing: null }
+      for (const piece of batch) {
+        if (piece.part === 'use') {
+          // 开始给某个工具填参数了：不再是"它在写"（参数是给程序看的，不摆出来）
+          next = { ...next, preparing: piece.text }
+          continue
+        }
+        // 不认识的那一路（服务端比界面新）：**宁可少显示，也不能把界面搞崩**
+        if (piece.part !== 'think' && piece.part !== 'say') continue
+        const lane = next[piece.part]
+        const text = lane === null ? piece.text : lane.label === piece.label ? lane.text + piece.text : `${lane.text}\n${piece.text}`
+        next = { ...next, [piece.part]: { label: piece.label, text: tail(text), at }, live: piece.part, preparing: null }
+      }
+      return next
+    })
+  }, [])
+
+  /** 来了一个增量：先攒着，下一批到点再画（见 DELTA_FLUSH_MS） */
+  const queueDelta = useCallback(
+    (piece: { part: StreamPart; label: string; text: string }) => {
+      pendingDelta.current = [...pendingDelta.current, piece]
+      if (flushTimer.current === null) flushTimer.current = window.setTimeout(flushDelta, DELTA_FLUSH_MS)
+    },
+    [flushDelta],
+  )
+
+  /** 这一轮结束（或老师起新一轮）：攒着的丢掉，那一块整块收起——这是轮与轮之间的切换，不是闪 */
+  const dropStream = useCallback(() => {
+    pendingDelta.current = []
+    if (flushTimer.current !== null) {
+      window.clearTimeout(flushTimer.current)
+      flushTimer.current = null
+    }
+    setStream(null)
+  }, [])
+
   useEffect(() => {
     void reload().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
     void syncRuns().catch(() => undefined)
@@ -135,7 +203,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
           // **老师起的新一轮**：实时区从头开始（上一轮的尾巴不该留着）。
           // 子任务（帮手）不算新一轮——它只是这一轮里派出去的活，实时区不该跟着它清掉。
           if (signal.parent === undefined) {
-            setStream(null)
+            dropStream()
             setLastStop(null)
           }
           setRuns((previous) => [
@@ -153,21 +221,25 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         }
         if (signal.kind === 'busy') {
           setDoing({ what: signal.what, agent: signal.agent, at: Date.now() })
-          // 工具在跑：模型这会儿没在吐字（但已经写出来的字留着，见下面的 delta）
-          setStream((previous) => (previous === null || !previous.live ? previous : { ...previous, live: false }))
+          // 工具在跑：模型这会儿没在吐字（但已经写出来的字留着，只把标签改成"刚才写的"）。
+          // 攒着的那几帧先落地：不然标签说"刚写的"、尾巴还停在更早的地方。
+          // `preparing` 到这儿也该收了：工具真的开跑了，状态行会显示它在跑哪个工具
+          flushDelta()
+          setStream((previous) =>
+            previous === null ? previous : { ...previous, live: null, preparing: null },
+          )
         }
         if (signal.kind === 'delta') {
-          // **模型正在写什么**：累积成"这一轮的流"，实时区只显示它的尾巴。
-          // 换了一次输出（主线的"它说" → 执笔者的"写题面"）就另起一段，接着往下滚。
-          setStream((previous) => {
-            const before = previous === null ? '' : previous.label === signal.label ? previous.text : `${previous.text}\n`
-            return { label: signal.label, text: tail(before + signal.text), at: Date.now(), live: true }
-          })
+          // **模型正在写什么**：两路各自累积，实时区只显示它的尾巴
+          queueDelta({ part: signal.part, label: signal.label, text: signal.text })
         }
         if (signal.kind === 'step') {
           // 走完一步：模型的话已经变成记录里的一行，但实时区**不清**（清了就是"一会儿有一会儿没"）；
           // 只把"正在写"改成"刚才写的"，老师一眼看得出这一块是不是活的
-          setStream((previous) => (previous === null || !previous.live ? previous : { ...previous, live: false }))
+          flushDelta()
+          setStream((previous) =>
+            previous === null ? previous : { ...previous, live: null, preparing: null },
+          )
           // 这一步做完了：状态行不该继续挂着刚才那个工具在跳秒（接下来是模型在想事情）
           setDoing((current) => (current === null || current.agent !== (signal.agent ?? signal.runId) ? current : null))
           setRuns((previous) =>
@@ -176,7 +248,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         }
         if (signal.kind === 'done') {
           if (signal.parent === undefined && signal.workspace === runningNow.current) {
-            setStream(null)
+            dropStream()
             setLastStop(signal.stopped)
           }
           setRuns((previous) => previous.filter((run) => run.id !== signal.runId))
@@ -186,8 +258,13 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       // 连上（或重连）事件流：把"现在到底有没有在跑"重新问一遍服务端
       () => void syncRuns().catch(() => undefined),
     )
-    return unsubscribe
-  }, [reload, syncRuns])
+    return () => {
+      unsubscribe()
+      // 卸载时别把定时器留着：它还会往一个已经不存在的组件里画字
+      if (flushTimer.current !== null) window.clearTimeout(flushTimer.current)
+      flushTimer.current = null
+    }
+  }, [reload, syncRuns, flushDelta, queueDelta, dropStream])
 
   /**
    * "判定该记在谁名下"（哪个会话、哪一轮）**从 `running` 推出来**，不靠事件里记一下。
@@ -237,8 +314,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
     [guard, running],
   )
 
-  /** 跟它说一件事：空闲就开一轮，在忙就插进去（不挡老师） */
-  const ask = useCallback(
+  /** 跟它说一件事：空闲就开一轮，在忙就插进去（不挡老师） */  const ask = useCallback(
     async (goal: string): Promise<'run' | 'interjected'> => {
       if (running !== null) {
         await interject(goal)
