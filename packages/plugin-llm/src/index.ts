@@ -213,13 +213,15 @@ export class LlmService extends Service implements LlmApi {
  * 只认 `data:` 行，遇到 `[DONE]` 收工；工具调用的参数是**分片**来的，
  * 必须按 index 拼回去（拼错了工具就带着半截 JSON 被调用——这是流式最容易踩的坑）。
  *
- * **两路分开回调**（`delta.reasoning_content` → `think`，`delta.content` → `say`）：
+ * **三路分开回调**（`delta.reasoning_content` → `think`，`delta.content` → `say`，
+ * `delta.tool_calls` 的工具名 → `use`）：
  * 一个带工具的回合里，模型常常先想十几秒、再动手，这段时间流里**只有** `reasoning_content`。
  * 以前只认 `content`，那十几秒就被整段丢掉——界面上那一块于是"根本不存在"，
  * 而老师看到的却是状态行说"在做"（真实量过：前 14 个采样点、约 25 秒，实时区都是空的）。
  *
  * 思考**不进 reply**：它是模型的过程，不是结论（记录只认走完的那一步，见 ADR-0038）。
- * 返回值里只有 `content` 与 `toolCalls`，这条边界靠类型就守住了。
+ * 返回值里只有 `content` 与 `toolCalls`（`use` 那一路只是"名字先到了"的通知，
+ * 拼好的参数照样在 `toolCalls` 里），这条边界靠类型就守住了。
  */
 export async function readStream(
   body: ReadableStream<Uint8Array>,
@@ -252,9 +254,14 @@ export async function readStream(
     for (const call of delta?.tool_calls ?? []) {
       const index = call.index ?? 0
       const current = calls.get(index) ?? { id: '', name: '', args: '' }
+      const toolName = call.function?.name ?? current.name
+      // 名字先到、参数一个字一个字地流：**这一段是"它在准备哪一步"**。
+      // 参数（一坨 JSON，真实跑过十几秒）不摆给老师看，但得说一声"它在写这一步要用的东西"——
+      // 不说的话，那十几秒里界面上的字一动不动，看着像死了。
+      if (toolName !== '' && toolName !== current.name) onDelta({ kind: 'use', text: toolName })
       calls.set(index, {
         id: call.id ?? current.id,
-        name: call.function?.name ?? current.name,
+        name: toolName,
         args: current.args + (call.function?.arguments ?? ''),
       })
     }

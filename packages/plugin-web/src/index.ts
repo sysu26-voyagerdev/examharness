@@ -498,7 +498,7 @@ export function apply(ctx: Context, config: WebConfig): void {
   })
   /** 模型正在写什么：只推给界面实时显示，**不进记录**（记录只认走完的那一步） */
   ctx.on('llm:delta', ({ runId, label, kind, text, workspace }) => {
-    // kind（它在想 / 它在写）原样转发：少了它，界面只能把"想"也标成"写"——
+    // kind（它在想 / 它在写 / 它在准备哪一步）原样转发：少了它，界面只能把"想"也标成"写"——
     // 而"想"是英文的、还比正文长，标错了老师会以为题面就长那样
     broadcast('delta', { runId, label, kind, text, workspace: workspace === '' ? owner() : workspace })
   })

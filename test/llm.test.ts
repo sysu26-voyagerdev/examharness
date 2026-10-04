@@ -146,6 +146,25 @@ describe('流式（SSE）', () => {
     expect(reply.content).toBeNull()
   })
 
+  it('开始给工具填参数时报一次"它在准备哪一步"（参数本身不回调出去）', async () => {
+    const seen: { kind: string; text: string }[] = []
+    const reply = await readStream(
+      stream([
+        // 真实形状：名字先到，参数一个字一个字地流（写一整个题型模块能有十几秒）
+        frame({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'c1', function: { name: 'constructor_write', arguments: '' } }] } }] }),
+        frame({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":"con' } }] } }] }),
+        frame({ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: 'structors/x.mjs"' } }] } }] }),
+        'data: [DONE]\n\n',
+      ]),
+      (delta) => seen.push(delta),
+    )
+
+    // 只说一次名字（后面那些分片不再重复报）；这一段给界面用，**不是**模型写的字
+    expect(seen).toEqual([{ kind: 'use', text: 'constructor_write' }])
+    // 参数照样拼完整交给调用方（参数没丢，只是不摆给老师看）
+    expect(reply.toolCalls).toEqual([{ id: 'c1', name: 'constructor_write', arguments: '{"path":"constructors/x.mjs"' }])
+  })
+
   it('工具调用的参数是**分片**来的：必须按 index 拼回去（拼错就成了半截 JSON）', async () => {
     const reply = await readStream(
       stream([
