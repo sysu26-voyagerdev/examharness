@@ -13,29 +13,102 @@
 
 ---
 
-## How to run
+## 如何启动
+
+### 1. 准备环境
+
+安装 **Node.js 22.18 或更高版本**（推荐 Node.js 24 LTS）和 **pnpm**。没有 pnpm 时可运行：
+
+```bash
+npm install -g pnpm
+```
+
+以下命令都在仓库根目录执行，也就是 `package.json` 和 `cordis.yml` 所在的目录。
+Windows 可直接使用 PowerShell；读取 PDF、Word、Excel 或使用 OCR 时，还需要 Python 3，
+相关脚本使用 Bash 和 `.venv/bin/python3`，建议在 WSL 中安装环境并运行整个项目。
+
+### 2. 安装依赖并启动
 
 ```bash
 pnpm install
-pnpm venv       # 给 agent 建虚拟环境（读 PDF/Word/Excel 要用，装一次就够）
-pnpm ocr:lang   # 可选：下载中文 OCR 语言包（不需要 sudo）
-pnpm start      # 构建 + 起服务，界面在 http://<本机 IP>:8787/
+pnpm start
 ```
 
-模型密钥两种给法：界面「设置 → API 密钥」填。
-或者起服务前设环境变量 `EXAMHARNESS_API_KEY`（环境变量优先，界面上只读）。
+`pnpm start` 会先构建服务端和前端，再启动服务。终端出现「命题组已启动」后，
+在浏览器打开 **[http://localhost:8787/](http://localhost:8787/)**。保持终端运行，按 `Ctrl+C` 停止服务。
+
+后续启动仍可用 `pnpm start`；代码没有变化且已构建时，可直接运行 `node bin.js`。
+端口默认是 `8787`，需要修改时编辑 [`cordis.yml`](cordis.yml) 中 `web` 插件的 `config.port`，然后重启。
+
+### 3. 配置模型
+
+服务可以先启动，再在界面右上角「设置」中填写 **API 地址、模型名称、API 密钥**。
+API 地址应是 OpenAI 兼容接口的基础地址（例如 `https://api.openai.com/v1`），
+模型名称填写服务商提供的实际名称。配置完整后即可与 agent 协作出题。
+
+也可以在启动前通过环境变量提供配置。Windows PowerShell：
+
+```powershell
+$env:EXAMHARNESS_BASE_URL = "https://api.openai.com/v1"
+$env:EXAMHARNESS_MODEL = "你的模型名称"
+$env:EXAMHARNESS_API_KEY = "你的 API 密钥"
+pnpm start
+```
+
+macOS、Linux 或 WSL：
+
+```bash
+export EXAMHARNESS_BASE_URL="https://api.openai.com/v1"
+export EXAMHARNESS_MODEL="你的模型名称"
+export EXAMHARNESS_API_KEY="你的 API 密钥"
+pnpm start
+```
+
+环境变量提供的密钥优先于界面保存的密钥，界面中会显示为只读。
+界面保存的模型设置位于 `data/settings.json`，密钥单独存放在 `data/credentials.json`。
+
+### 可选：读取文档与 OCR
+
+在 macOS、Linux 或 WSL 中，安装 Python 3 后运行一次：
+
+```bash
+pnpm venv                    # 创建 .venv，安装 PDF、Word、Excel 读取依赖
+```
+
+扫描版 PDF 和图片还需要系统中安装 Tesseract，并运行：
+
+```bash
+pnpm venv:add pypdfium2       # 扫描版 PDF 转图片
+pnpm ocr:lang                # 下载简体、繁体、英文 OCR 语言包到 data/tessdata
+```
+
+### 开发模式
+
+安装依赖后，在第一个终端构建并启动后端：
+
+```bash
+pnpm build
+node bin.js
+```
+
+在第二个终端启动前端热更新：
+
+```bash
+pnpm dev:client
+```
+
+打开 **[http://localhost:5173/](http://localhost:5173/)**（以 Vite 实际输出的地址为准）。
+前端的 `/api` 请求会代理到 `8787`；修改后端端口时，还需同步修改
+[`client/vite.config.ts`](client/vite.config.ts) 中的代理地址。修改后端代码后，重新构建并重启后端。
 
 常用命令：
 
 ```bash
-pnpm check                                   # lint + tsc -b + 客户端类型检查 + vitest，提交前必须全绿
-pnpm dev:client                              # 前端热更（vite 5173，/api 代理到 8787），另开终端 node bin.js
-bash scripts/serve.sh restart                # 起停服务（带 PID 文件；不要用 pkill，会伤到自己）
+pnpm check                                  # lint + 类型检查 + vitest，提交前必须全绿
+bash scripts/serve.sh restart                # Linux / WSL 后台重启服务（需先 pnpm build）
 node scripts/graph-build.mjs                 # 重建知识图谱
-node scripts/shot.mjs <url> <out.png>        # 界面截图（CDP；chrome --screenshot 遇到 SSE 长连接不会返回）
+node scripts/shot.mjs <url> <out.png>         # 界面截图（CDP）
 ```
-
-依赖：Node 20+、pnpm、Python 3。
 
 ---
 
