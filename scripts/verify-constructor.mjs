@@ -218,10 +218,70 @@ function contractProblems(built) {
       }
     }
   }
-  if (built.figure !== undefined && (typeof built.figure !== 'object' || built.figure === null || Array.isArray(built.figure))) {
-    problems.push('figure 必须是对象（图形规范）')
+  if (built.figure !== undefined) {
+    for (const problem of figureProblems(built.figure)) problems.push(problem)
   }
   return problems
+}
+
+/**
+ * 图形规范（figureSpec）的结构检查：**在验收阶段就查图**。
+ *
+ * 为什么加：以前只查"figure 是不是对象"，于是"元素名写错 / 线段指向不存在的点 /
+ * 圆的圆心没定义"要等到 submit 时由图形闸门抛出来——agent 白跑几轮才知道哪里错，
+ * 而它最可能的错就是**猜错了字段名**（真实踩过：`{type:'geometry', elements:[...]}`）。
+ * 这里把话说清楚：缺什么字段、规范长什么样、哪个名字在 points 里找不到。
+ */
+function figureProblems(figure) {
+  const out = []
+  if (typeof figure !== 'object' || figure === null || Array.isArray(figure)) {
+    return ['figure 必须是对象（图形规范）：{ kind: "plane-geometry" | "function-graph", … }']
+  }
+  const kind = figure.kind
+  if (kind !== 'plane-geometry' && kind !== 'function-graph') {
+    return [`figure.kind 只能是 "plane-geometry"（平面几何）或 "function-graph"（函数图），现在是 ${JSON.stringify(kind)}；` + '不是 elements 数组那一套']
+  }
+  if (kind === 'function-graph') {
+    if (!Array.isArray(figure.quadratics) || figure.quadratics.length === 0) out.push('function-graph 要 quadratics: [{ a, b, c }]（至少一条抛物线）')
+    if (!Array.isArray(figure.domain) || figure.domain.length !== 2) out.push('function-graph 要 domain: [x1, x2]')
+    if (!Array.isArray(figure.points)) out.push('function-graph 要 points: [{ label, x, y }]（标注点，断言会核它们在不在曲线上）')
+    return out
+  }
+  const label = (point) => (typeof point === 'object' && point !== null ? point.label : undefined)
+  if (!Array.isArray(figure.points) || figure.points.length === 0) {
+    out.push('plane-geometry 要 points: [{ label, x, y }]（世界坐标，渲染器自己缩放）')
+    return out
+  }
+  if (figure.points.some((point) => typeof point !== 'object' || point === null || typeof label(point) !== 'string' || typeof point.x !== 'number' || typeof point.y !== 'number')) {
+    out.push('points 每一条都要是 { label: 字符串, x: 数字, y: 数字 }')
+  }
+  const names = new Set(figure.points.map(label))
+  if (!Array.isArray(figure.segments)) out.push('plane-geometry 要 segments: [{ from, to }]（两端写点名，例如 { from: "A", to: "B" }）')
+  else {
+    for (const segment of figure.segments) {
+      for (const side of ['from', 'to']) {
+        const name = segment?.[side]
+        if (!names.has(name)) out.push(`segments 里的 ${side}="${String(name)}" 不在 points 里（现有：${[...names].join('、') || '（空）'}）`)
+      }
+    }
+  }
+  for (const circle of figure.circles ?? []) {
+    if (!names.has(circle?.center)) out.push(`circles[].center="${String(circle?.center)}" 不在 points 里`)
+    if (typeof circle?.radius !== 'number' || !(circle.radius > 0)) out.push('circles[].radius 要是正数')
+  }
+  for (const mark of figure.rightAngles ?? []) {
+    for (const field of ['vertex', 'armA', 'armB']) {
+      if (!names.has(mark?.[field])) out.push(`rightAngles[].${field}="${String(mark?.[field])}" 不在 points 里（直角标记写顶点与两条边上的另一点）`)
+    }
+  }
+  for (const one of figure.labels ?? []) {
+    const parts = String(one?.of ?? '').split('-')
+    if (parts.length !== 2 || parts.some((part) => !names.has(part))) {
+      out.push(`labels[].of 要写成 "A-B" 两个点名（现在 ${JSON.stringify(one?.of)}）`)
+    }
+    if (typeof one?.text !== 'string') out.push('labels[].text 要是字符串（标注上写的字）')
+  }
+  return out
 }
 
 const problems = []

@@ -32,6 +32,9 @@ function render(tex: string, displayMode: boolean, mode: MathMode): string {
       throwOnError: true,
       // 不允许 \href / \includegraphics 之类能往外跑的东西
       trust: false,
+      // 关掉"字体里没有这个字符"的告警：`≌`、`⊙` 这类初中卷面天天用，
+      // 告警会把服务日志刷满（真实踩过：日志里几千行 No character metrics，排查时什么都看不见）。
+      // 真正的语法错误仍然由 throwOnError 抛出来。
       strict: false,
     })
   } catch (error) {

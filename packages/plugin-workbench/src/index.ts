@@ -412,6 +412,28 @@ const GAP_TOOL: LlmToolSpec = {
   parameters: { type: "object", properties: {}, required: [] },
 };
 
+const FIGURE_TOOL: LlmToolSpec = {
+  name: "figure_check",
+  description:
+    "**画一张图看看**（写题型前后都能用）：把图形规范交给框架渲染，返回断言结果与失败原因；" +
+    "画出来的 SVG 落到工作区 out/ 里（可以交给老师看，或用 ws_read 读它的结构）。\n" +
+    "为什么要有它：出图以前走到「写进模块 → 验收 → 提交」才第一次知道图画不出来，一轮几十秒；" +
+    "先在这儿画一次，几毫秒就知道哪里不对。\n" +
+    "两种规范：\n" +
+    '  1) plane-geometry：{ kind: "plane-geometry", points: [{ label: "A", x: 0, y: 0 }, …],\n' +
+    '     segments: [{ from: "A", to: "B" }], circles: [{ center: "O", radius: 5 }],\n' +
+    '     rightAngles: [{ vertex: "A", armA: "B", armB: "C" }], labels: [{ of: "A-B", text: "6" }] }\n' +
+    '  2) function-graph：{ kind: "function-graph", quadratics: [{ a: 1, b: -2, c: -3 }], domain: [-4, 5],\n' +
+    '     points: [{ label: "A", x: -1, y: 0 }], annotations: ["对称轴 x = 1"] }\n' +
+    "规矩：坐标是世界坐标（渲染器自己缩放）；引用点名必须先在 points 里定义；labels[].of 写成「A-B」；" +
+    "标注的数必须真的等于两点距离、直角标记必须是真直角，否则断言会判 false（**图不能撒谎**）。",
+  parameters: {
+    type: "object",
+    properties: { spec: { type: "object", description: "图形规范（上面两种之一）" } },
+    required: ["spec"],
+  },
+};
+
 const CONSTRUCTOR_TOOL: LlmToolSpec = {
   name: "constructor_write",
   description:
@@ -436,7 +458,15 @@ const CONSTRUCTOR_TOOL: LlmToolSpec = {
     '**goal 与 givens 要写**：题面被模型重写后，回译闸门就是拿它们核对"有没有写漏、写歪"的；\n' +
     '不写这两项，那份题面就只能落到"待复核"。\n' +
     'checks 是**框架用来独立核对的事实**（求值器是框架的）：比如"根代回多项式为 0"、' +
-    '"两点都满足解析式"。写得越具体越好；只写恒等式（如 a-a=0）会被判无效。',
+    '"两点都满足解析式"。写得越具体越好；只写恒等式（如 a-a=0）会被判无效。\n' +
+    "**要出图就加 figure**（题面写了「如图」就必须给，否则图形闸门会拦下；规范见 figure_check）：\n" +
+    '  figure: { kind: "plane-geometry", points: [{ label: "A", x: 0, y: 0 }, …],\n' +
+    '            segments: [{ from: "A", to: "B" }], circles: [{ center: "O", radius: 5 }],\n' +
+    '            rightAngles: [{ vertex: "A", armA: "B", armB: "C" }], labels: [{ of: "A-B", text: "6" }] }\n' +
+    '  figure: { kind: "function-graph", quadratics: [{ a: 1, b: -2, c: -3 }], domain: [-4, 5],\n' +
+    '            points: [{ label: "A", x: -1, y: 0 }] }\n' +
+    "  线段/圆心/直角标记只能引用 points 里有的点名；标注的数必须真的等于两点距离。\n" +
+    "  写进模块之前先用 figure_check 画一张看看——它会指出哪个断言不过、哪个点名找不到。",
   parameters: {
     type: "object",
     properties: {
@@ -684,6 +714,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   private readonly config: WorkbenchConfig;
   /** 新增题位起 key 用的计数器（只求唯一、可读） */
   private settingCounter = 0;
+  /** figure_check 画的第几张图（落盘文件名用） */
+  private figureCounter = 0;
   /** 正在跑的轮次（顶层最多一轮；子任务可以并行，见 start()） */
   private readonly runs = new Map<string, RunState>();
   private counter = 0;
@@ -709,7 +741,7 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     // 组卷是收尾动作；蓝图库让 agent 能"换一份合适的模板再出"
     if (this.ctx.get("session") !== undefined) tools.push(PAPER_TOOL, ...BLUEPRINT_TOOLS);
     // 运行时制作新题型：写模块 → 框架验收 → 通过即生效
-    if (this.ctx.get("constructDynamic") !== undefined) tools.push(CONSTRUCTOR_TOOL, GAP_TOOL);
+    if (this.ctx.get("constructDynamic") !== undefined) tools.push(CONSTRUCTOR_TOOL, FIGURE_TOOL, GAP_TOOL);
     // 派子 agent：独立的事可以并行做（子任务看不到主对话，目标要写完整）
     tools.push(...AGENT_TOOLS);
     // 看/改某一道题：老师指着卷子说"把这道题改成…"时，agent 得先看得见那道题
@@ -1787,6 +1819,59 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       };
     }
 
+    if (tool === "figure_check") {
+      const figure = this.ctx.get("figure");
+      if (figure === undefined) {
+        return { kind: "tool", text: "figure_check：没有接入图形渲染", payload: { error: "没有图形能力" } };
+      }
+      const spec = args.spec;
+      try {
+        const artifact = figure.render(spec as never);
+        const failed = Object.entries(artifact.assertions).filter(([, ok]) => !ok);
+        // 画出来的图落进工作区：老师能看，agent 也能用 ws_read 读它的结构
+        let saved = "";
+        const space = this.openWorkspace(workspaceName === "" ? undefined : workspaceName);
+        if (space !== undefined) {
+          this.figureCounter += 1;
+          const file = `out/fig-${String(this.figureCounter)}.svg`;
+          try {
+            space.write(file, artifact.svg);
+            saved = file;
+          } catch {
+          /* 工作区写不进去就算了，断言结果才是关键 */
+        }
+      }
+      if (failed.length === 0) {
+        return {
+          kind: "tool",
+          text:
+          `figure_check：画出来了，${String(Object.keys(artifact.assertions).length)} 项断言全过` +
+          (saved === "" ? "（没开工作区，SVG 没落盘）" : `；SVG 在 ${saved}`) +
+          "——可以把它写进题型的 figure 字段了。",
+          payload: { ok: true, assertions: artifact.assertions, svg: saved },
+        };
+      }
+      return {
+        kind: "gate",
+        text:
+        `figure_check：画出来了，但有 ${String(failed.length)} 项不过（**图不能撒谎**）：\n` +
+        failed.map(([key]) => `  · ${key}`).join("\n") +
+        "\n改法：坐标改成真的满足条件的值（标注的长度必须等于两点距离、直角标记必须是真直角），" +
+        "或者把那个标注/标记删掉。",
+        payload: { ok: false, failures: failed.map(([key]) => key), svg: saved },
+      };
+      } catch (error) {
+      return {
+        kind: "tool",
+        text:
+        `figure_check：画不出来 —— ${error instanceof Error ? error.message : String(error)}\n` +
+        "常见原因：kind 写错（只能 plane-geometry / function-graph）、引用了 points 里没有的点名、" +
+        "points 缺 x/y、segments 不是 { from, to }。规范见工具描述。",
+        payload: { error: "图形规范不对" },
+      };
+      }
+      }
+
     if (tool === "corpus_search") {
       const corpus = this.ctx.get("corpus");
       if (corpus === undefined) {
@@ -2185,7 +2270,10 @@ export class WorkbenchService extends Service implements WorkbenchApi {
       if (session === undefined)
         return { kind: "tool", text: `${tool}：没有会话服务`, payload: { error: "未接入会话" } };
 
-      if (tool === "change_setting") {
+
+
+
+    if (tool === "change_setting") {
         // `session` 在上一层（blueprint_ 分支）已经取过：这里直接用，别再声明一次
         const patch = session.settingPatch?.bind(session);
         if (session === undefined || patch === undefined) {
@@ -2758,6 +2846,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
 
     // 这一行是**给老师看的**（模型拿的是 payload，不知道名字也无所谓）：
     // 记录里露一个英文工具名，等于把内部实现摊在老师面前（截图里见过 `未知工具 change_setting`）
+    // 服务端日志留一份真实名字：界面不露内部名，但排查时必须知道"它到底调了什么"
+    console.warn(`[workbench] 未知工具：${tool}（这一轮可用工具见 run 开头的 tools 列表）`);
     return { kind: "tool", text: "它想用一个这里没有的能力，这一步没做成", payload: { error: `未知工具 ${tool}` } };
   }
 }
