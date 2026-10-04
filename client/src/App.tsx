@@ -32,9 +32,20 @@ import type {
   RunAgentView,
   SessionView,
   SessionsView,
+  RunDoneView,
   SettingsView,
   StateView,
+  StreamView,
 } from './types.js'
+
+/**
+ * 实时区只显示**尾巴**：一次输出可以几十 KB（题面、JSON），
+ * 全部塞进一个 76px 高的框里既看不见、又越来越慢（每来一段都要重排一次）。
+ */
+const STREAM_TAIL = 2000
+function tail(text: string): string {
+  return text.length > STREAM_TAIL ? text.slice(text.length - STREAM_TAIL) : text
+}
 
 /**
  * 壳层：**挑一张卷子 → 改这张卷子 → 设置**，没有常驻侧边栏。
@@ -56,10 +67,15 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
   const [runs, setRuns] = useState<readonly RunAgentView[]>([])
   const [doing, setDoing] = useState<{ what: string; agent: string; at: number } | null>(null)
   /**
-   * 模型**此刻正在写的内容**（流式累积）。
-   * 它不是记录：走完一步就清掉（那一步会作为一条记录出现）。界面只在右下角用浅字显示它。
+   * 模型**写出来的字**（流式累积）：界面底部那一块浅字显示它的尾巴。
+   *
+   * 它不是记录，也不是"解析出来的步骤"——它是模型此刻/刚才说的原话。
+   * 清空的时机只有两个：**老师起新一轮**、**这一轮结束**。
+   * 换工具、走完一步都不清：以前每走完一步就清一次，那一块于是"一会儿有一会儿没"。
    */
-  const [stream, setStream] = useState<{ label: string; text: string; at: number } | null>(null)
+  const [stream, setStream] = useState<StreamView | null>(null)
+  /** 上一轮是怎么结束的：出错就得在状态行说一句，不然记录一滚就没人知道它栽了 */
+  const [lastStop, setLastStop] = useState<RunDoneView | null>(null)
   const [live, setLive] = useState<readonly LiveEvent[]>([])
   /** 同时在跑的界面动作（可以有多个：一边在改题，一边在存设定） */
   const [busy, setBusy] = useState<readonly string[]>([])
@@ -91,8 +107,22 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
     setLog(nextSession.log)
   }, [])
 
+  /**
+   * 现在有没有在跑的一轮：**问服务端**，不靠"我见过那个事件"。
+   *
+   * 刷新页面（或者事件流断线重连）之后，"正在跑"这件事就丢了——界面会显示"空闲"、
+   * 输入框按"开新一轮"发（服务端会拒："这个会话已经有 agent 在跑"）、连叫停都没有。
+   * 服务端不报"什么时候开始的"，所以这里**不给 `since`**：宁可只显示"第几步"，
+   * 也不要拿"我刚知道"的时间冒充"它已经跑了多久"。
+   */
+  const syncRuns = useCallback(async () => {
+    const { active } = await api.getRuns()
+    setRuns(active)
+  }, [])
+
   useEffect(() => {
     void reload().catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause)))
+    void syncRuns().catch(() => undefined)
     const unsubscribe = api.subscribe(
       (event) => {
         if (event.kind !== 'stored' && event.kind !== 'rejected' && event.kind !== 'confirmed') return
@@ -105,9 +135,8 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
           // **老师起的新一轮**：实时区从头开始（上一轮的尾巴不该留着）。
           // 子任务（帮手）不算新一轮——它只是这一轮里派出去的活，实时区不该跟着它清掉。
           if (signal.parent === undefined) {
-            runningNow.current = signal.workspace
-            runNow.current = signal.runId
             setStream(null)
+            setLastStop(null)
           }
           setRuns((previous) => [
             ...previous.filter((run) => run.id !== signal.runId),
@@ -124,33 +153,52 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
         }
         if (signal.kind === 'busy') {
           setDoing({ what: signal.what, agent: signal.agent, at: Date.now() })
+          // 工具在跑：模型这会儿没在吐字（但已经写出来的字留着，见下面的 delta）
+          setStream((previous) => (previous === null || !previous.live ? previous : { ...previous, live: false }))
         }
         if (signal.kind === 'delta') {
-          // **模型正在写什么**：累积一小段，界面用浅字实时显示（约 3 行就滚）
-          setStream((previous) =>
-            previous === null || previous.label !== signal.label || Date.now() - previous.at > 4000
-              ? { label: signal.label, text: signal.text, at: Date.now() }
-              : { ...previous, text: previous.text + signal.text, at: Date.now() },
-          )
+          // **模型正在写什么**：累积成"这一轮的流"，实时区只显示它的尾巴。
+          // 换了一次输出（主线的"它说" → 执笔者的"写题面"）就另起一段，接着往下滚。
+          setStream((previous) => {
+            const before = previous === null ? '' : previous.label === signal.label ? previous.text : `${previous.text}\n`
+            return { label: signal.label, text: tail(before + signal.text), at: Date.now(), live: true }
+          })
         }
         if (signal.kind === 'step') {
+          // 走完一步：模型的话已经变成记录里的一行，但实时区**不清**（清了就是"一会儿有一会儿没"）；
+          // 只把"正在写"改成"刚才写的"，老师一眼看得出这一块是不是活的
+          setStream((previous) => (previous === null || !previous.live ? previous : { ...previous, live: false }))
+          // 这一步做完了：状态行不该继续挂着刚才那个工具在跳秒（接下来是模型在想事情）
+          setDoing((current) => (current === null || current.agent !== (signal.agent ?? signal.runId) ? current : null))
           setRuns((previous) =>
             previous.map((run) => (run.id === signal.runId ? { ...run, steps: Math.max(run.steps, signal.step) } : run)),
           )
         }
         if (signal.kind === 'done') {
           if (signal.parent === undefined && signal.workspace === runningNow.current) {
-            runningNow.current = ''
-            runNow.current = ''
             setStream(null)
+            setLastStop(signal.stopped)
           }
           setRuns((previous) => previous.filter((run) => run.id !== signal.runId))
           setDoing((current) => (current?.agent === signal.runId ? null : current))
         } else setLog((previous) => appendSignal(previous, signal))
       },
+      // 连上（或重连）事件流：把"现在到底有没有在跑"重新问一遍服务端
+      () => void syncRuns().catch(() => undefined),
     )
     return unsubscribe
-  }, [reload])
+  }, [reload, syncRuns])
+
+  /**
+   * "判定该记在谁名下"（哪个会话、哪一轮）**从 `running` 推出来**，不靠事件里记一下。
+   *
+   * 以前是在收到 `run:started` 时写进 ref：刷新或断线重连之后它就是空的，
+   * 判定行于是没有归属，界面按会话过滤时会把它们滤掉（"哪道题没过"就看不见了）。
+   */
+  useEffect(() => {
+    runningNow.current = running === null ? '' : running.workspace === '' ? mine : running.workspace
+    runNow.current = running?.id ?? ''
+  }, [running, mine])
 
   // 一轮跑完就重新拉一遍（卷面、版本、底栏的事实都会变）
   useEffect(() => {
@@ -229,6 +277,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       agents: runs.filter((run) => run.workspace === '' || run.workspace === mine),
       doing,
       stream,
+      lastStop,
       live,
       busy: busy[0] ?? '',
       busyWith,
@@ -247,7 +296,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
       stopRun,
       go: goTo,
     }),
-    [session, sessions, state, settings, kb, log, running, elsewhere, doing, stream, live, busy, busyWith, error, notice, reload, guard, startRun, ask, interject, stopRun, goTo, runs, mine],
+    [session, sessions, state, settings, kb, log, running, elsewhere, doing, stream, lastStop, live, busy, busyWith, error, notice, reload, guard, startRun, ask, interject, stopRun, goTo, runs, mine],
   )
 
   // 旧地址（工作台/题库/会话/资料）还有人存着书签：一律落到"这张卷子"或起始页

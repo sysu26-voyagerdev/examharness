@@ -383,6 +383,27 @@ export interface RunAgentView {
   parent?: string
 }
 
+/**
+ * 一轮是怎么结束的（服务端 `run:done` 里的 `stopped`：做完了 / 出错 / 没模型 / 老师叫停）
+ */
+export type RunDoneView = RunView['stopped']
+
+/**
+ * 模型写出来的字（agent 栏底部那一块实时区）。
+ *
+ * 它是**这一轮**的流，不是记录：`live` 表示"此刻还在吐字"（工具在跑、模型在想的时候不是）。
+ * 文本只留尾巴（几十 KB 的正文塞进一条 76px 高的框里没有意义，而且每来一段都要重排）。
+ */
+export interface StreamView {
+  /** 这一次输出是谁在写（主线"它说"、执笔者的"写题面"…）：换人另起一段 */
+  label: string
+  text: string
+  /** 最后一次吐字的时间 */
+  at: number
+  /** 此刻还在写吗（界面据此说"它在写"还是"它刚才说的"） */
+  live: boolean
+}
+
 export interface LiveEvent {
   kind:
     | 'stored'

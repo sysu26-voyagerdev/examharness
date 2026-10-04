@@ -57,10 +57,12 @@ function diffVersions(before: VersionView | undefined, after: VersionView): read
 
 export function PaperPage(): React.JSX.Element {
   const app = useApp()
-  const { session, state, log, running, elsewhere, doing, stream } = app
+  const { session, state, log, running, elsewhere, doing, stream, lastStop } = app
   const panes = usePanes()
 
   const [draft, setDraft] = useState('')
+  /** 刚插进去、还没被读到的那句话（给一行回执，别让老师以为话丢了） */
+  const [pending, setPending] = useState('')
   const [answers, setAnswers] = useState(false)
   const [viewVersion, setViewVersion] = useState<number | null>(null)
   const [editingBlueprint, setEditingBlueprint] = useState(false)
@@ -114,17 +116,40 @@ export function PaperPage(): React.JSX.Element {
     return { unconfirmed, gaps, low, high, count: rows.length }
   }, [rows, shown])
 
-  /** 说了就办：它空闲就开一轮；它正忙就插进去（不挡老师，也不打断它） */
+  /**
+   * 说了就办：它空闲就开一轮；它正忙就插进去（不挡老师，也不打断它）。
+   *
+   * **空话不发**：以前空输入按回车会开一整轮（那一轮的目标是"按设定出一份卷子"），
+   * 按钮是灰的、回车却能过——老师一不留神就发起了一轮。
+   */
   const send = (): void => {
     const text = draft.trim()
-    void app.ask(text === '' ? '按设定出一份卷子' : text)
+    if (text === '') return
     setDraft('')
     setViewVersion(null)
+    // 插话要有个回执：它读到之前，那句话在记录里还不存在
+    if (running !== null) setPending(text)
+    void app.ask(text)
   }
 
   useEffect(() => {
     setViewVersion(null)
   }, [session?.meta.id])
+
+  // 插话的回执什么时候撤：它读到了（记录里出现这句话）、这一轮结束了、或者太久没动静
+  useEffect(() => {
+    if (pending === '') return undefined
+    if (running === null) {
+      setPending('')
+      return undefined
+    }
+    if (entries.some((entry) => entry.kind === 'user' && entry.text.includes(pending))) {
+      setPending('')
+      return undefined
+    }
+    const timer = window.setTimeout(() => setPending(''), 60000)
+    return () => window.clearTimeout(timer)
+  }, [pending, entries, running])
 
   const document = (
     <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto', bgcolor: 'action.hover' }}>
@@ -190,6 +215,8 @@ export function PaperPage(): React.JSX.Element {
           running={running}
           doing={doing}
           stream={stream}
+          lastStop={lastStop}
+          stopping={app.busyWith('stop')}
           translate={translate}
           onExample={(example) => setDraft(example)}
           onStop={() => void app.stopRun()}
@@ -201,6 +228,7 @@ export function PaperPage(): React.JSX.Element {
         onSend={send}
         running={running}
         elsewhere={elsewhere}
+        pending={pending}
       />
     </Box>
   )

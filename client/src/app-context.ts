@@ -6,8 +6,10 @@ import type {
   RunAgentView,
   SessionView,
   SessionsView,
+  RunDoneView,
   SettingsView,
   StateView,
+  StreamView,
 } from './types.js'
 
 /**
@@ -32,8 +34,10 @@ export interface AppValue {
   elsewhere: readonly RunAgentView[]
   /** 正在做的动作（工具名 + 开始时间）：界面显示"正在…（已 n 秒）" */
   doing: { what: string; agent: string; at: number } | null
-  /** 模型此刻正在写的内容（流式）：界面右下角用浅字实时显示，走完一步就清掉 */
-  stream: { label: string; text: string; at: number } | null
+  /** 模型写出来的字（流式）：界面底部用浅字显示它的尾巴（换工具、走完一步都不清） */
+  stream: StreamView | null
+  /** 上一轮怎么结束的（出错/没模型/老师叫停/做完了）：空闲时状态行据此说一句 */
+  lastStop: RunDoneView | null
   live: readonly LiveEvent[]
   /**
    * 正在进行的界面动作（'' = 空闲）。

@@ -10,6 +10,7 @@ import type {
   KbBatchView,
   KbListView,
   LiveEvent,
+  RunAgentView,
   RunEventView,
   RunSignal,
   RunView,
@@ -60,6 +61,16 @@ const send = (method: string, path: string, body?: unknown): Promise<Response> =
 
 export const getSession = (): Promise<SessionView> => fetch('/api/session').then((r) => json<SessionView>(r))
 export const getState = (): Promise<StateView> => fetch('/api/state').then((r) => json<StateView>(r))
+
+/**
+ * 现在有没有在跑的一轮（服务端是权威）。
+ *
+ * 为什么要它：`run:started` 是一条**事件**，刷新页面就错过了——
+ * 刷新之后界面会以为"空闲"，而它其实正在干活：状态行写"空闲"、输入框按"开新一轮"发、
+ * 连"叫停"都没有。所以挂载时、以及每次（重新）连上事件流时，都要问一遍服务端。
+ */
+export const getRuns = (): Promise<{ active: readonly RunAgentView[] }> =>
+  fetch('/api/runs').then((r) => json<{ active: readonly RunAgentView[] }>(r))
 
 /** 知识图谱：整张图一次拿走（只读——图是脚本算出来的产物，见 docs/知识图谱构建报告.md） */
 export const getGraph = (): Promise<GraphView> => fetch('/api/graph').then((r) => json<GraphView>(r))
@@ -282,8 +293,14 @@ export const exportUrl = (format: 'html' | 'md' | 'docx', options: { answers?: b
 }
 
 /** 订阅实时事件。返回退订函数——组件卸载时必须调用，否则 EventSource 泄漏 */
-export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: RunSignal) => void): () => void {
+export function subscribe(
+  onEvent: (event: LiveEvent) => void,
+  onRun: (signal: RunSignal) => void,
+  /** 每次（重新）连上事件流时调一次：断线期间发生的事得补回来 */
+  onOpen?: () => void,
+): () => void {
   const source = new EventSource('/api/stream')
+  if (onOpen !== undefined) source.addEventListener('open', onOpen)
   const at = (): string => new Date().toLocaleTimeString('zh-CN')
   const simple = (kind: LiveEvent['kind']) => (message: MessageEvent<string>) => {
     onEvent({ ...(JSON.parse(message.data) as object), kind, at: at() } as LiveEvent)
@@ -348,6 +365,7 @@ export function subscribe(onEvent: (event: LiveEvent) => void, onRun: (signal: R
   ]
   for (const [name, handler] of handlers) source.addEventListener(name, handler)
   return () => {
+    if (onOpen !== undefined) source.removeEventListener('open', onOpen)
     for (const [name, handler] of handlers) source.removeEventListener(name, handler)
     source.close()
   }

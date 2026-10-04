@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward'
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome'
 import BuildOutlinedIcon from '@mui/icons-material/BuildOutlined'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
@@ -207,7 +208,19 @@ export function Timeline({
 }): React.JSX.Element {
   const endRef = useRef<HTMLDivElement | null>(null)
   const boxRef = useRef<HTMLDivElement | null>(null)
+  /** 里面那一层（块都在里面）：观察它的大小，才知道"内容又长高了" */
+  const contentRef = useRef<HTMLDivElement | null>(null)
+  /**
+   * 是不是"贴着底"：贴着就跟着最新一行往下走，松开就不动它。
+   *
+   * 规矩（用户原话）：**除非老师自己在往上滚，就自动到最底部**（刚打开也算）；
+   * 他往上滚之后别再拽他回去，除非点"回到最新"。
+   * 用 scroll 事件记，而不是每次新记录来了量一遍——后者在"内容一边长、事件一边来"时会误判。
+   */
   const stickRef = useRef(true)
+  /** 我们自己刚把滚动条设到哪儿：用来认出"这是程序滚的"，别当成老师在翻 */
+  const expectRef = useRef(-1)
+  const [free, setFree] = useState(false)
   /**
    * 块的开合：**只记老师手动改过的那些**（id → 展开吗）。
    *
@@ -217,13 +230,57 @@ export function Timeline({
    */
   const [manual, setManual] = useState<Readonly<Record<string, boolean>>>({})
 
+  const toBottom = (): void => {
+    const box = boxRef.current
+    if (box === null) return
+    // 直接设 scrollTop：`scrollIntoView` 会连祖先滚动容器一起滚（实测会把卷面也带着动）
+    box.scrollTop = box.scrollHeight
+    expectRef.current = box.scrollTop
+    stickRef.current = true
+    setFree(false)
+  }
+  /**
+   * 老师在翻记录吗？
+   *
+   * 只认**他滚出来的位置**：内容一边长、事件一边来，如果每次都拿"现在离底多远"重新判断，
+   * 中间那一次量到"离底很远"就会把"跟着走"关掉——记录一边长一边自己停在半路（真实踩到过）。
+   * 所以先认出"这一下是我自己滚的"（停在刚设的位置上），剩下的才算老师翻的。
+   */
+  const remember = (): void => {
+    const box = boxRef.current
+    if (box === null) return
+    if (Math.abs(box.scrollTop - expectRef.current) <= 2) return
+    const away = box.scrollHeight - box.scrollTop - box.clientHeight > 24
+    stickRef.current = !away
+    setFree(away)
+  }
   useEffect(() => {
     const box = boxRef.current
     if (box === null) return
-    stickRef.current = box.scrollHeight - box.scrollTop - box.clientHeight < 120
-    // 直接设 scrollTop：`scrollIntoView` 会连祖先滚动容器一起滚（实测会把卷面也带着动）
-    if (stickRef.current) box.scrollTop = box.scrollHeight
+    if (stickRef.current) {
+      toBottom()
+      return
+    }
+    // 没贴着底：把"离底多远"重新量一遍——内容长了、或者它自己已经回到过底部，按钮要跟着变
+    const away = box.scrollHeight - box.scrollTop - box.clientHeight > 24
+    stickRef.current = !away
+    setFree(away)
   }, [entries.length])
+  /**
+   * 高度会自己变（实时区出现/消失、窗口缩放、字体与公式重排）：贴着底的话一直跟着走。
+   * 观察的是**里面的内容**：只观察外框的话，内容长高根本不会触发（这一层高度没变）。
+   */
+  useEffect(() => {
+    const box = boxRef.current
+    const content = contentRef.current
+    if (box === null || content === null) return undefined
+    const observer = new ResizeObserver(() => {
+      if (stickRef.current) toBottom()
+    })
+    observer.observe(box)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [])
 
   const blocks = useMemo(() => collapseBlocks(groupRuns(entries)), [entries])
   /** 默认展开**最近一轮**（刚发生的事才是老师要看的）；兜底那一块（'earlier'）不算"最近一轮" */
@@ -272,19 +329,43 @@ export function Timeline({
   }
 
   return (
-    <Box ref={boxRef} sx={{ height: '100%', overflowY: 'auto', px: 1.25, py: 1 }}>
-      {blocks.map((block) => (
-        <BlockRow
-          key={block.id}
-          block={block}
-          running={running}
-          {...(runningId === undefined ? {} : { runningId })}
-          isOpen={isOpen}
-          onToggle={toggle}
-          {...(translate === undefined ? {} : { translate })}
-        />
-      ))}
-      <div ref={endRef} />
+    <Box sx={{ position: 'relative', height: '100%', minHeight: 0 }}>
+      <Box ref={boxRef} onScroll={remember} sx={{ height: '100%', overflowY: 'auto', px: 1.25, py: 1 }}>
+        <Box ref={contentRef}>
+          {blocks.map((block) => (
+            <BlockRow
+              key={block.id}
+              block={block}
+              running={running}
+              {...(runningId === undefined ? {} : { runningId })}
+              isOpen={isOpen}
+              onToggle={toggle}
+              {...(translate === undefined ? {} : { translate })}
+            />
+          ))}
+          <div ref={endRef} />
+        </Box>
+      </Box>
+      {/* 老师往上翻着看的时候，新记录不会把他拽下去；想跟上就点这一下 */}
+      {free && (
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<ArrowDownwardIcon sx={{ fontSize: 15 }} />}
+          onClick={toBottom}
+          sx={{
+            position: 'absolute',
+            bottom: 10,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            bgcolor: 'background.paper',
+            boxShadow: 'none',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          回到最新
+        </Button>
+      )}
     </Box>
   )
 }
