@@ -422,7 +422,19 @@ function BlockRow({
           <Typography variant="body2" sx={{ fontWeight: 600, flex: 1, minWidth: 0 }} noWrap>
             {titleLine(block.title, translate)}
           </Typography>
-          {current ? <Chip size="small" color="primary" label="在做" /> : <Chip size="small" variant="outlined" label="做完了" />}
+          {(() => {
+            // 块头那一枚状态章：**错误要说出来**（以前只要是过去的块就写"做完了"，
+            // 哪怕这一轮是"出错停下了"——记录里红字写着，章上却打勾，自相矛盾）
+            const status = blockOutcome(block, current)
+            return (
+              <Chip
+                size="small"
+                variant={status.color === 'default' ? 'outlined' : 'filled'}
+                color={status.color}
+                label={status.label}
+              />
+            )
+          })()}
           <Typography variant="caption" color="text.disabled" sx={{ whiteSpace: 'nowrap' }}>
             {clock(block.at)}
           </Typography>
@@ -465,6 +477,17 @@ function BlockRow({
 /** 几点几分（记录里只有一个时间格式：时:分） */
 function clock(at: string): string {
   return new Date(at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+}
+
+/** 一块最后是什么结果：在做 / 出错了 / 做完了（块头那枚章用它） */
+function blockOutcome(
+  block: RunBlock,
+  current: boolean,
+): { label: string; color: 'default' | 'primary' | 'error' } {
+  if (current) return { label: '在做', color: 'primary' }
+  const errored = block.entries.some((entry) => /出错停下了|这一轮出错/u.test(entry.text))
+  if (errored) return { label: '出错了', color: 'error' }
+  return { label: '做完了', color: 'default' }
 }
 
 /** 折起来的块也让人知道"最后成了什么"（取最后一条记录的第一句） */
