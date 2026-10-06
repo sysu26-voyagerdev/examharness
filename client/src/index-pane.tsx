@@ -16,6 +16,7 @@ import Typography from '@mui/material/Typography'
 import { useApp } from './app-context.js'
 import { formatDifficulty, questionNumbers } from './components.js'
 import { KnowledgePage } from './pages/KnowledgePage.js'
+import { MATERIAL_STATUS } from './pages/materials.js'
 import type { ItemView } from './types.js'
 import type { SlotBindingView } from './types.js'
 
@@ -140,7 +141,7 @@ export function IndexPane({
                   {batch.name}
                 </Typography>
                 <Typography variant="caption" color="text.secondary">
-                  {batch.status === 'indexed' ? `已整理 ${String(batch.records)} 条` : '未整理'} · {String(batch.files.length)} 份文件
+                  {MATERIAL_STATUS[batch.status]} · {String(batch.files.length)} 份文件
                 </Typography>
               </Box>
             ))}
@@ -153,9 +154,9 @@ export function IndexPane({
       )}
 
       {materials && (
-        <Dialog open onClose={() => setMaterials(false)} fullWidth maxWidth="md">
-          <DialogTitle>资料</DialogTitle>
-          <DialogContent>
+        <Dialog open onClose={() => setMaterials(false)} fullWidth maxWidth="lg" aria-label="资料库">
+          <DialogTitle sx={{ display: 'flex', justifyContent: 'flex-end', py: 1 }}><Button onClick={() => setMaterials(false)}>完成</Button></DialogTitle>
+          <DialogContent sx={{ p: 0 }}>
             <KnowledgePage />
           </DialogContent>
         </Dialog>

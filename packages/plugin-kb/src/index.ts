@@ -1,5 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
-import { basename, extname, join, relative, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { CorpusRecord, KbApi, KbBatch, KbStatus } from '@examharness/core'
@@ -44,6 +45,25 @@ export interface KbConfig {
 
 /** 收哪些类型：认得出来的资料。认不出来的（二进制包、压缩包）不进来，让老师自己解。 */
 const KEEP = new Set(['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.txt', '.md', '.csv', '.jsonl', '.png', '.jpg', '.jpeg'])
+const TEXT = new Set(['.txt', '.md', '.csv', '.jsonl', '.json'])
+
+function newBatchId(): string {
+  return `kb-${String(Date.now())}-${randomUUID().slice(0, 8)}`
+}
+
+/** 跨平台可保存；重名另存一份，绝不能覆盖原件。 */
+function uploadName(filename: string, used: Set<string>): string {
+  let safe = [...filename.normalize('NFC')].map((char) => char.charCodeAt(0) < 32 ? '_' : char).join('')
+    .replace(/[<>:"/\\|?*]/g, '_').trim().replace(/[. ]+$/, '')
+  if (safe === '') throw new Error('文件名不能为空或只有句点')
+  if (/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(safe)) safe = `_${safe}`
+  const ext = extname(safe).slice(0, 16)
+  const stem = safe.slice(0, safe.length - extname(safe).length).slice(0, 100) || '资料'
+  safe = `${stem}${ext}`
+  for (let n = 2; used.has(safe.toLowerCase()); n += 1) safe = `${stem} (${String(n)})${ext}`
+  used.add(safe.toLowerCase())
+  return safe
+}
 
 function walk(dir: string, out: string[] = [], depth = 0): string[] {
   let entries: string[]
@@ -103,31 +123,46 @@ export class KbService extends Service implements KbApi {
   }
 
   upload(title: string, files: readonly { name: string; text?: string; base64?: string }[]): KbBatch {
-    const id = `kb-${String(Date.now())}`
+    if (files.length === 0) throw new Error('请先选择文件')
+    const used = new Set<string>()
+    // 先核对整批，再落盘；失败不会留下半批文件，更不会悄悄截断原件。
+    const prepared = files.map((file) => {
+      const safe = uploadName(file.name, used)
+      if ((file.text === undefined) === (file.base64 === undefined)) {
+        throw new Error(`「${file.name}」必须提供且只能提供一种文件内容`)
+      }
+      // 大文件不能用重复分组匹配，否则数 MB 的正常内容也会耗尽正则调用栈。
+      if (file.base64 !== undefined && (file.base64.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(file.base64))) {
+        throw new Error(`「${file.name}」的文件编码损坏，请重新选择文件`)
+      }
+      const body = file.base64 === undefined ? Buffer.from(file.text ?? '', 'utf8') : Buffer.from(file.base64, 'base64')
+      if (file.base64 !== undefined && body.toString('base64') !== file.base64) throw new Error(`「${file.name}」的文件编码损坏，请重新选择文件`)
+      if (body.length === 0) throw new Error(`「${file.name}」是空文件，请移除后重试`)
+      const limit = file.text !== undefined || TEXT.has(extname(safe).toLowerCase()) ? this.config.maxTextBytes : this.config.maxFileBytes
+      if (body.length > limit) throw new Error(`「${file.name}」超过单文件上限（${String(limit)} 字节），请分割文件或从本机文件夹导入`)
+      return { name: safe, body }
+    })
+    const id = newBatchId()
     const dir = join(this.dir, id)
-    mkdirSync(dir, { recursive: true })
-    const stored: { name: string; bytes: number }[] = []
-    for (const file of files) {
-      const safe = file.name.replace(/[^\w.\-\u4e00-\u9fa5]/g, '_').slice(0, 120)
-      // 二进制按原样存（PDF / Word / 图片）：这类文件当文本读会直接毁掉
-      const body =
-        file.base64 === undefined
-          ? Buffer.from((file.text ?? '').slice(0, this.config.maxTextBytes), 'utf8')
-          : Buffer.from(file.base64, 'base64').subarray(0, this.config.maxFileBytes)
-      if (body.length === 0) continue
-      writeFileSync(join(dir, safe), body)
-      stored.push({ name: safe, bytes: body.length })
-    }
     const batch: KbBatch = {
       id,
-      name: title === '' ? id : title,
+      name: title.trim() || (files.length === 1 ? files[0]?.name ?? id : `${String(files.length)} 份资料`),
       at: new Date().toISOString(),
       status: 'raw',
-      files: stored,
+      files: prepared.map((file) => ({ name: file.name, bytes: file.body.length })),
       records: 0,
     }
-    this.batches.push(batch)
-    this.save()
+    mkdirSync(dir)
+    try {
+      for (const file of prepared) writeFileSync(join(dir, file.name), file.body, { flag: 'wx' })
+      this.batches.push(batch)
+      this.save()
+    } catch (error) {
+      this.batches = this.batches.filter((entry) => entry.id !== id)
+      // dir 是本次独占创建、位于 uploads 下的批次目录。
+      rmSync(dir, { recursive: true, force: true })
+      throw error
+    }
     this.ctx.emit('kb:changed', { batchId: batch.id, status: batch.status })
     return batch
   }
@@ -138,6 +173,7 @@ export class KbService extends Service implements KbApi {
    * agent 照常按相对路径读。
    */
   importDir(title: string, dir: string): KbBatch {
+    if (dir.trim() === '') throw new Error('请填写本机文件夹路径')
     const root = resolve(dir.replace(/^~(?=\/)/, process.env['HOME'] ?? '~'))
     if (!existsSync(root) || !statSync(root).isDirectory()) {
       throw new Error(`不是文件夹：${dir}`)
@@ -153,7 +189,7 @@ export class KbService extends Service implements KbApi {
       }
     }
     if (files.length === 0) throw new Error(`这个文件夹里没有认得的资料（${[...KEEP].join(' ')}）`)
-    const id = `kb-${String(Date.now())}`
+    const id = newBatchId()
     const batch: KbBatch = {
       id,
       name: title === '' ? basename(root) : title,
@@ -184,10 +220,13 @@ export class KbService extends Service implements KbApi {
     limit = 4000,
   ): { text: string; total: number; next?: number } | undefined {
     const batch = this.batches.find((entry) => entry.id === batchId)
-    const file = join(batch?.sourceDir ?? join(this.dir, batchId), fileName)
-    // 导入的批次根目录在工作区之外，边界改成"必须在那一批的根目录里"
-    const boundary = batch?.sourceDir ?? this.dir
-    if (!file.startsWith(boundary) || !existsSync(file)) return undefined
+    if (batch === undefined || !batch.files.some((entry) => entry.name === fileName)) return undefined
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit <= 0) return undefined
+    const boundary = resolve(batch.sourceDir ?? join(this.dir, batch.id))
+    const file = resolve(boundary, fileName)
+    if (!existsSync(file)) return undefined
+    const within = relative(realpathSync(boundary), realpathSync(file))
+    if (within === '..' || within.startsWith('../') || within.startsWith('..\\') || isAbsolute(within) || !statSync(file).isFile()) return undefined
     const text = readFileSync(file, 'utf8')
     const slice = text.slice(offset, offset + limit)
     const next = offset + limit < text.length ? offset + limit : undefined
@@ -221,6 +260,7 @@ export class KbService extends Service implements KbApi {
 
   dirOf(batchId: string): string | undefined {
     const batch = this.batches.find((entry) => entry.id === batchId)
+    if (batch === undefined) return undefined
     const dir = batch?.sourceDir ?? join(this.dir, batchId)
     return existsSync(dir) ? dir : undefined
   }
@@ -237,7 +277,13 @@ export class KbService extends Service implements KbApi {
 
   private save(): void {
     mkdirSync(resolve(this.indexFile, '..'), { recursive: true })
-    writeFileSync(this.indexFile, JSON.stringify(this.batches, null, 1), 'utf8')
+    const pending = `${this.indexFile}.${randomUUID()}.tmp`
+    try {
+      writeFileSync(pending, JSON.stringify(this.batches, null, 1), 'utf8')
+      renameSync(pending, this.indexFile)
+    } finally {
+      rmSync(pending, { force: true })
+    }
   }
 }
 

@@ -193,6 +193,10 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
     void syncRuns().catch(() => undefined)
     const unsubscribe = api.subscribe(
       (event) => {
+        if (event.kind === 'kb:changed') {
+          void api.getKb().then(setKb).catch(() => undefined)
+          return
+        }
         if (event.kind !== 'stored' && event.kind !== 'rejected' && event.kind !== 'confirmed') return
         setLive((previous) => [event, ...previous].slice(0, 20))
         // 判定属于当前在跑的那一轮（不再"两边都显示"）
@@ -253,6 +257,7 @@ export function App({ dark, onToggleDark }: { dark: boolean; onToggleDark: () =>
           }
           setRuns((previous) => previous.filter((run) => run.id !== signal.runId))
           setDoing((current) => (current?.agent === signal.runId ? null : current))
+          void api.getKb().then(setKb).catch(() => undefined)
         } else setLog((previous) => appendSignal(previous, signal))
       },
       // 连上（或重连）事件流：把"现在到底有没有在跑"重新问一遍服务端

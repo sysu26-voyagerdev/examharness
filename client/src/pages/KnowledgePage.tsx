@@ -1,375 +1,215 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import CloseIcon from '@mui/icons-material/Close'
 import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
-import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import UploadFileOutlinedIcon from '@mui/icons-material/UploadFileOutlined'
-import Box from '@mui/material/Box'
-import Button from '@mui/material/Button'
-import Card from '@mui/material/Card'
-import CardActions from '@mui/material/CardActions'
-import CardContent from '@mui/material/CardContent'
-import CardHeader from '@mui/material/CardHeader'
-import Chip from '@mui/material/Chip'
-import Collapse from '@mui/material/Collapse'
-import Dialog from '@mui/material/Dialog'
-import DialogActions from '@mui/material/DialogActions'
-import DialogContent from '@mui/material/DialogContent'
-import DialogTitle from '@mui/material/DialogTitle'
-import Divider from '@mui/material/Divider'
-import Stack from '@mui/material/Stack'
-import TextField from '@mui/material/TextField'
-import Typography from '@mui/material/Typography'
+import { Alert, Box, Button, Chip, IconButton, LinearProgress, MenuItem, Stack, Tab, Table, TableBody, TableCell, TableHead, TablePagination, TableRow, Tabs, TextField, Typography } from '@mui/material'
 import * as api from '../api.js'
 import { useApp } from '../app-context.js'
 import { FilesView, Timeline } from '../components.js'
 import { forWorkspace } from '../log.js'
 import type { KbBatchView, KbStatus } from '../types.js'
-
-const STATUS: Readonly<Record<KbStatus, { text: string; color?: 'warning' | 'success' | 'info' }>> = {
-  raw: { text: '待整理', color: 'info' },
-  ingesting: { text: '整理中', color: 'warning' },
-  indexed: { text: '整理完成', color: 'success' },
-  failed: { text: '没有整理完', color: 'warning' },
-}
+import { AddMaterialsDialog } from './AddMaterialsDialog.js'
+import { MATERIAL_STATUS, fileSize, isTextMaterial } from './materials.js'
 
 export function KnowledgePage(): React.JSX.Element {
   const app = useApp()
-  const { kb, settings, log, running, busy } = app
-
-  const [name, setName] = useState('')
-  const [dir, setDir] = useState('')
-  const [files, setFiles] = useState<readonly { name: string; text?: string; base64?: string }[]>([])
-  const [pasted, setPasted] = useState('')
-  const [pastedName, setPastedName] = useState('')
-  const [reading, setReading] = useState(false)
   const [adding, setAdding] = useState(false)
-  const [open, setOpen] = useState('')
-  const [fileName, setFileName] = useState('')
-  const [chunk, setChunk] = useState<{ text: string; total: number; next?: number } | null>(null)
-  const [offset, setOffset] = useState(0)
-
-  const configured = settings?.runtime.modelConfigured === true
-  const pending = pasted.trim() === '' ? files : [...files, { name: pastedName === '' ? '粘贴的资料.txt' : pastedName, text: pasted }]
-
-  // 只显示**这一批**的活：主 agent 的对话属于工作台，不该混进来
-  const entries = useMemo(() => forWorkspace(log, open), [log, open])
-
-  const pick = async (list: FileList | null): Promise<void> => {
-    setReading(true)
-    try {
-      setFiles(
-        await Promise.all(
-          [...(list ?? [])].map(async (file) => {
-            const binary = /\.(pdf|docx|xlsx|xlsm|png|jpe?g|webp|bmp|tiff?)$/i.test(file.name)
-            if (!binary) return { name: file.name, text: await file.text() }
-            const bytes = new Uint8Array(await file.arrayBuffer())
-            let raw = ''
-            for (const byte of bytes) raw += String.fromCharCode(byte)
-            return { name: file.name, base64: btoa(raw) }
-          }),
-        ),
-      )
-    } finally {
-      setReading(false)
-    }
-  }
-
-  const upload = (): void => {
-    void app.guard('upload', async () => {
-      const batch = await api.uploadKb(name.trim(), pending)
-      setAdding(false)
-      setName('')
-      setFiles([])
-      setPasted('')
-      setOpen(batch.id)
-      setFileName('')
-      setChunk(null)
-      await app.reload()
-    })
-  }
-
-  const load = (batchId: string, file: string, at: number): void => {
-    void app.guard('preview', async () => {
-      setOpen(batchId)
-      setFileName(file)
-      setOffset(at)
-      setChunk(await api.previewKb(batchId, file, at))
-    })
-  }
-
-  const batches = kb?.batches ?? []
-
-  const importDir = (): void => {
-    void app.guard('import', async () => {
-      const batch = await api.importKbDir(name.trim(), dir.trim())
-      setName('')
-      setDir('')
-      setAdding(false)
-      setOpen(batch.id)
-      await app.reload()
-    })
-  }
-
+  const [selected, setSelected] = useState('')
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState<KbStatus | 'all'>('all')
+  const [source, setSource] = useState<'all' | 'upload' | 'folder'>('all')
+  const [sort, setSort] = useState<'recent' | 'name'>('recent')
+  const [page, setPage] = useState(0)
+  const batches = app.kb?.batches ?? []
+  const visible = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase()
+    return batches.filter((batch) =>
+      (status === 'all' || batch.status === status)
+      && (source === 'all' || (source === 'folder') === (batch.sourceDir !== undefined))
+      && (needle === '' || [batch.name, batch.sourceDir ?? '', ...batch.files.map((file) => file.name)]
+        .some((text) => text.toLocaleLowerCase().includes(needle))))
+      .toSorted((a, b) => sort === 'name' ? a.name.localeCompare(b.name, 'zh-CN') : b.at.localeCompare(a.at))
+  }, [batches, query, status, source, sort])
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(visible.length / 10) - 1))
+  const batch = batches.find((entry) => entry.id === selected)
+  const clear = (): void => { setQuery(''); setStatus('all'); setSource('all'); setPage(0) }
   return (
-    <Box sx={{ display: 'flex', height: '100%', minHeight: 0, gap: 2.5, p: 2.5 }}>
-      <Box sx={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
-        <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 2 }}>
-          <Typography variant="h5">资料</Typography>
-          <Typography variant="caption" color="text.secondary">
-            真题、课标、教材——出题时的参考，也是判重的依据
-          </Typography>
-          <Box sx={{ flex: 1 }} />
-          <Button variant="contained" disableElevation startIcon={<UploadFileOutlinedIcon />} disabled={busy !== ''} onClick={() => setAdding(true)}>
-            加资料
-          </Button>
-        </Stack>
-
-        {/* 三种加法是**三件不同的事**（上传小文件 / 指向大文件夹 / 贴一段文字），
-            摆在一个表单里只会让人犹豫——收进对话框，一次选一种 */}
-        <Dialog open={adding} onClose={() => setAdding(false)} fullWidth maxWidth="sm">
-          <DialogTitle>加一批资料</DialogTitle>
-          <DialogContent>
-            <Stack spacing={2.5} sx={{ mt: 1 }}>
-              <TextField
-                label="给这批资料起个名字"
-                value={name}
-                placeholder="例如 2023 中考真题"
-                onChange={(event) => setName(event.target.value)}
-              />
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  小文件直接上传
-                </Typography>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-                  <Button component="label" variant="outlined" size="small" disabled={reading} startIcon={<UploadFileOutlinedIcon />}>
-                    选择文件
-                    <input
-                      hidden
-                      type="file"
-                      multiple
-                      accept=".txt,.md,.csv,.jsonl,.pdf,.docx,.xlsx,.png,.jpg,.jpeg"
-                      onChange={(event) => void pick(event.target.files)}
-                    />
-                  </Button>
-                  <Typography variant="caption" color="text.secondary">
-                    {pending.length === 0 ? '还没有选文件' : pending.map((file) => file.name).join('　')}
-                  </Typography>
-                  <Box sx={{ flex: 1 }} />
-                  <Button variant="contained" disableElevation size="small" disabled={busy !== '' || pending.length === 0} onClick={upload}>
-                    上传
-                  </Button>
-                </Stack>
-              </Box>
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  教材、课标这类几十 GB 的：指一个本机文件夹
-                </Typography>
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
-                  <TextField
-                    fullWidth
-                    label="文件夹路径"
-                    value={dir}
-                    placeholder="/home/…/课标、教材、教参"
-                    helperText="文件原地不动，整理时链接进工作区"
-                    onChange={(event) => setDir(event.target.value)}
-                  />
-                  <Button
-                    variant="outlined"
-                    size="small"
-                    sx={{ mt: 0.5 }}
-                    disabled={busy !== '' || dir.trim() === ''}
-                    onClick={importDir}
-                  >
-                    导入
-                  </Button>
-                </Stack>
-              </Box>
-              <Box>
-                <Typography variant="subtitle2" gutterBottom>
-                  或者直接贴一段文字
-                </Typography>
-                <Stack spacing={1}>
-                  <TextField value={pasted} multiline minRows={2} maxRows={6} placeholder="把题目或课标片段贴进来" onChange={(event) => setPasted(event.target.value)} />
-                  {pasted.trim() !== '' && (
-                    <TextField label="这段文字叫什么" value={pastedName} onChange={(event) => setPastedName(event.target.value)} />
-                  )}
-                </Stack>
-              </Box>
-            </Stack>
-          </DialogContent>
-          <DialogActions>
-            <Button onClick={() => setAdding(false)}>算了</Button>
-          </DialogActions>
-        </Dialog>
-
-        {batches.length === 0 && (
-          <Card>
-            <CardContent>
-              <Typography variant="body2" color="text.secondary">
-                还没有资料。加上一批之后，出题时会拿它做参考，也会拿来判重。
-              </Typography>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* 卡片不要铺满 1500px 的屏：一行文字超过 ~90 字就看不住了 */}
-        <Stack spacing={2} sx={{ maxWidth: 900 }}>
-          {batches.map((batch) => (
-            <BatchCard
-              key={batch.id}
-              batch={batch}
-              busy={busy !== ''}
-              running={running !== null}
-              configured={configured}
-              open={open === batch.id}
-              fileName={fileName}
-              chunk={chunk}
-              offset={offset}
-              onOpen={() => setOpen(batch.id)}
-              onLoad={load}
-              onIngest={() => {
-                void app.guard('ingest', async () => {
-                  await api.ingestKb(batch.id)
-                  setOpen(batch.id)
-                  await app.reload()
-                })
-              }}
-            />
-          ))}
-        </Stack>
-      </Box>
-
-      {/* 整理记录：**选了一批才出现**——不该为"可能要看"常占三分之一屏 */}
-      <Card sx={{ flex: 0.8, minWidth: 320, display: open === '' ? 'none' : 'flex', flexDirection: 'column' }}>
-        <CardHeader
-          title="整理记录"
-          subheader={open === '' ? '选一批资料，这里显示它读到了什么' : (batches.find((batch) => batch.id === open)?.name ?? '')}
-          action={running !== null ? <Chip color="warning" label="正在整理" /> : undefined}
-        />
-        <Divider />
-        <Box sx={{ flex: 1, minHeight: 0 }}>
-          {open === '' ? (
-            <Box sx={{ p: 3 }}>
-              <Typography variant="body2" color="text.secondary">
-                先选一批资料，这里会显示它读到了什么、抽出了什么。
-              </Typography>
-            </Box>
-          ) : (
-            <Timeline entries={entries} running={running !== null} />
-          )}
+    <Box sx={{ minHeight: 0, p: { xs: 1.5, md: 2.5 } }}>
+      <Stack direction="row" spacing={2} sx={{ alignItems: 'center', mb: 2 }}>
+        <Box sx={{ flex: 1 }}>
+          <Typography variant="h5">资料库</Typography>
+          <Typography variant="body2" color="text.secondary">管理出题参考，查看整理进度。</Typography>
         </Box>
-        {open !== '' && (
-          <Box sx={{ borderTop: 1, borderColor: 'divider', maxHeight: 260, overflowY: 'auto' }}>
-            <FilesView name={open} tick={entries.length} />
-          </Box>
-        )}
-      </Card>
+        <Button variant="contained" startIcon={<UploadFileOutlinedIcon />} onClick={() => setAdding(true)}>添加资料</Button>
+      </Stack>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} sx={{ mb: 2 }}>
+        <TextField label="搜索资料或文件名" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} sx={{ flex: 1, minWidth: 160 }} />
+        <TextField select label="整理状态" value={status} onChange={(event) => { setStatus(event.target.value as typeof status); setPage(0) }} sx={{ minWidth: 130 }}>
+          <MenuItem value="all">全部状态</MenuItem>
+          {Object.entries(MATERIAL_STATUS).map(([value, text]) => <MenuItem key={value} value={value}>{text}</MenuItem>)}
+        </TextField>
+        <TextField select label="来源" value={source} onChange={(event) => { setSource(event.target.value as typeof source); setPage(0) }} sx={{ minWidth: 130 }}>
+          <MenuItem value="all">全部来源</MenuItem><MenuItem value="upload">上传或粘贴</MenuItem><MenuItem value="folder">本机文件夹</MenuItem>
+        </TextField>
+        <TextField select label="排序" value={sort} onChange={(event) => { setSort(event.target.value as typeof sort); setPage(0) }} sx={{ minWidth: 130 }}>
+          <MenuItem value="recent">最近添加</MenuItem><MenuItem value="name">名称顺序</MenuItem>
+        </TextField>
+      </Stack>
+      <Typography variant="caption" color="text.secondary">共 {batches.length} 批资料，显示 {visible.length} 批</Typography>
+      {app.kb === null ? <LinearProgress sx={{ my: 2 }} /> : visible.length === 0 ? (
+        <Box sx={{ textAlign: 'center', py: 7 }}>
+          <FolderOpenOutlinedIcon color="action" sx={{ fontSize: 36, mb: 1 }} />
+          <Typography variant="body1">{batches.length === 0 ? '把备课资料放在这里' : '没有找到匹配的资料'}</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{batches.length === 0 ? '上传文件、导入文件夹，或粘贴一段文字。' : '试试其他关键词，或清除筛选条件。'}</Typography>
+          <Button onClick={batches.length === 0 ? () => setAdding(true) : clear}>{batches.length === 0 ? '添加第一批资料' : '清除筛选'}</Button>
+        </Box>
+      ) : <>
+        <Box sx={{ overflowX: 'auto' }}>
+          <Table size="small" aria-label="资料列表" sx={{ mt: 1 }}>
+            <TableHead><TableRow><TableCell>资料</TableCell><TableCell>状态</TableCell><TableCell align="right">文件</TableCell><TableCell align="right">操作</TableCell></TableRow></TableHead>
+            <TableBody>{visible.slice(currentPage * 10, currentPage * 10 + 10).map((entry) => <TableRow key={entry.id} selected={entry.id === selected}>
+              <TableCell sx={{ maxWidth: 420 }}>
+                <Button variant="text" sx={{ textAlign: 'left', justifyContent: 'flex-start', p: 0, overflowWrap: 'anywhere' }} onClick={() => setSelected(entry.id)}>{entry.name}</Button>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{entry.sourceDir === undefined ? '上传或粘贴' : '本机文件夹'} · {new Date(entry.at).toLocaleDateString('zh-CN')}</Typography>
+                {entry.note !== undefined && <Typography variant="caption" color="text.secondary" sx={{ display: 'block', overflowWrap: 'anywhere' }}>{entry.note}</Typography>}
+              </TableCell>
+              <TableCell sx={{ whiteSpace: 'nowrap' }}><Chip variant="outlined" color={entry.status === 'failed' ? 'warning' : 'default'} label={MATERIAL_STATUS[entry.status]} />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>{entry.records} 条已整理内容</Typography>
+              </TableCell>
+              <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>{entry.files.length} 个<Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>{fileSize(entry.files.reduce((sum, file) => sum + file.bytes, 0))}</Typography></TableCell>
+              <TableCell align="right"><Button size="small" onClick={() => setSelected(selected === entry.id ? '' : entry.id)}>{selected === entry.id ? '收起' : '查看'}</Button></TableCell>
+            </TableRow>)}</TableBody>
+          </Table>
+        </Box>
+        <TablePagination component="div" count={visible.length} page={currentPage} rowsPerPage={10} rowsPerPageOptions={[10]} onPageChange={(_event, next) => setPage(next)} labelDisplayedRows={({ from, to, count }) => `第 ${String(from)}–${String(to)} 批，共 ${String(count)} 批`} getItemAriaLabel={(type) => type === 'next' ? '下一页资料' : '上一页资料'} />
+      </>}
+      {batch !== undefined && <BatchDetails key={batch.id} batch={batch} onClose={() => setSelected('')} />}
+      <AddMaterialsDialog open={adding} onClose={() => setAdding(false)} onAdded={(added) => {
+        setAdding(false); clear(); setSort('recent'); setSelected(added.id)
+        app.notify(`已添加「${added.name}」，共 ${String(added.files.length)} 个文件`)
+        void app.guard('kb-refresh', app.reload)
+      }} />
     </Box>
   )
 }
 
-function BatchCard({
-  batch,
-  busy,
-  running,
-  configured,
-  open,
-  fileName,
-  chunk,
-  offset,
-  onOpen,
-  onLoad,
-  onIngest,
-}: {
-  batch: KbBatchView
-  busy: boolean
-  running: boolean
-  configured: boolean
-  open: boolean
-  fileName: string
-  chunk: { text: string; total: number; next?: number } | null
-  offset: number
-  onOpen: () => void
-  onLoad: (batchId: string, file: string, at: number) => void
-  onIngest: () => void
-}): React.JSX.Element {
-  const status = STATUS[batch.status]
-  return (
-    <Card>
-      <CardHeader
-        avatar={<FolderOpenOutlinedIcon color="action" />}
-        title={batch.name}
-        subheader={`${String(batch.files.length)} 个文件${batch.records > 0 ? `　抽到 ${String(batch.records)} 条` : ''}　${new Date(batch.at).toLocaleString('zh-CN')}`}
-        action={
-          <Stack direction="row" spacing={1}>
-            <Chip color={status.color} label={status.text} />
-            {batch.sourceDir !== undefined && <Chip variant="outlined" label="本机文件夹" title={batch.sourceDir} />}
+function BatchDetails({ batch, onClose }: { batch: KbBatchView; onClose: () => void }): React.JSX.Element {
+  const app = useApp()
+  const [tab, setTab] = useState<'files' | 'activity'>('files')
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(0)
+  const [filename, setFilename] = useState('')
+  const [offset, setOffset] = useState(0)
+  const [chunk, setChunk] = useState<{ text: string; total: number; next?: number } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [working, setWorking] = useState(false)
+  const [runId, setRunId] = useState('')
+  const request = useRef(0)
+  const runRevision = useRef(0)
+  const action = useRef(false)
+  const entries = useMemo(() => forWorkspace(app.log, batch.id), [app.log, batch.id])
+  const active = [...app.agents, ...app.elsewhere].find((run) => run.workspace === batch.id && run.parent === undefined)
+  const running = active !== undefined || runId !== ''
+  const configured = app.settings?.runtime.modelConfigured === true
+  const files = batch.files.filter((file) => file.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(files.length / 10) - 1))
+
+  const refreshRun = useCallback(async (): Promise<void> => {
+    const revision = ++runRevision.current
+    try {
+      const result = await api.getRuns()
+      if (revision === runRevision.current) setRunId(result.active.find((run) => run.workspace === batch.id && run.parent === undefined)?.id ?? '')
+    } catch { /* 已收到的实时状态保留；连接恢复后可重新打开详情核对。 */ }
+  }, [batch.id])
+
+  useEffect(() => () => { request.current += 1 }, [])
+  useEffect(() => {
+    const unsubscribe = api.subscribe(() => undefined, (signal) => {
+      if (signal.workspace !== batch.id) return
+      if (signal.kind === 'started' && signal.parent === undefined) { runRevision.current += 1; setRunId(signal.runId) }
+      if (signal.kind === 'done' && signal.parent === undefined) { runRevision.current += 1; setRunId('') }
+    })
+    void refreshRun()
+    return () => { runRevision.current += 1; unsubscribe() }
+  }, [batch.id, refreshRun])
+
+  const load = async (file: string, at: number): Promise<void> => {
+    const ticket = ++request.current
+    setFilename(file); setOffset(at); setChunk(null); setError('')
+    if (!isTextMaterial(file)) { setLoading(false); return }
+    setLoading(true)
+    try {
+      const next = await api.previewKb(batch.id, file, at)
+      if (request.current === ticket) setChunk(next)
+    } catch (cause) {
+      if (request.current === ticket) setError(cause instanceof Error ? cause.message : String(cause))
+    } finally {
+      if (request.current === ticket) setLoading(false)
+    }
+  }
+
+  const ingest = async (): Promise<void> => {
+    if (action.current) return
+    action.current = true; setWorking(true); setError('')
+    try {
+      await api.ingestKb(batch.id)
+      // 极快的失败可能先于 HTTP 响应结束，返回的 runId 不能当作仍在运行的证据。
+      await refreshRun(); setTab('activity')
+      void app.guard('kb-refresh', app.reload)
+    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)) }
+    finally { action.current = false; setWorking(false) }
+  }
+
+  return <Box sx={{ borderTop: 1, borderColor: 'divider', mt: 2, pt: 2 }}>
+    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+      <Box sx={{ flex: 1, minWidth: 0 }}><Typography variant="h6" sx={{ overflowWrap: 'anywhere' }}>{batch.name}</Typography>
+        {batch.sourceDir !== undefined && <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: 'anywhere' }}>{batch.sourceDir}</Typography>}
+      </Box>
+      {running ? <Button color="warning" disabled={working} onClick={() => {
+        const id = active?.id ?? runId
+        setWorking(true)
+        void api.stopRun(id).then(() => app.notify('已请求停止，当前步骤结束后会保留已整理的内容'))
+          .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : String(cause))).finally(() => setWorking(false))
+      }}>停止整理</Button> : <Button variant="outlined" disabled={working || !configured} onClick={() => void ingest()}>{working ? '正在开始…' : batch.status === 'failed' ? '继续整理' : batch.status === 'indexed' ? '再次整理' : '开始整理'}</Button>}
+      <IconButton aria-label="关闭资料详情" onClick={onClose}><CloseIcon /></IconButton>
+    </Stack>
+    {!configured && <Alert severity="info" sx={{ mt: 1 }} action={<Button size="small" onClick={() => app.go('settings')}>前往设置</Button>}>配置模型后即可整理资料，上传和查看文件仍可使用。</Alert>}
+    {error !== '' && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
+    <Tabs value={tab} onChange={(_event, next: typeof tab) => setTab(next)} aria-label="资料详情" sx={{ mb: 2 }}>
+      <Tab value="files" label={`文件（${String(batch.files.length)}）`} /><Tab value="activity" label={running ? '整理记录 · 正在整理' : '整理记录'} />
+    </Tabs>
+    {tab === 'files' ? <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'minmax(240px, 1fr) minmax(0, 1.4fr)' }, gap: 2 }}>
+      <Box sx={{ minWidth: 0 }}>
+        <TextField label="在这批资料中找文件" value={query} onChange={(event) => { setQuery(event.target.value); setPage(0) }} fullWidth />
+        <Box sx={{ mt: 1 }}>
+          {files.slice(currentPage * 10, currentPage * 10 + 10).map((file) => <Button key={file.name} fullWidth onClick={() => void load(file.name, 0)}
+            sx={{ display: 'flex', justifyContent: 'space-between', gap: 1, py: 1, textAlign: 'left', bgcolor: filename === file.name ? 'action.selected' : undefined }}>
+            <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>{file.name}</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>{fileSize(file.bytes)}</Typography>
+          </Button>)}
+          {files.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>没有匹配的文件。</Typography>}
+        </Box>
+        <TablePagination component="div" count={files.length} page={currentPage} rowsPerPage={10} rowsPerPageOptions={[10]} onPageChange={(_event, next) => setPage(next)} labelDisplayedRows={({ from, to, count }) => `${String(from)}–${String(to)} / ${String(count)} 个`} getItemAriaLabel={(type) => type === 'next' ? '下一页文件' : '上一页文件'} />
+      </Box>
+      <Box sx={{ minWidth: 0, bgcolor: 'background.default', borderRadius: 1, p: 2 }}>
+        <Typography variant="subtitle2" sx={{ mb: 1, overflowWrap: 'anywhere' }}>{filename === '' ? '文件预览' : filename}</Typography>
+        {loading && <LinearProgress aria-label="正在读取文件" sx={{ mb: 1 }} />}
+        {filename === '' && <Typography variant="body2" color="text.secondary">选择一个文件查看内容。</Typography>}
+        {filename !== '' && !isTextMaterial(filename) && <Typography variant="body2" color="text.secondary">此格式暂不提供原文预览。开始整理后，可在整理记录中查看处理过程和提取结果。</Typography>}
+        {chunk !== null && <>
+          <Typography component="pre" variant="body2" sx={{ m: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: 340, overflowY: 'auto' }}>{chunk.text || '这一段没有文字。'}</Typography>
+          <Stack direction="row" spacing={1} sx={{ mt: 2, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ flex: 1 }}>第 {chunk.total === 0 ? 0 : offset + 1}–{Math.min(offset + chunk.text.length, chunk.total)} 字，共 {chunk.total} 字</Typography>
+            <Button size="small" disabled={loading || offset === 0} onClick={() => void load(filename, Math.max(0, offset - 2000))}>上一段</Button>
+            <Button size="small" disabled={loading || chunk.next === undefined} onClick={() => void load(filename, chunk.next ?? offset)}>下一段</Button>
           </Stack>
-        }
-      />
-      {batch.note !== undefined && (
-        <CardContent sx={{ pt: 0 }}>
-          <Typography variant="caption" color="text.secondary">
-            {batch.note}
-          </Typography>
-        </CardContent>
-      )}
-      <Collapse in={open} unmountOnExit>
-        <CardContent sx={{ pt: batch.note === undefined ? 0 : 1 }}>
-          <Stack direction="row" spacing={1} sx={{ mb: 1.5, flexWrap: 'wrap', gap: 1 }}>
-            {batch.files.slice(0, 20).map((file) => (
-              <Chip
-                key={file.name}
-                variant={file.name === fileName ? 'filled' : 'outlined'}
-                color={file.name === fileName ? 'primary' : 'default'}
-                label={file.name}
-                onClick={() => onLoad(batch.id, file.name, 0)}
-              />
-            ))}
-            {batch.files.length > 20 && <Chip variant="outlined" label={`…还有 ${String(batch.files.length - 20)} 个`} />}
-          </Stack>
-          {chunk === null ? (
-            <Typography variant="caption" color="text.secondary">
-              选一个文件看内容。
-            </Typography>
-          ) : (
-            <>
-              <Box sx={{ maxHeight: 300, overflow: 'auto', bgcolor: 'action.hover', borderRadius: 2, p: 2 }}>
-                <Typography component="pre" variant="caption" sx={{ m: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace' }}>
-                  {chunk.text}
-                </Typography>
-              </Box>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 1 }}>
-                <Typography variant="caption" color="text.secondary">
-                  {offset}–{Math.min(offset + chunk.text.length, chunk.total)} / {chunk.total}
-                </Typography>
-                <Box sx={{ flex: 1 }} />
-                <Button size="small" disabled={busy || offset === 0} onClick={() => onLoad(batch.id, fileName, Math.max(0, offset - 4000))}>
-                  上一段
-                </Button>
-                <Button size="small" disabled={busy || chunk.next === undefined} onClick={() => onLoad(batch.id, fileName, chunk.next ?? offset)}>
-                  下一段
-                </Button>
-              </Stack>
-            </>
-          )}
-        </CardContent>
-      </Collapse>
-      <CardActions>
-        <Button size="small" disabled={busy} onClick={onOpen}>
-          {open ? '收起' : '看一下'}
-        </Button>
-        <Box sx={{ flex: 1 }} />
-        <Button
-          size="small"
-          variant="contained"
-          startIcon={<PlayArrowIcon />}
-          disabled={busy || running || batch.status === 'ingesting'}
-          title={configured ? 'agent 读资料、抽题、写进语料' : '先去设置里配置模型'}
-          onClick={onIngest}
-        >
-          让 agent 整理
-        </Button>
-      </CardActions>
-    </Card>
-  )
+        </>}
+      </Box>
+    </Box> : <Box>
+      {entries.length === 0 && !running ? <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>还没有整理记录。开始整理后，这里会显示处理过程。</Typography>
+        : <Box sx={{ height: 340 }}><Timeline entries={entries} running={running} /></Box>}
+      <FilesView name={batch.id} tick={entries.length} />
+    </Box>}
+  </Box>
 }

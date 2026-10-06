@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, extname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Service, type Context } from '@deepseek-ai/cordis'
 import type { WorkspaceApi, WorkspaceFile, WorkspaceRun } from '@examharness/core'
@@ -139,10 +140,21 @@ export class WorkspaceService extends Service implements WorkspaceApi {
     const target = join(this.base, safe, 'in')
     mkdirSync(target, { recursive: true })
     let linked = 0
-    for (const source of sources) {
+    const unique = [...new Set(sources.map((source) => resolve(source)))]
+    const counts = new Map<string, number>()
+    for (const source of unique) {
+      const key = basename(source).toLowerCase()
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    for (const source of unique) {
+      // 不同文件夹的同名原件各留一份；路径摘要让重新整理时仍能找到同一个副本。
+      const original = basename(source)
+      const extension = extname(original)
+      const filename = (counts.get(original.toLowerCase()) ?? 0) < 2 ? original
+        : `${basename(original, extension).slice(0, 100)}-${createHash('sha256').update(source).digest('hex').slice(0, 12)}${extension}`
+      const link = join(target, filename)
       try {
         if (!existsSync(source)) continue
-        const link = join(target, basename(source))
         // 已经铺过的算数：重复整理同一批时不该报"0 份"
         if (existsSync(link)) {
           linked += 1
@@ -152,7 +164,7 @@ export class WorkspaceService extends Service implements WorkspaceApi {
         linked += 1
       } catch {
         try {
-          copyFileSync(source, join(target, basename(source)))
+          copyFileSync(source, link)
           linked += 1
         } catch {
           /* 复制也不行就跳过 */

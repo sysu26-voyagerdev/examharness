@@ -1265,22 +1265,28 @@ export function apply(ctx: Context, config: WebConfig): void {
     }
 
     if (method === 'POST' && path === '/api/kb/upload') {
-      const body = (await readBody(req)) as {
-        name?: string
-        files?: { name?: string; text?: string; base64?: string }[]
+      try {
+        const body = (await readBody(req)) as { name?: unknown; files?: unknown } | null
+        if (body === null || !Array.isArray(body.files) || (body.name !== undefined && typeof body.name !== 'string')) {
+          throw new Error('请提供资料名称和文件清单')
+        }
+        const files = body.files.map((entry: unknown) => {
+          if (entry === null || typeof entry !== 'object') throw new Error('文件清单中有无效项目，请重新选择文件')
+          const file = entry as { name?: unknown; text?: unknown; base64?: unknown }
+          if (typeof file.name !== 'string' || (typeof file.text === 'string') === (typeof file.base64 === 'string')
+            || (file.text !== undefined && typeof file.text !== 'string') || (file.base64 !== undefined && typeof file.base64 !== 'string')) {
+            throw new Error('每个文件需要名称和一种有效的内容，请重新选择文件')
+          }
+          return {
+            name: file.name,
+            ...(typeof file.text === 'string' ? { text: file.text } : {}),
+            ...(typeof file.base64 === 'string' ? { base64: file.base64 } : {}),
+          }
+        })
+        send(res, 200, ctx.kb.upload(body.name ?? '', files))
+      } catch (error) {
+        send(res, 400, { error: error instanceof Error ? error.message : String(error) })
       }
-      const files: { name: string; text?: string; base64?: string }[] = (body.files ?? []).flatMap((file) => {
-        if (typeof file.name !== 'string') return []
-        // 文本给 text，二进制给 base64（PDF / Word / 图片按原样存，整理时再解析）
-        if (typeof file.text === 'string') return [{ name: file.name, text: file.text }] as { name: string; text?: string; base64?: string }[]
-        if (typeof file.base64 === 'string') return [{ name: file.name, base64: file.base64 }] as { name: string; text?: string; base64?: string }[]
-        return [] as { name: string; text?: string; base64?: string }[]
-      })
-      if (files.length === 0) {
-        send(res, 400, { error: '没有可用的文件：文本给 text，PDF/图片给 base64' })
-        return
-      }
-      send(res, 200, ctx.kb.upload(body.name ?? '', files))
       return
     }
 
@@ -1351,12 +1357,15 @@ export function apply(ctx: Context, config: WebConfig): void {
       // 步数用尽 / 没有模型 / 被叫停都如实标成未完成，并写清为什么。
       void started.done
         .then((run) => {
+          const current = ctx.kb.list().find((entry) => entry.id === batch.id)
+          // agent 明确记录的结果和说明不能被通用收尾覆盖，尤其不能把 failed 改成完成。
+          if (run.stopped === 'done' && current !== undefined && current.status !== 'ingesting') return
           const done = run.stopped === 'done'
           ctx.kb.mark(
             batch.id,
-            done ? 'indexed' : 'failed',
+            'failed',
             done
-              ? `agent 整理完成：${String(run.steps)} 步`
+              ? `本轮已结束，但尚未确认整理结果；已抽到的 ${String(current?.records ?? 0)} 条记录保留，可以继续整理`
               : run.stopped === 'no-llm'
                 ? '模型未配置，无法整理'
                 : `已按停：跑了 ${String(run.steps)} 步，抽到的记录都保留着`,

@@ -186,8 +186,22 @@ export const importKbDir = (name: string, dir: string): Promise<KbBatchView> =>
 export const uploadKb = (
   name: string,
   files: readonly { name: string; text?: string; base64?: string }[],
+  onProgress?: (percent: number) => void,
 ): Promise<KbBatchView> =>
-  send('POST', '/api/kb/upload', { name, files }).then((r) => json<KbBatchView>(r))
+  new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest()
+    request.open('POST', '/api/kb/upload')
+    request.setRequestHeader('content-type', 'application/json')
+    request.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress?.(Math.round((event.loaded / event.total) * 100))
+    }
+    request.onerror = () => reject(new Error('连接中断，未能确认上传结果。请先刷新资料列表，再决定是否重试。'))
+    request.onload = () => {
+      void json<KbBatchView>(new Response(request.responseText, { status: request.status }))
+        .then(resolve, reject)
+    }
+    request.send(JSON.stringify({ name, files }))
+  })
 
 export const previewKb = (
   batchId: string,
