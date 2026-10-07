@@ -1185,6 +1185,8 @@ export function apply(ctx: Context, config: WebConfig): void {
         runtime: {
           modelConfigured: ctx.llm.configured,
           modelName: ctx.llm.model,
+          // 思考等级（'' = 提供方默认）：界面上要能看见"现在到底想多深"
+          reasoningEffort: ctx.llm.reasoningEffort,
           modelSource: ctx.llm.source,
           corpusTotal: stats.total,
           corpusDistributable: stats.distributable,

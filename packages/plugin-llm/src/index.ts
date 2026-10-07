@@ -20,6 +20,11 @@ export const Config = z.object({
   apiKey: z.string().default('${EXAMHARNESS_API_KEY}'),
   model: z.string().default('gpt-4o-mini'),
   temperature: z.number().default(0.2),
+  /**
+   * 思考等级（`reasoning_effort`）：'' = 不传（提供方默认）。
+   * 设置页可热改——实测同一段上下文里 `low` 比默认少想三分之二，工具选择不变。
+   */
+  reasoningEffort: z.string().default(''),
   timeoutMs: z.number().default(60_000),
   /** 暂时性失败（超时/网络抖动/5xx）重试几次：一次抖动不该把整轮 agent 带停 */
   retries: z.number().default(2),
@@ -32,6 +37,8 @@ export interface LlmConfig {
   temperature: number
   timeoutMs: number
   retries: number
+  /** 思考等级（`reasoning_effort`）：'' = 不传（提供方默认） */
+  reasoningEffort: string
 }
 
 export { expandEnv }
@@ -58,6 +65,8 @@ export function buildPayload(
       return out
     }),
   }
+  // **思考等级**：不传就用提供方的默认（有的模型不给这个参数）
+  if (config.reasoningEffort !== '') payload.reasoning_effort = config.reasoningEffort
   if (tools !== undefined && tools.length > 0) {
     payload.tools = tools.map((tool) => ({
       type: 'function',
@@ -142,15 +151,24 @@ export class LlmService extends Service implements LlmApi {
     return this.effective().model
   }
 
-  /** 设置页可以热改 baseUrl / model；密钥仍只从环境变量取 */
-  private effective(): { baseUrl: string; model: string } {
+  /** 设置页可以热改 baseUrl / model / 思考等级；密钥仍只从环境变量取 */
+  private effective(): { baseUrl: string; model: string; reasoningEffort: string } {
     const settings = this.ctx.get('settings')
-    if (settings === undefined) return { baseUrl: this.config.baseUrl, model: this.config.model }
+    if (settings === undefined) {
+      return { baseUrl: this.config.baseUrl, model: this.config.model, reasoningEffort: this.config.reasoningEffort }
+    }
     const live = settings.get().model
     return {
       baseUrl: live.baseUrl === '' ? this.config.baseUrl : live.baseUrl,
       model: live.model === '' ? this.config.model : live.model,
+      // 空串是**有效值**（=不传），只有 undefined 才回退装机配置
+      reasoningEffort: live.reasoningEffort ?? this.config.reasoningEffort,
     }
+  }
+
+  /** 现在生效的思考等级（界面显示用）：'' = 提供方默认 */
+  get reasoningEffort(): string {
+    return this.effective().reasoningEffort
   }
 
   async chat(
@@ -165,7 +183,7 @@ export class LlmService extends Service implements LlmApi {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       try {
         // eslint-disable-next-line no-await-in-loop -- 重试必须串行
-        return await this.once(active.baseUrl, active.model, messages, tools, onDelta)
+        return await this.once(active, messages, tools, onDelta)
       } catch (error) {
         lastError = error
         // 只重试**暂时性**失败（超时、网络抖动、5xx）：真实的错（密钥、参数、余额）重试也没用，
@@ -181,16 +199,15 @@ export class LlmService extends Service implements LlmApi {
 
   /** 一次调用（不带重试）：要流式就带 onDelta */
   private async once(
-    baseUrl: string,
-    model: string,
+    active: { baseUrl: string; model: string; reasoningEffort: string },
     messages: readonly LlmMessage[],
     tools?: readonly LlmToolSpec[],
     onDelta?: (delta: LlmDelta) => void,
   ): Promise<LlmReply> {
-    const payload = buildPayload({ ...this.config, model }, messages, tools)
+    const payload = buildPayload({ ...this.config, ...active }, messages, tools)
     // 有人在看就流式：一次调用常常十几秒没输出，那段时间界面不该是死的
     if (onDelta !== undefined) payload.stream = true
-    const response = await fetch(`${baseUrl.replace(/\/$/, '')}/chat/completions`, {
+    const response = await fetch(`${active.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.key()}` },
       body: JSON.stringify(payload),

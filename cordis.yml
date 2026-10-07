@@ -176,6 +176,10 @@
     apiKey: ${EXAMHARNESS_API_KEY}
     model: ${EXAMHARNESS_MODEL}
     temperature: 0.2
+    # 思考等级（reasoning_effort）：'' = 用提供方默认。
+    # 实测同一段上下文：默认一步 2.5 秒、想 1214 字；low → 1.8 秒、想 417 字，工具选择一模一样。
+    # 老师要的是"出题快"，不是"想得久"——默认给低，设置页里随时能改。
+    reasoningEffort: low
 
 # 联网搜索：**可配置的引导工具**，默认关闭。
 # 它是引导不是闸门——网上既有素材也有别人出过的题，后者只有查重闸门拦得住。

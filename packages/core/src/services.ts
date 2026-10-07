@@ -358,6 +358,11 @@ export interface LlmApi {
   readonly configured: boolean
   /** 当前模型名（要记进 prose.serializer，题面将来可重生成） */
   readonly model: string
+  /**
+   * 现在生效的**思考等级**（`reasoning_effort`）：'' = 不传，用提供方的默认。
+   * 老师要的是"出题快"，不是"想得久"——所以它得能被看见、能被调。
+   */
+  readonly reasoningEffort: string
   chat(
     messages: readonly LlmMessage[],
     tools?: readonly LlmToolSpec[],
@@ -509,7 +514,19 @@ export interface ComposeResult {
 
 export interface AppSettings {
   /** 模型：baseUrl 与 model 可改；密钥不在这里（走 ${VAR}） */
-  model: { baseUrl: string; model: string; /** 密钥存在哪个环境变量名下（配置里只放引用名） */ apiKeyEnv: string }
+  model: {
+    baseUrl: string
+    model: string
+    /**
+     * **思考等级**（`reasoning_effort`）：'' 表示不传（用提供方的默认）。
+     * 实测（deepseek-v4-flash，同一段 7k 字上下文 + 同一张工具表，20 秒内量的）：
+     * 不传 → 一步 2.5s、想 1214 字；`low` → **1.8s、想 417 字**，选出来的工具一模一样。
+     * 老师要的是"出题快"，不是"想得久"——所以这一项要能被老师自己调。
+     */
+    reasoningEffort: string
+    /** 密钥存在哪个环境变量名下（配置里只放引用名） */
+    apiKeyEnv: string
+  }
   /** 联网搜索：开关与网关地址 */
   websearch: { enabled: boolean; endpoint: string }
   /** 语料目录（上传的知识库会追加进这里） */

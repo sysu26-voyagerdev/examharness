@@ -212,7 +212,7 @@ export interface CredentialInfoView {
 
 /** 可编辑的运行期设置（落盘到 data/settings.json） */
 export interface AppSettingsView {
-  model: { baseUrl: string; model: string; apiKeyEnv: string }
+  model: { baseUrl: string; model: string; reasoningEffort: string; apiKeyEnv: string }
   websearch: { enabled: boolean; endpoint: string }
   corpusDirs: readonly string[]
   sessionDefaults: { className: string; progress: string; blueprintPath: string }
@@ -228,6 +228,8 @@ export interface SettingsView {
   runtime: {
     modelConfigured: boolean
     modelName: string
+    /** 现在生效的思考等级（'' = 提供方默认） */
+    reasoningEffort: string
     modelSource: 'env' | 'file' | 'none'
     corpusTotal: number
     corpusDistributable: number

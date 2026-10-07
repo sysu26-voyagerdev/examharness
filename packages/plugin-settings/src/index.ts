@@ -42,6 +42,8 @@ export const Config = z.object({
   modelBaseUrl: z.string().default(''),
   modelApiKeyEnv: z.string().default('EXAMHARNESS_API_KEY'),
   modelName: z.string().default(''),
+  /** 思考等级：'' = 不传（提供方默认）；low/medium/high = reasoning_effort */
+  modelReasoningEffort: z.string().default(''),
   websearchEnabled: z.boolean().default(false),
   websearchEndpoint: z.string().default(''),
   corpusDirs: z.array(z.string()).default([]),
@@ -60,6 +62,7 @@ export interface SettingsConfig {
   modelBaseUrl: string
   modelApiKeyEnv: string
   modelName: string
+  modelReasoningEffort: string
   websearchEnabled: boolean
   websearchEndpoint: string
   corpusDirs: string[]
@@ -112,6 +115,7 @@ export class SettingsService extends Service implements SettingsApi {
       model: {
         baseUrl: expandEnv(config.modelBaseUrl),
         model: expandEnv(config.modelName),
+        reasoningEffort: config.modelReasoningEffort,
         apiKeyEnv: config.modelApiKeyEnv,
       },
       websearch: { enabled: config.websearchEnabled, endpoint: config.websearchEndpoint },

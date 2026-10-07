@@ -164,6 +164,19 @@ export function SettingsPage(): React.JSX.Element {
               {fetching ? '正在取…' : '获取可用模型'}
             </Button>
           </Stack>
+          <TextField
+            select
+            label="思考等级"
+            value={draft.model.reasoningEffort ?? ''}
+            helperText="想得越少越快。实测同一段上下文：默认 2.5 秒/步、想 1214 字；低 1.8 秒、想 417 字，出的工具一样。"
+            onChange={(event) => edit({ model: { ...draft.model, reasoningEffort: event.target.value } })}
+          >
+            <MenuItem value="">提供方默认</MenuItem>
+            <MenuItem value="minimal">最低</MenuItem>
+            <MenuItem value="low">低（推荐）</MenuItem>
+            <MenuItem value="medium">中</MenuItem>
+            <MenuItem value="high">高</MenuItem>
+          </TextField>
           {models.length > 0 && (
             <TextField
               select

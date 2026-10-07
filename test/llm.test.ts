@@ -14,7 +14,19 @@ const config: LlmConfig = {
   temperature: 0.2,
   timeoutMs: 1000,
   retries: 2,
+  reasoningEffort: '',
 }
+
+describe('思考等级', () => {
+  it('设了就进请求体（reasoning_effort），空串就不传', () => {
+    const base = { baseUrl: 'https://x', apiKey: '', model: 'm', temperature: 0.2, timeoutMs: 1000, retries: 0, reasoningEffort: '' }
+    const low = buildPayload({ ...base, reasoningEffort: 'low' }, [{ role: 'user', content: '你好' }])
+    expect(low.reasoning_effort).toBe('low')
+    // 空串 = 用提供方的默认：**不许**写成空字符串塞进去（有的提供方会因此报错）
+    const none = buildPayload({ ...base, reasoningEffort: '' }, [{ role: 'user', content: '你好' }])
+    expect('reasoning_effort' in none).toBe(false)
+  })
+})
 
 describe('模型接入的纯函数', () => {
   it('密钥从环境变量展开；没设置就是空串（据此判定未配置）', () => {
