@@ -904,7 +904,12 @@ function humanGap(reason: string): string {
     .replace(/[^：:\s]+\s*被\s*verify-([a-z-]+)\s*拦下：/gu, (_all, gate: string) => `${RISK[gate] ?? gateLabel(`verify-${gate}`)}：`)
     .replace(/与已入库题目结构完全相同（\S+）/gu, '与我已经出过的一道题完全相同')
     .replace(/构造器不覆盖该题位：.*$/u, '还没有能出这道题的题型')
-  return stripped.length > 120 ? `${stripped.slice(0, 118)}…` : stripped
+  if (stripped.length <= 120) return stripped
+  // 掐短时不要切在句子/公式中间：切出来的碎片在界面上就是乱码
+  //（实测见过 `（1）$y=-2(x+` 这种，老师看了只会更糊涂）
+  const head = stripped.slice(0, 118)
+  const cut = Math.max(head.lastIndexOf('：'), head.lastIndexOf('；'), head.lastIndexOf('，'))
+  return `${cut > 40 ? head.slice(0, cut) : head}…`
 }
 
 function changeMark(change: SlotChangeView | undefined): string {

@@ -412,6 +412,24 @@ const GAP_TOOL: LlmToolSpec = {
   parameters: { type: "object", properties: {}, required: [] },
 };
 
+const REDRAW_TOOL: LlmToolSpec = {
+  name: "redraw_slot",
+  description:
+    "**只把卷子上的这一道重出**（老师指着某一题说「换一道不一样的」「这道太难了」「情境换个」时用它）：" +
+    "按这个题位重新设计、构造、写题面、过检查，然后**只换这一道**，其余题目一动不动。\n" +
+    "**不要为了改一道去调 assemble_paper**：那会把整卷重造一遍——既慢（每题一次模型调用），" +
+    "又会在题库里堆一堆没人要的题（真实踩过：一次组卷尝试 65 次构造、同一题位堆了 116 道）。",
+  parameters: {
+    type: "object",
+    properties: {
+      slotKey: { type: "string", description: "卷面题位，例如 S3-1" },
+      requirement: { type: "string", description: "老师的要求（情境、难度、问法…）；没有就留空" },
+      kind: { type: "string", description: "指定用哪个题型（想换一种出法时给）" },
+    },
+    required: ["slotKey"],
+  },
+};
+
 const FIGURE_TOOL: LlmToolSpec = {
   name: "figure_check",
   description:
@@ -726,6 +744,17 @@ export class WorkbenchService extends Service implements WorkbenchApi {
   }
 
   /**
+   * 把模型报来的工具名对到登记过的名字：只差一个结尾的 s 就认（change_settings → change_setting）。
+   * 认不出就原样返回，让下面那条"未知工具"分支如实报出来。
+   */
+  private resolveTool(called: string): string {
+    const known = new Set(this.tools().map((spec) => spec.name));
+    if (known.has(called)) return called;
+    const guess = called.endsWith("s") ? called.slice(0, -1) : `${called}s`;
+    return known.has(guess) ? guess : called;
+  }
+
+  /**
    * 工具表按**配置**生成：没接语料库、没开联网搜索，agent 连对应工具都看不到。
    * 这是"可配置"的落点——不是把工具塞给它再让它别用。
    */
@@ -742,6 +771,8 @@ export class WorkbenchService extends Service implements WorkbenchApi {
     if (this.ctx.get("session") !== undefined) tools.push(PAPER_TOOL, ...BLUEPRINT_TOOLS);
     // 运行时制作新题型：写模块 → 框架验收 → 通过即生效
     if (this.ctx.get("constructDynamic") !== undefined) tools.push(CONSTRUCTOR_TOOL, FIGURE_TOOL, GAP_TOOL);
+    // 只重出一道：改一道题的正常路径（组卷是补齐，不是整卷重摇）
+    if (this.ctx.get("session") !== undefined) tools.push(REDRAW_TOOL);
     // 派子 agent：独立的事可以并行做（子任务看不到主对话，目标要写完整）
     tools.push(...AGENT_TOOLS);
     // 看/改某一道题：老师指着卷子说"把这道题改成…"时，agent 得先看得见那道题
@@ -1108,16 +1139,16 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           attempts.push(`${entry.item.instance.kind}（种子 ${String(seed)}）：题面没写成 —— ${entry.prose}`);
           continue;
         }
-        // oxlint-disable-next-line no-await-in-loop -- 唯一写入口有状态（去重、事件），串行才不会绕成一团
-        const result = await this.ctx.bank.submit(entry.prose);
-        if (result.ok) {
-          // 交回**入库后的那一份**：证据是闸门写的，写在库里的那份上
-          // （拿提交前的副本会让界面看到"检查：无"——检查明明跑过了）
-          items.push(this.ctx.bank.get(result.id) ?? { ...entry.prose, id: result.id });
+        // **预检，不入库**：口述出题常常要试好几个种子，入库就变成"每个种子留一道"，
+        // 题库会迅速堆满没人要的题（真实后果：2000+ 道、同一题位 116 道）。
+        // oxlint-disable-next-line no-await-in-loop -- 预检也要一道一道来（闸门会读题库现状）
+        const verdict = (await this.ctx.bank.verify?.(entry.prose)) ?? { pass: true as const };
+        if (verdict.pass) {
+          items.push({ ...entry.prose, evidence: verdict.evidence ?? {} });
           continue;
         }
         attempts.push(
-          `${entry.item.instance.kind}（种子 ${String(seed)}）：被 ${result.verdict.gate} 拦下 —— ${result.verdict.reason}`,
+          `${entry.item.instance.kind}（种子 ${String(seed)}）：被 ${verdict.gate} 拦下 —— ${verdict.reason}`,
         );
       }
     }
@@ -1447,11 +1478,15 @@ export class WorkbenchService extends Service implements WorkbenchApi {
 
   private async execute(
     state: RunState,
-    tool: string,
+    rawName: string,
     rawArguments: string,
     blueprint: Blueprint,
     workspaceName = "",
   ): Promise<{ kind: WorkbenchEvent["kind"]; text: string; payload: unknown; storedId?: string }> {
+    // 工具名的手滑（多半是单复数）先认下来：模型把 change_setting 写成 change_settings，
+    // 白费一步，老师看到的是"它想用一个这里没有的能力"（真实发生过两次）。
+    // 只认**登记过的名字**的单复数变体，不猜相似字符串。
+    const tool = this.resolveTool(rawName);
     let args: Record<string, unknown> = {};
     try {
       args = rawArguments === "" ? {} : (JSON.parse(rawArguments) as Record<string, unknown>);
@@ -1626,32 +1661,32 @@ export class WorkbenchService extends Service implements WorkbenchApi {
         item = written;
         state.candidates.set(candidateId, { ...candidate, item });
       }
-      const result = await this.ctx.bank.submit(item);
-      if (result.ok) {
+      // **预检，不入库**：同一条闸门链，但不落库。
+      // 为什么：以前每个候选一提交就入库，于是"出一道题试了五个种子"就在题库里留下五道；
+      // 真实后果是题库涨到 2000+ 道、同一个题位堆了 116 道，查重越来越容易撞、越撞越慢。
+      // 入库发生在**真的把它放上卷子**的时候（place_item / 组卷）。
+      const result = await this.ctx.bank.verify?.(item);
+      const verdict = result ?? { pass: true as const };
+      if (verdict.pass) {
+        state.candidates.set(candidateId, { ...candidate, item });
         return {
           kind: "gate",
           text:
-            `submit_item：${candidateId} 通过全部闸门并入库（${result.id}）——**入库只是留档，卷子还没变**；` +
-            `要把卷子上某个题位换成它，用 place_item <题位> ${candidateId}\n题面：${item.prose.stem}`,
+            `submit_item：${candidateId} 过了全部检查（**还没入库**）——` +
+            `要把卷子上某个题位换成它，用 place_item <题位> ${candidateId}；那时候才正式收下。\n题面：${item.prose.stem}`,
           // 通过时把证据一并回给模型：它能看到"凭什么通过"，而不是只看到 ok
-          payload: {
-            ok: true,
-            id: result.id,
-            evidence: result.verdict.pass ? (result.verdict.evidence ?? {}) : {},
-          },
-          storedId: result.id,
+          payload: { ok: true, id: item.id, evidence: verdict.evidence ?? {} },
         };
       }
+      const failure = verdict as Extract<typeof verdict, { pass: false }>;
+      const gate = failure.gate;
+      const reason = failure.reason;
+      const fixable = failure.fixable;
+      const hint = failure.hint;
       return {
         kind: "gate",
-        text: `submit_item：被 ${result.verdict.gate} 拦下 —— ${result.verdict.reason}`,
-        payload: {
-          ok: false,
-          gate: result.verdict.gate,
-          reason: result.verdict.reason,
-          fixable: result.verdict.fixable,
-          hint: result.verdict.hint ?? null,
-        },
+        text: `submit_item：被 ${gate} 拦下 —— ${reason}`,
+        payload: { ok: false, gate, reason, fixable, hint: hint ?? null },
       };
     }
 
@@ -1741,6 +1776,88 @@ export class WorkbenchService extends Service implements WorkbenchApi {
           attempts: result.attempts ?? [],
           spec: result.spec ?? null,
         },
+      };
+    }
+
+    if (tool === "redraw_slot") {
+      const session = this.ctx.get("session");
+      if (session === undefined) {
+        return { kind: "tool", text: "redraw_slot：没有会话服务", payload: { error: "未接入会话" } };
+      }
+      const slotKey = String(args.slotKey ?? "");
+      const requirement = typeof args.requirement === "string" ? args.requirement : "";
+      const row = blueprint.blueprint.find((entry) => entry.key === slotKey || slotKey.startsWith(`${entry.key}-`));
+      if (row === undefined) {
+        return {
+          kind: "tool",
+          text: `redraw_slot：设定里没有题位 ${slotKey}（现在的题位：${blueprint.blueprint.map((entry) => entry.key).join("、")}）`,
+          payload: { error: "未知题位" },
+        };
+      }
+      const slot = { ...row, key: slotKey, count: 1 };
+      const kinds = [...(this.ctx.construct.candidates?.(slot) ?? [])];
+      const wanted = typeof args.kind === "string" && args.kind !== "" ? args.kind : undefined;
+      if (wanted !== undefined && kinds.length > 0 && !kinds.includes(wanted)) {
+        return {
+          kind: "tool",
+          text: `redraw_slot：这个题位用不了题型 ${wanted}；能用的：${kinds.join("、")}`,
+          payload: { error: "题型与题位不匹配", kinds },
+        };
+      }
+      const attempts: string[] = [];
+      // 想「换一道」就该真的换：优先用**和现在这道不同的题型**，其次换种子
+      const current = session.latest()?.bindings.find((binding) => binding.slot === slotKey);
+      const currentItem = current === undefined ? undefined : this.ctx.bank.get(current.itemId);
+      const order = currentItem === undefined ? kinds : [...kinds.filter((one) => one !== currentItem.provenance.constructor.split("@")[0]), ...kinds.filter((one) => one === currentItem.provenance.constructor.split("@")[0])];
+      const list = wanted === undefined ? (order.length === 0 ? [""] : order) : [wanted];
+      const base = Date.now() % 90_000;
+      for (const kind of list) {
+        for (const step of [0, 1, 3, 7]) {
+          let item: Item;
+          try {
+            const byKind = this.ctx.construct.generateWith?.bind(this.ctx.construct);
+            item = kind === "" || byKind === undefined ? this.ctx.construct.generate(slot, base + step) : byKind(slot, base + step, kind);
+          } catch (error) {
+            attempts.push(`${kind || "默认题型"}：造不出来 —— ${error instanceof Error ? error.message : String(error)}`);
+            continue;
+          }
+          // eslint-disable-next-line no-await-in-loop -- 一道一道试：被拦下就换种子
+          const written = await this.serialize(item, requirement);
+          if (typeof written === "string") {
+            attempts.push(`${kind || "默认题型"}：题面没写成 —— ${written}`);
+            continue;
+          }
+          // eslint-disable-next-line no-await-in-loop
+          const stored = await this.ctx.bank.submit(written);
+          if (!stored.ok) {
+            attempts.push(`${kind || "默认题型"}：被 ${stored.verdict.gate} 拦下 —— ${stored.verdict.reason}`);
+            continue;
+          }
+          // oxlint-disable-next-line no-await-in-loop -- 写卷子是有状态的动作（版本、绑定），必须串行
+          const placed = await session.place(slotKey, stored.id, "agent");
+          if (!placed.ok) {
+            return {
+              kind: "tool",
+              text: `redraw_slot：这一道造好了（${stored.id}），但没放进 ${slotKey} —— ${placed.reason ?? ""}`,
+              payload: { ok: false, id: stored.id, reason: placed.reason ?? "" },
+            };
+          }
+          return {
+            kind: "gate",
+            text:
+              `redraw_slot：**卷子第 ${String(placed.version?.version ?? 0)} 版**，${slotKey} 这一道换成了新的` +
+              `（其余题目没有动）\n${written.prose.stem}`,
+            payload: { ok: true, id: stored.id, slot: slotKey, version: placed.version?.version ?? null },
+            storedId: stored.id,
+          };
+        }
+      }
+      return {
+        kind: "gate",
+        text:
+          `redraw_slot：这一道重出失败——${attempts.slice(0, 3).join("；")}\n` +
+          "可以换一个要求（比如放宽难度）、换题型（kind）、或者先用 quick_question 看看现造得出来什么。",
+        payload: { ok: false, attempts },
       };
     }
 

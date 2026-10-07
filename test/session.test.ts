@@ -119,12 +119,13 @@ describe('会话与版本', () => {
     ctx.session.update({ blueprintPath: extraPath })
     await ctx.session.assemble('换蓝图')
 
-    // **"再出一版"是现造**：同样的题位会换成新题，所以 diff 里是 replaced 而不是 same
-    //（这正是我们要的：新卷子不该是把上次那批从题库里捞回来）
+    // **组卷 = 补齐**：卷子上已经有的题位原样留着，只把新题位补上。
+    // （这条以前断言的是"整卷重摇"——那正是老师抱怨的"我改一句它又造一堆题"：
+    //   一次组卷尝试 65 次构造、同一题位在题库里堆了 116 道。ADR-0040 改成了补齐。）
     const diff = ctx.session.diff(1, 2)
     expect(diff.find((change) => change.slot === 'S99-1')?.change).toBe('added')
-    expect(diff.filter((change) => change.change === 'replaced').length).toBe(blueprint.blueprint.length)
-    expect(diff.filter((change) => change.change === 'same')).toHaveLength(0)
+    expect(diff.filter((change) => change.change === 'replaced')).toHaveLength(0)
+    expect(diff.filter((change) => change.change === 'same')).toHaveLength(blueprint.blueprint.length)
   })
 
   it('改蓝图不会抹掉题位上的旁注（_evidence 是依据，不是垃圾）', async () => {

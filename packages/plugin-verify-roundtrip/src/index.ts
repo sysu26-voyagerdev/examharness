@@ -182,6 +182,28 @@ function withoutStructure(text: string): string {
  * 查的是**正文**（题面/答案/解法里的 `$…$`）：数学就写在正文里，
  * 不再另设一份"公式层"（那份东西界面也不该单独摆一块——用户："这个部分意义不大"）。
  */
+/** 报错/片段掐短：只留第一行，最多 80 字（缺口行是**给老师看的一句话**，不是日志） */
+function shortError(text: string, max = 80): string {
+  const line = text.split('\n')[0] ?? ''
+  return line.length > max ? `${line.slice(0, max)}…` : line
+}
+
+/**
+ * 旧"公式层"（`prose.tex`）怎么检查。
+ *
+ * 这两个字段早先是"纯公式片段"，但老题/agent 现写的题型里常把**整句正文**塞进来
+ * （`（1）$y=-(x-3)^{2}+2$；（2）…`）。那时它其实是正文，数学写在 `$…$` 里——
+ * 按正文拆开逐段编译才对；整句当公式编译必然报 `Can't use function '$'`，
+ * 于是一个**数学没有任何问题**的候选被整道拦下。
+ * 实测：一次组卷里 6 道题卡在这一条，每道都白花一次模型调用。
+ * 不带定界符的才按公式编译（那才是真的坏数据：整句塞进公式字段）。
+ */
+function legacyTex(label: string, fragment: string | undefined): [string, string][] {
+  if (fragment === undefined) return []
+  const parts = mathSegments(fragment)
+  return parts.length > 0 ? parts.map((part) => [label, part] as [string, string]) : [[label, fragment]]
+}
+
 function checkTexLayer(item: Item): Verdict | undefined {
   const tex = item.prose.tex
   const fragments: [string, string][] = [
@@ -191,8 +213,8 @@ function checkTexLayer(item: Item): Verdict | undefined {
       mathSegments(step).map((part) => [`解析第 ${String(index + 1)} 步的公式`, part] as [string, string]),
     ),
     // 老题里还带着"公式层"（tex.*）：留着的也要编译得过，不许是坏 LaTeX
-    ...(tex?.stem === undefined ? [] : ([['题面公式（旧字段）', tex.stem]] as [string, string][])),
-    ...(tex?.answer === undefined ? [] : ([['答案公式（旧字段）', tex.answer]] as [string, string][])),
+    ...legacyTex('题面公式（旧字段）', tex?.stem),
+    ...legacyTex('答案公式（旧字段）', tex?.answer),
   ]
   if (fragments.length === 0) return undefined
   for (const [label, fragment] of fragments) {
@@ -201,14 +223,17 @@ function checkTexLayer(item: Item): Verdict | undefined {
       return {
         pass: false,
         gate: name,
-        reason: `${label}的 LaTeX 编译不过：${result.error}`,
+        // KaTeX 的报错里带着**原文片段**，直接铺进缺口行会把记录撑成一坨（实测见过两百多字的
+        // 一行，里面还夹着 `；`，界面按分号切就切碎了）。这里只留第一行、掐短；
+        // 完整片段进 hint，agent 要看细节看 hint。
+        reason: `${label}的 LaTeX 编译不过：${shortError(result.error)}`,
         fixable: true,
         // 最常见的错法：把正文连同 $…$ 定界符一起塞进公式字段。
         // 这里必须说清怎么改，否则 agent 只会换个写法再撞一次。
-        hint: fragment.includes('$')
+        hint: `原文片段：${shortError(fragment, 60)}。` + (fragment.includes('$')
           ? '这个字段是**数学模式下的公式片段**，不要再带 $ 定界符（也别把"已知抛物线…与 x 轴交于…"整句塞进来）：' +
             '正文留在题面里，这里只写给公式本身（例如 y=-2(x-4)^{2}-2）'
-          : '数学由构造给出，别自己改写公式；只把它嵌进句子里',
+          : '数学由构造给出，别自己改写公式；只把它嵌进句子里'),
       }
     }
   }

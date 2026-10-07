@@ -8,6 +8,7 @@ import type {
   PaperGap,
   PaperSlot,
   SlotSpec,
+  Verdict,
 } from '@examharness/core'
 import { fnv1a, shapeOf, signedByAll } from '@examharness/core'
 import z from 'schemastery'
@@ -77,15 +78,34 @@ export class PaperService extends Service implements PaperApi {
         }
         // **钉住的题位**（老师签过字的那道）：直接用指定的题，不重造——
         // 签的是那道题，重组卷不该把它换掉。
+        // 老师签字过 / 被明确指定过的：不重造
         const pinnedId = options.pinned?.[key]
         if (pinnedId !== undefined && this.ctx.bank.get(pinnedId) !== undefined) {
           slots.push({ key, spec, itemId: pinnedId })
           continue
         }
+        // **卷子上已经有的那道：保持不动**（组卷 = 补齐，不是整卷重摇）。
+        // 条件：还在库里、被现役闸门全部签过字、分类信息与题位对得上。
+        const keptId = options.keep?.[key]
+        const kept = keptId === undefined ? undefined : this.ctx.bank.get(keptId)
+        if (
+          kept !== undefined &&
+          signedByAll(kept, this.ctx.bank.gates?.() ?? []) &&
+          kept.slot.type === spec.type &&
+          kept.slot.score === spec.score
+        ) {
+          slots.push({ key, spec, itemId: keptId ?? '' })
+          continue
+        }
         const seeds = options.seeds?.[key]
         let placed: PaperSlot | undefined
-        let fallback: PaperSlot | undefined
-        let fallbackShape: string | undefined
+        // **候选不入库**：试过的种子与题型都不写题库，只有"这个题位最终收下的那道"才入库。
+        // 为什么（实测）：早先每个候选都 submit，组卷一次就往库里堆十几道没人要的题
+        // （同一题位堆到 116 道、全库两千余道）；查重闸门随后拿这些没人要的废候选拦住新题，
+        // 于是越出越出不来——老师等的是"一道题"，系统却在跟自己的垃圾较劲（ADR-0040）。
+        let chosen: Item | undefined
+        let spare: Item | undefined
+        let spareShape: string | undefined
         let reason = '候选种子用尽，仍未凑到通过闸门的题'
         // 每个题型各为什么不行：缺口原因要给老师看得懂的一句话，
         // 只留最后一条会误导（"被 verify-question 拦下"可能只是备选题型的事，首选是别的原因）
@@ -134,37 +154,45 @@ export class PaperService extends Service implements PaperApi {
             // 都没过或都用过时，退回"第一个过的"。
             // 为此把前几次尝试的通过项记下来，而不是一遇到通过就收手。
             // oxlint-disable-next-line no-await-in-loop
-            const result = await this.ctx.bank.submit(item)
-            if (result.ok) {
+            const verdict = await this.judge(item)
+            if (verdict.pass) {
               const shape = shapeOf(item)
               if (!used.has(shape)) {
-                placed = { key, spec, itemId: result.id }
+                chosen = item
                 used.add(shape)
                 break
               }
               // 用过的结构：先放着当备选，继续试下一个种子
-              fallback ??= { key, spec, itemId: result.id }
-              fallbackShape ??= shape
+              spare ??= item
+              spareShape ??= shape
               reason = '这个题位的结构这张卷已经用过了，继续找新的'
               continue
             }
-            reason = kind === undefined ? `${result.verdict.gate}：${result.verdict.reason}` : `${kind} 被 ${result.verdict.gate} 拦下：${result.verdict.reason}`
+            reason = kind === undefined ? `${verdict.gate}：${verdict.reason}` : `${kind} 被 ${verdict.gate} 拦下：${verdict.reason}`
             tried.push(
               kind === undefined
                 ? reason
-                : `${kind} 被 ${result.verdict.gate} 拦下：${result.verdict.reason}`,
+                : `${kind} 被 ${verdict.gate} 拦下：${verdict.reason}`,
             )
             // fixable=false 是结构性违规（超纲等）：换种子没用，必须改蓝图
-            if (!result.verdict.fixable) break
+            if (!verdict.fixable) break
           }
-          if (placed !== undefined) break
+          if (chosen !== undefined || placed !== undefined) break
           // 结构性违规换题型也没用（超纲是题位本身的问题）
           if (kinds !== undefined && kinds.length > 1 && reason.includes('verify-scope')) break
         }
         // 新结构一个都没找到：用能过闸门的备选（宁可结构重复，也不要空题位）
-        if (placed === undefined && fallback !== undefined) {
-          placed = fallback
-          used.add(fallbackShape ?? '')
+        const picked = chosen ?? spare
+        if (placed === undefined && picked !== undefined) {
+          if (spareShape !== undefined) used.add(spareShape)
+          // **收下这一刻才入库**：入库 = 上卷子（R3 的"复用"也才成立）
+          // oxlint-disable-next-line no-await-in-loop
+          const final = await this.ctx.bank.submit(picked)
+          if (final.ok) placed = { key, spec, itemId: final.id }
+          else {
+            reason = `${final.verdict.gate}：${final.verdict.reason}`
+            tried.push(reason)
+          }
         }
 
         // 最后一招：**沿用上一版这个题位的那道**。
@@ -206,6 +234,18 @@ export class PaperService extends Service implements PaperApi {
     }
     this.latest = paper
     return paper
+  }
+
+  /**
+   * 判一道候选题**能不能收**：只判不收（题库的 verify 就是这条 waterfall，判定只有一套）。
+   *
+   * 宿主没有 verify（极简实现）时退回 submit——但那会入库，所以只当兜底。
+   */
+  private async judge(item: Item): Promise<Verdict> {
+    const verify = this.ctx.bank.verify?.bind(this.ctx.bank)
+    if (verify !== undefined) return verify(item)
+    const result = await this.ctx.bank.submit(item)
+    return result.ok ? { pass: true } : result.verdict
   }
 
   private difficultyMid(itemId: string): number {

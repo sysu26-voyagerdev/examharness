@@ -25,6 +25,13 @@ export class BankService extends Service implements BankApi {
 
   private readonly file: string
   private readonly items = new Map<string, Item>()
+  /**
+   * 这次运行里**新收下的**题号（见 BankApi.fresh）。
+   *
+   * 只活在内存里：它回答的是"组卷刚刚放上卷子的那些"，重启之后这个问题由会话的版本记录回答
+   * （版本里记着每个题位的题号）。所以丢了也不影响判断，只是范围窄一点。
+   */
+  private readonly freshIds = new Set<string>()
 
   constructor(ctx: Context, config: BankConfig) {
     super(ctx, 'bank')
@@ -93,6 +100,7 @@ export class BankService extends Service implements BankApi {
       evidence: { ...item.evidence, ...verdict.evidence },
     }
     this.items.set(stored.id, stored)
+    this.freshIds.add(stored.id)
     this.append(stored)
     this.ctx.emit('item:stored', { item: stored })
     return { ok: true, id: stored.id, verdict }
@@ -108,6 +116,11 @@ export class BankService extends Service implements BankApi {
 
   get(id: string): Item | undefined {
     return this.items.get(id)
+  }
+
+  /** 这次运行里新收下的题号（组卷刚放上卷子的那些）——见 BankApi.fresh 的说明 */
+  fresh(): readonly string[] {
+    return [...this.freshIds]
   }
 
   /** 人工终审签字：把题目落成 verified 并把"谁、何时"写进 review。 */

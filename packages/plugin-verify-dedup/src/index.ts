@@ -22,7 +22,41 @@ function proseOf(entry: { prose: { stem: string; answerText: string; solution: r
  */
 export const evidenceKey = 'dedup'
 
-/** 判定规则的版本：加一条新判据就 +1（旧签字随即失效，旧题重新送审） */
+/**
+ * **什么才算"已有的题目"**：在用的题。三样都算，别的都不算：
+ *
+ * 1. 本卷用过的（当前会话每一版题位上引用过的题号）；
+ * 2. 老师确认过的（`review.confirmedBy`——他签过字，就是要留着）；
+ * 3. 这次运行里刚收下的（组卷刚放上卷子的那些，`bank.fresh()`）。
+ *
+ * 为什么要把范围收窄（实测，不是推测）：题库里两千余道题中，同一题位堆了 116 道、
+ * 全是早先"每个候选都 submit"留下的、**没在任何卷子上**。拿它们当"已有题目"，
+ * 新造出来的题几乎必然撞上其中一道 → 组卷一遍遍换种子 → 老师等到的是"还没出结果"。
+ * 查重是为了不重复出题，不是为了守护历史垃圾。库里那些照样进**相似度报告**
+ * （证据里写出来给老师看），只是不再**拦人**。
+ */
+function usedIds(ctx: Context): ReadonlySet<string> {
+  const used = new Set<string>(ctx.bank.fresh?.() ?? [])
+  for (const item of ctx.bank.all()) {
+    if (item.review.confirmedBy !== null) used.add(item.id)
+  }
+  // 会话可选：没有会话（极简宿主 / 单测）时，只剩"这次刚收下的"和"老师签过的"
+  const session = ctx.get('session')
+  for (const version of session?.versions?.() ?? []) {
+    for (const binding of version.bindings) used.add(binding.itemId)
+  }
+  return used
+}
+
+/**
+ * 判定规则的版本：**加一条新判据**就 +1（旧签字随即失效，旧题重新送审）。
+ *
+ * 这次改了比对范围（只跟"在用的题"比，见 usedIds），但**故意不 +1**：
+ * 规则号是给"判据变严"用的——旧签字是在**更严**的范围下拿到的（当时跟库里全部比），
+ * 按新范围必然也过，签字仍然成立。真 +1 的后果是当场把全库签字作废，
+ * "组卷=补齐"和"沿用上一版"一起失灵（实测：重出一版把 5 个题位全换掉了）。
+ * 判据变松不用重审；判据变严才要。
+ */
 export const rule = 1
 export const inject = ['bank']
 
@@ -68,8 +102,18 @@ export function apply(ctx: Context, config: DedupConfig): void {
     const fingerprint = ctx.bank.fingerprint(item)
     let worst = 0
     let worstId: string | undefined
+    // 库里**没人在用**的同结构旧候选：不拦人，但要如实报出来（老师有权知道库里躺着一堆）
+    let stale = 0
+    const inUse = usedIds(ctx)
 
     for (const other of ctx.bank.all()) {
+      // 同 id 的三条判据**不受"在用"范围影响**：那是完整性检查（id 被改写、同一道题又提一次），
+      // 与"跟谁比算撞题"是两件事。放行重复提交会往盘上再追一行同样的题。
+      const sameId = other.id === item.id
+      if (!sameId && !inUse.has(other.id)) {
+        if (ctx.bank.fingerprint(other) === fingerprint) stale += 1
+        continue
+      }
       // 同 id 的三种情形：
       //   · 内容不同 → id 被改写（id 由构造参数算出）——拦下；
       //   · 内容一样、而且这道题**已经被现役闸门全部签过字** → 是重复提交，照旧拦下；
@@ -154,7 +198,9 @@ export function apply(ctx: Context, config: DedupConfig): void {
         ...verdict.evidence,
         [evidenceKey]: {
           pass: true,
-          detail: `与题库最高相似度 ${worst.toFixed(2)}（阈值 ${config.maxSimilarity}）`,
+          detail:
+            `与在用的题最高相似度 ${worst.toFixed(2)}（阈值 ${config.maxSimilarity}）` +
+            (stale === 0 ? '' : `；库里另有 ${String(stale)} 道同结构的旧草稿（没人用过，不算撞题）`),
         },
         // 原创度报告：只出数字，不出语料原文（ADR-0014）
         originality: { pass: true, detail: corpusNote },

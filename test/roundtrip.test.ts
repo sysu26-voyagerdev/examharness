@@ -50,6 +50,9 @@ interface BrainOptions {
 
 function brain(options: BrainOptions) {
   let phase = 0
+  // 记住见过的那一个候选号：submit 之后返回里就没有 candidateId 了（只有 ok/evidence/id），
+  // 而放上卷子那一步还得用它。**必须活在闭包外**，否则每次调用都被清空。
+  let remembered = ''
   return (messages: readonly LlmMessage[]): LlmReply => {
     const system = messages.find((message) => message.role === 'system')?.content ?? ''
     const last = messages.at(-1)?.content ?? ''
@@ -79,10 +82,12 @@ function brain(options: BrainOptions) {
     phase += 1
     const candidateId = (): string => {
       try {
-        return (JSON.parse(last) as { candidateId?: string }).candidateId ?? ''
+        const parsed = JSON.parse(last) as { candidateId?: string }
+        if (parsed.candidateId !== undefined && parsed.candidateId !== '') remembered = parsed.candidateId
       } catch {
-        return ''
+        /* 不是 JSON 就用上次记住的 */
       }
+      return remembered
     }
     if (phase === 1) {
       return { content: '先构造候选。', toolCalls: [call('c1', 'construct_item', { slotKey: 'S1', seed: SEED })] }
@@ -92,6 +97,10 @@ function brain(options: BrainOptions) {
     }
     if (phase <= 3) {
       return { content: null, toolCalls: [call('c3', 'submit_item', { candidateId: candidateId() })] }
+    }
+    // 提交只是过检查；**放上卷子**才入库（真实语义：入库发生在那一刻）
+    if (phase === 4) {
+      return { content: null, toolCalls: [call('c4', 'place_item', { slotKey: 'S1-1', candidateId: candidateId() })] }
     }
     return { content: '收工。', toolCalls: [] }
   }
@@ -168,6 +177,7 @@ describe('回译闸门', () => {
     )
     const run = await ctx.workbench.run({ goal: '出题', blueprint })
 
+    // 放上卷子之后才在库里（提交本身只是预检）
     expect(run.stored).toHaveLength(1)
     const stored = ctx.bank.all()[0]
     expect(stored?.prose.serializer.model).toBe('fake-writer')
@@ -207,6 +217,35 @@ describe('回译闸门', () => {
     expect(ctx.bank.all()[0]?.prose.serializer.model).toBe('template')
     // 模板题**不走回译**，但要留一条痕迹（题库靠"每道现役闸门都签过字"判断旧题能否复用）
     expect(ctx.bank.all()[0]?.evidence.roundtrip?.detail).toContain('模板序列化')
+  })
+
+  it('旧"公式层"（tex.*）里塞的是整句正文时，按正文拆开编译，不整道拦下', async () => {
+    // 实测：一次组卷里 6 道题卡在这一条——`tex.answer` 写的是
+    // `（1）$y=-(x-3)^{2}+2$；（2）…`，整句当公式编译必然报 `Can't use function '$'`，
+    // 于是一个**数学没有任何问题**的候选被整道拦下，还白花一次模型调用。
+    const ctx = await boot(brain({ serialize: false, parse: () => null }), false)
+    const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
+    const withTex: Item = {
+      ...base,
+      prose: {
+        ...base.prose,
+        tex: { answer: '（1）$y=(x-3)^{2}-4$；（2）最大值 $-4$' },
+      },
+    }
+    const result = await ctx.bank.submit(withTex)
+
+    expect(result.ok).toBe(true)
+  })
+
+  it('旧"公式层"里没有定界符、公式本身写坏了 → 照样拦下，并说清是哪个字段', async () => {
+    const ctx = await boot(brain({ serialize: false, parse: () => null }), false)
+    const base = ctx.construct.generate({ ...SLOT, key: 'S1-1', count: 1 }, SEED)
+    const broken: Item = { ...base, prose: { ...base.prose, tex: { answer: 'y=\\frac{1}{' } } }
+    const result = await ctx.bank.submit(broken)
+
+    expect(result.ok).toBe(false)
+    expect(result.ok ? '' : result.verdict.gate).toBe('verify-roundtrip')
+    expect(result.ok ? '' : result.verdict.reason).toContain('答案公式（旧字段）')
   })
 
   it('构造实例没声明目标/条件 → 这两项没验成，如实落"待复核"（不假装通过）', async () => {

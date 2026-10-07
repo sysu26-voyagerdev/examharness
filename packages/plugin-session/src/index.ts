@@ -269,12 +269,17 @@ export class SessionService extends Service implements SessionApi {
     // 现造不出新的时的最后一招：沿用上一版这个题位的那道（见 AssembleOptions.previous）
     const previousItems: Record<string, string> = {}
     for (const binding of this.latest()?.bindings ?? []) previousItems[binding.slot] = binding.itemId
+    // **组卷 = 补齐**：卷子上已经有的题位原样留着，只把缺的/不可用的补上。
+    // （以前每次都整卷重造：一次组卷尝试 65 次构造、同一题位堆 116 道题、老师改一句等几分钟）
+    const keep: Record<string, string> = {}
+    for (const binding of this.latest()?.bindings ?? []) keep[binding.slot] = binding.itemId
     const paper = await this.ctx.paper.assemble(blueprint, {
       nonce: `${record.meta.id}|${String(Date.now())}`,
       usedShapes,
       pinned,
       preferredKinds,
       previous: previousItems,
+      keep,
     })
     const previous = this.latest()
 

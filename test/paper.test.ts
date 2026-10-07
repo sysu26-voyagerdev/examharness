@@ -108,6 +108,21 @@ describe('组卷', () => {
     expect(second?.id).not.toBe(first?.id)
   })
 
+  it('试过的候选**不入库**：只有收下的那几道进题库（实测过：以前一次组卷堆出十几道没人要的）', async () => {
+    const ctx = await boot()
+    const paper = await ctx.paper.assemble(blueprint, { nonce: 'n-waste' })
+
+    // 题位齐了，题库里就正好这么多道——一个废候选都没留下
+    expect(paper.slots.length).toBeGreaterThan(0)
+    expect(ctx.bank.all()).toHaveLength(paper.slots.length)
+    // 而且这些正是卷子上用的那些（入库 = 上卷子）
+    expect(new Set(ctx.bank.all().map((item) => item.id))).toEqual(
+      new Set(paper.slots.map((slot) => slot.itemId)),
+    )
+    // 尝试次数如实记着（闸门拦了几次是可见的）：不等于入库数，说明确实试过别的
+    expect(paper.attempts).toBeGreaterThanOrEqual(paper.slots.length)
+  })
+
   it('现造不出新的时**沿用上一版这个题位的那道**，并如实标注（宁可沿用，不要空题位）', async () => {
     const ctx = await boot()
     const first = await ctx.paper.assemble(blueprint, { nonce: 'n1' })

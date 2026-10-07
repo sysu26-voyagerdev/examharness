@@ -139,13 +139,15 @@ describe('口述出题', () => {
     expect(result?.items.length).toBeGreaterThan(0)
     const item = result?.items[0]
     expect(item?.id).toBeDefined()
-    // 收下的题真的在题库里，而且每道现役闸门都签过字
-    expect(ctx.bank.get(item?.id ?? '')).toBeDefined()
+    // 每道现役闸门都签过字（签字就是证据）；但**还没入库**——
+    // 口述出题给出的是"摆在老师眼前的一稿"，不是悄悄往题库里塞一道
     expect(Object.keys(item?.evidence ?? {}).length).toBeGreaterThan(0)
+    expect(ctx.bank.get(item?.id ?? '')).toBeUndefined()
     // 现造：来源是题型 + 种子，不是"从库里挑的"
     expect(item?.provenance.constructor).not.toBe('')
     expect(item?.prose.stem).toContain('拱桥')
-    expect(ctx.bank.all()).toHaveLength(result?.items.length ?? 0)
+    // 一道都没落库：候选是候选，入库只有 place_item（老师点头）这一条路
+    expect(ctx.bank.all()).toHaveLength(0)
   })
 
   it('规格造不出来时降一档再试，并把降了什么说清楚（不许偷偷降）', async () => {
@@ -159,7 +161,7 @@ describe('口述出题', () => {
     expect(result?.items[0]?.slot.score).toBe(6)
     expect(result?.adjusted).toContain('10 分')
     expect(result?.adjusted).toContain('6 分')
-    expect(ctx.bank.get(result?.items[0]?.id ?? '')).toBeDefined()
+    expect(ctx.bank.get(result?.items[0]?.id ?? '')).toBeUndefined()
   })
 
   it('结构上就站不住的候选不会被白写一遍题面（预检不花模型调用）', async () => {

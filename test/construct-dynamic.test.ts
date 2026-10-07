@@ -341,7 +341,13 @@ async function boot(): Promise<Context> {
     await ctx.plugin(figurePlugin, { width: 480, height: 300, minPointGapPx: 14 }),
     await ctx.plugin(figureGate, { requireFigure: false }),
     await ctx.plugin(constructPlugin, { rootRange: [-4, 5] }),
-    await ctx.plugin(dynamicPlugin, { dir: join(workdir, 'constructors'), samples: 30, maxCovers: 6 }),
+    await ctx.plugin(dynamicPlugin, {
+      dir: join(workdir, 'constructors'),
+      samples: 30,
+      maxCovers: 6,
+      // 与仓库里那些真实题型隔离：否则它们的 covers 会盖住本文件里的样例模块
+      includeRepo: false,
+    }),
     await ctx.plugin(paperPlugin, { maxAttempts: 6 }),
   )
   return ctx

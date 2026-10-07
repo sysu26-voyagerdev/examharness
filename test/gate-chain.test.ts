@@ -109,6 +109,32 @@ describe('闸门链', () => {
     expect(ctx.bank.all()).toHaveLength(1)
   })
 
+  it('撞题只跟**在用的题**比：这次刚收下的照样拦，库里没人用的旧草稿不拦', async () => {
+    // 场景一：这道题是**这次运行里刚收下的**（组卷刚放上卷子）→ 它"在用"，撞它必须拦
+    const first = await boot()
+    const original = first.construct.generate(slot('S1'), 99)
+    expect((await first.bank.submit(original)).ok).toBe(true)
+    // 同一个构造参数、换个题位 → 指纹相同（构造器 + 参数），题号不同
+    const twin = first.construct.generate({ ...slot('S1'), key: 'S2' }, 99)
+    expect(twin.id).not.toBe(original.id)
+    expect(first.bank.fingerprint(twin)).toBe(first.bank.fingerprint(original))
+    const blocked = await first.bank.submit(twin)
+    expect(blocked.ok).toBe(false)
+    expect(blocked.ok ? '' : blocked.verdict.gate).toBe('verify-dedup')
+
+    // 场景二：库是**上一次运行**留下的（重启后加载进来，没人用过、没人签过字）
+    // 早先这个库会拿这些旧草稿拦人——实测把组卷卡成 60 多次徒劳尝试（ADR-0040）
+    await Promise.all(fibers.toReversed().map((fiber) => fiber.dispose()))
+    fibers.length = 0
+    const second = await boot()
+    expect(second.bank.all()).toHaveLength(1)
+    const legacyTwin = second.construct.generate({ ...slot('S1'), key: 'S2' }, 99)
+    const allowed = await second.bank.submit(legacyTwin)
+    expect(allowed.ok).toBe(true)
+    // 但库里那道还是在的（没删、没动），只是不再当"已有题目"用
+    expect(second.bank.all()).toHaveLength(2)
+  })
+
   it('不认识的构造器 fail closed：不得入库', async () => {
     const ctx = await boot()
     const item: Item = { ...ctx.construct.generate(slot('S1'), 5), instance: { kind: 'parabola/legendre', params: { a: 1 }, givens: [], goal: 'x' } }

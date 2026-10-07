@@ -32,6 +32,8 @@ const blueprint = JSON.parse(readFileSync(join(ROOT, 'seed/blueprint.json'), 'ut
 
 /** 一个只会照着剧本走的"模型"：先构造，再提交，然后收工 */
 function driver(slotKey: string, seed: number) {
+  let lastCandidate = ''
+  let placed = false
   return (messages: readonly LlmMessage[]): LlmReply => {
     const last = messages.at(-1)
     const system = messages.find((message) => message.role === 'system')?.content ?? ''
@@ -54,11 +56,23 @@ function driver(slotKey: string, seed: number) {
       }
     }
     if (last?.role === 'tool') {
-      const payload = JSON.parse(last.content ?? '{}') as { candidateId?: string }
+      const payload = JSON.parse(last.content ?? '{}') as { candidateId?: string; ok?: boolean; id?: string }
+      if (payload.candidateId !== undefined) lastCandidate = payload.candidateId
       if (payload.candidateId !== undefined) {
         return {
           content: null,
           toolCalls: [{ id: 'c2', name: 'submit_item', arguments: JSON.stringify({ candidateId: payload.candidateId }) }],
+        }
+      }
+      // 提交只是过检查；**放上卷子**才是收尾（入库发生在那一刻）。
+      // 只放一次：place_item 的返回里也有 ok，条件不看紧就会自己打转（真踩过——测试跑不完）
+      if (payload.ok === true && !placed) {
+        placed = true
+        return {
+          content: null,
+          toolCalls: [
+            { id: 'c3', name: 'place_item', arguments: JSON.stringify({ slotKey, candidateId: lastCandidate }) },
+          ],
         }
       }
     }
@@ -120,14 +134,15 @@ afterEach(async () => {
 })
 
 describe('agent 工作台', () => {
-  it('模型构造 → 提交 → 过闸门入库，全程留痕', async () => {
+  it('模型构造 → 提交（预检）→ 放上卷子才入库，全程留痕', async () => {
     const ctx = await boot({ chat: driver('S1', 42) })
     const run = await ctx.workbench.run({ goal: '按蓝图出一份课后作业卷', blueprint })
 
     expect(run.stopped).toBe('done')
-    expect(run.stored).toHaveLength(1)
+    // **入库发生在"放上卷子"那一刻**：提交只是过检查、把候选留着
+    //（以前一提交就入库，于是"换个种子再试"就把题库堆满了——真实后果 2000+ 道、同一题位 116 道）
     expect(ctx.bank.all()).toHaveLength(1)
-    expect(run.transcript.some((event) => event.kind === 'gate' && event.text.includes('入库'))).toBe(true)
+    expect(run.stored).toHaveLength(1)
     expect(run.transcript.some((event) => event.text.startsWith('construct_item'))).toBe(true)
   })
 
@@ -145,6 +160,28 @@ describe('agent 工作台', () => {
     expect(gate?.text).toContain('verify-scope')
     expect(run.stored).toHaveLength(0)
     expect(ctx.bank.all()).toHaveLength(0)
+  })
+
+  it('工具名手滑（多半是单复数）直接认下来，不白费一步', async () => {
+    // 真实发生过两次：模型把 change_setting 写成 change_settings，
+    // 老师看到的是"它想用一个这里没有的能力"。只认**登记过的名字**的单复数变体，不猜相似字符串。
+    const ctx = await boot({
+      chat: (messages) => {
+        const last = messages.at(-1)
+        if (last?.role === 'user') {
+          return {
+            content: '先构造候选。',
+            toolCalls: [{ id: 'c1', name: 'construct_items', arguments: JSON.stringify({ slotKey: 'S1', seed: 42 }) }],
+          }
+        }
+        return { content: '收工。', toolCalls: [] }
+      },
+    })
+    const run = await ctx.workbench.run({ goal: '出题', blueprint })
+
+    const tool = run.transcript.find((event) => event.kind === 'tool')
+    expect(tool?.text).toContain('construct_item')
+    expect(run.transcript.some((event) => event.text.includes('这里没有的能力'))).toBe(false)
   })
 
   it('没配密钥就明确拒绝，不假装在干活', async () => {

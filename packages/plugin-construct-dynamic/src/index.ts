@@ -41,6 +41,14 @@ export const name = 'construct-dynamic'
 
 export const Config = z.object({
   dir: z.string().default('data/constructors'),
+  /**
+   * 要不要**同时**加载仓库里的 `constructors/`（默认要）。
+   *
+   * 测试必须关掉它：agent 会在运行时往 `constructors/` 写真实题型，那些题型的 covers
+   * 会盖住测试自己的样例模块（真实踩过：一个覆盖「最值」的新题型让"重交同一个路径生效"
+   * 这条用例选中了别的题型，测试红了，而产品没问题）。测试要的是**自己的隔离环境**。
+   */
+  includeRepo: z.boolean().default(true),
   /** 验收时构造多少条样题 */
   samples: z.number().default(30),
   /** 一个题型最多覆盖多少知识点（防"什么都能出"的假题型） */
@@ -57,6 +65,7 @@ export const Config = z.object({
 
 export interface DynamicConfig {
   dir: string
+  includeRepo: boolean
   samples: number
   maxCovers: number
   verifyScript: string
@@ -220,7 +229,9 @@ export class DynamicConstructorService extends Service implements DynamicConstru
   /** 扫描目录：逐个加载 + 验收（不通过的只在报告里留痕，不注册） */
   async loadAll(): Promise<readonly ConstructorReport[]> {
     // 两个来源：仓库里的 constructors/（版本化、团队共享）+ data/constructors/（本机实验）
-    const dirs = [resolve(this.root, 'constructors'), this.dir]
+    const dirs = this.config.includeRepo
+      ? [resolve(this.root, 'constructors'), this.dir]
+      : [this.dir]
     const files = dirs.flatMap((dir) => {
       if (!existsSync(dir)) return []
       return readdirSync(dir)
