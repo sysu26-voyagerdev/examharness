@@ -412,6 +412,33 @@ function seedFromKb(ctx: Context, workspaceName: string, batchId: string): numbe
   return ctx.workspace.seedLinks(workspaceName, ctx.kb.sourcePaths(batchId))
 }
 
+/**
+ * 读设置改动（ops）。
+ *
+ * `path` 收两种写法：`["model","model"]`（界面用的）与 `"model.model"`（人和 agent 手写更顺手）。
+ * **别的形状当场报错**，不许默默写下去——真实事故：有人按"点号字符串"送来，
+ * 而底层把 path 当**数组**用，于是 `"model.model"` 被逐字符拆成
+ * `{m:{o:{d:{e:{l:{".":{...}}}}}}}`，设置文件被写进一份谁都不认识的覆盖层，
+ * 而模型**没换**（界面照旧显示旧模型，看着像"改了没反应"）。
+ */
+export function settingsOps(raw: unknown): SettingsOp[] {
+  if (raw === undefined || raw === null) return []
+  if (!Array.isArray(raw)) throw new Error('ops 必须是数组')
+  return raw.map((entry) => {
+    const op = (entry ?? {}) as { path?: unknown; value?: unknown; unset?: unknown }
+    const path =
+      typeof op.path === 'string'
+        ? op.path.split('.').filter((part) => part !== '')
+        : Array.isArray(op.path) && op.path.every((part) => typeof part === 'string')
+          ? (op.path as string[])
+          : undefined
+    if (path === undefined || path.length === 0) {
+      throw new Error(`op.path 只能是 ["model","model"] 或 "model.model" 这样的路径，收到的是 ${JSON.stringify(op.path)}`)
+    }
+    return { path, ...(op.unset === true ? { unset: true as const } : { value: op.value }) }
+  })
+}
+
 export function apply(ctx: Context, config: WebConfig): void {
   const base = ctx.baseUrl === undefined ? process.cwd() : fileURLToPath(ctx.baseUrl)
   const clients = new Set<ServerResponse>()
@@ -1172,8 +1199,14 @@ export function apply(ctx: Context, config: WebConfig): void {
     }
 
     if (method === 'PATCH' && path === '/api/settings') {
-      const body = (await readBody(req)) as { ops?: SettingsOp[]; expectedRevision?: number }
-      const ops = Array.isArray(body.ops) ? body.ops : []
+      const body = (await readBody(req)) as { ops?: unknown; expectedRevision?: number }
+      let ops: SettingsOp[] = []
+      try {
+        ops = settingsOps(body.ops)
+      } catch (error) {
+        send(res, 400, { error: error instanceof Error ? error.message : String(error) })
+        return
+      }
       if (ops.length === 0) {
         send(res, 400, { error: '没有要改的字段（要按路径给 ops：{path, value}）' })
         return
