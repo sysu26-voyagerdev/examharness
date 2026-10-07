@@ -465,6 +465,20 @@ describe('答案按值比（真实用例）', () => {
     // 构造答案是"(1.5, −12.25)"——曾经因为减号写法不同被判成两个答案，好题白白重跑一遍。
     { constructed: '(1.5, \u221212.25)', parsed: '顶点坐标为 (3/2, -49/4)', same: true },
     { constructed: '\\dfrac{1}{2}', parsed: '0.5', same: true },
+    // 真实两例（一次组卷里连着两道被冤枉）：分问之间用 `\quad`/`\ ` 排版、
+    // 面积记成 S 而回译写成"△ABC 的面积"——数值一模一样，却因"字母对不上"被判不一致，
+    // 每道白跑一次模型。排版与标签不是数学。
+    {
+      constructed: 'a=1,\\ b=6,\\ c=5;\\quad (0,5);\\quad x=-3,\\ y=-4',
+      parsed: '（1）a = 1，b = 6，c = 5；（2）(0, 5)；（3）x = -3 时 y 取得最小值，最小值是 -4',
+      same: true,
+    },
+    {
+      constructed: 'b=14,\\ c=45;\\quad (-7,-4);\\quad S= 90',
+      parsed: 'b = 14，c = 45；顶点坐标为 (-7, -4)；△ABC 的面积 = 90',
+      same: true,
+    },
+    { constructed: 'x = 2', parsed: 'y = 2', same: false },
     { constructed: 'x = 2', parsed: 'x = 3', same: false },
     { constructed: '\\dfrac{5}{12}', parsed: '5/13', same: false },
     { constructed: '（1）144；（2）x(x-6)(x+6)', parsed: '(1) 72；(2) x^3-36x = x(x+6)(x-6)', same: false },

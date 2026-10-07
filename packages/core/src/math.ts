@@ -131,16 +131,35 @@ export function answerValues(text: string): readonly number[] {
   return values.toSorted((a, b) => a - b)
 }
 
-/** 答案里的字母/字母组合（x、y、AB、S、△ABC 都算）：判定"问的是不是同一类量" */
+/**
+ * 答案里的字母/字母组合（x、y、AB、S、△ABC 都算）：判定"问的是不是同一类量"。
+ *
+ * **先剥 LaTeX 命令**：`\quad`、`\left`、`\text`、`\dfrac` 里的字母不是答案里的量。
+ * 真实事故（一次组卷里连着两道题被冤枉）：构造答案 `a=1,\ b=6;\quad x=-3` 的字母
+ * 被读成 `{a, b, quad, x}`，而回译写的是同一件事、没有 `quad`——
+ * 于是"答案不一致"，好题被拦下、白跑一次模型。排版不是数学。
+ */
 export function answerLetters(text: string): readonly string[] {
-  return [...new Set((text.match(/[A-Za-z]+/g) ?? []).map((token) => token.toLowerCase()))].toSorted()
+  const clean = text.replace(/\\[a-zA-Z]+/g, ' ')
+  return [...new Set((clean.match(/[A-Za-z]+/g) ?? []).map((token) => token.toLowerCase()))].toSorted()
+}
+
+/** 只留单字母记号（`x`、`y`、`S`）；`△ABC`、`AB` 这种是"哪个图形元素"的名字 */
+function singleLetterTokens(tokens: readonly string[]): string[] {
+  return tokens.filter((token) => token.length === 1)
 }
 
 /**
  * 两个答案是不是同一个答案：
- *   1. **数值多重集**必须一致（容差比较，顺序无关）；
- *   2. 构造侧的字母必须都出现在另一边（标签、名称、多写的量都不影响）。
- * 反例（会被判不同）：`x = 2` vs `x = 3`（数值不同）；`5/12` vs `5/13`。
+ *   1. **数值多重集**必须一致（容差比较，顺序无关）——这是主判据，数值不对就是不对；
+ *   2. 记号只用来拦"**同一个数被安到别的记号上**"：两边都有单字母记号时，至少要有一个重合。
+ *      一侧写成名字（`△ABC 的面积 = 90` 对 `S = 90`）不算冲突——那是措辞，不是数学。
+ * 反例（会被判不同）：`x = 2` vs `x = 3`（数值不同）；`5/12` vs `5/13`；`x = 2` vs `y = 2`（记号换了）。
+ *
+ * 为什么第 2 条从"构造侧字母必须全出现在另一边"放宽成"不许两边都写字母却一个都不重合"：
+ * 实测两次冤枉——`S = 90` 对 `△ABC 的面积 = 90`、以及 `\quad` 被当字母，
+ * 数值**完全一样**却判不一致，一整道题加一次模型调用就这么没了。
+ * 名字怎么起是执笔者的事（R1 管的是数从哪来，不是标签怎么写）。
  */
 export function sameAnswer(constructed: string, parsed: string, tolerance = 1e-6): boolean {
   const left = answerValues(constructed)
@@ -151,12 +170,14 @@ export function sameAnswer(constructed: string, parsed: string, tolerance = 1e-6
     const b = right[index]
     if (a === undefined || b === undefined || !closeEnough(a, b, tolerance)) return false
   }
-  // 字母只在**回译答案里也有字母**时比：`圆心O到弦AB的距离 = 12` 与 `12` 是同一个答案，
-  // 而 `y = 2x + 2` 与 `y = 3x + 2` 靠数值就已经分开了
-  const parsedLetters = answerLetters(parsed)
-  if (parsedLetters.length === 0) return true
-  const letters = new Set(parsedLetters)
-  return answerLetters(constructed).every((token) => letters.has(token))
+  // 记号只在**两边都写了单字母记号**时比：`圆心O到弦AB的距离 = 12` 与 `12` 是同一个答案，
+  // 而 `y = 2x + 2` 与 `y = 3x + 2` 靠数值就已经分开了。
+  // 多字母记号（`△ABC`、`AB`）是"哪个图形元素"的名字，措辞层面的事，不参与判定。
+  const parsedSingle = new Set(singleLetterTokens(answerLetters(parsed)))
+  if (parsedSingle.size === 0) return true
+  const constructedSingle = singleLetterTokens(answerLetters(constructed))
+  if (constructedSingle.length === 0) return true
+  return constructedSingle.some((token) => parsedSingle.has(token))
 }
 
 /** 题面里出现这些，说明它在"要求做点什么"，而不是只摆了一段情境 */
